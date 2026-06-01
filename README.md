@@ -8,7 +8,8 @@
 - **自动扫描** — 扫描 APK 内所有文本文件，自动识别格式（JSON / XML / RPYC / CSV / TXT 等）
 - **Ren'Py 支持** — 自动解压 RPC2 格式的 rpyc 文件，提取可翻译文本
 - **AI 翻译** — 支持 OpenAI / DeepSeek / 任意兼容 API，可配置模型
-- **批量并行翻译** — 多文件并行处理 + 每文件内批量翻译，大幅提升速度
+- **批量并行翻译** — 3 文件并行 + 每文件 5 路并发，最大 15 并发请求
+- **文本去重** — 自动去重相同文本，减少 API 调用次数
 - **自动输出** — 翻译结果自动保存到应用目录，无需手动选择输出位置
 - **目录结构保留** — 翻译后的文件保持原 APK 内的目录结构
 - **免 Root** — 无需 Root 权限
@@ -47,6 +48,7 @@ APK 生成路径：ndroid/app/build/outputs/apk/debug/app-debug.apk
 ### 翻译结果位置
 
 翻译后的文件保存在：
+
 `
 内部存储/Android/data/com.slgtranslator.app/files/SLG-Translator-Output/
 `
@@ -80,8 +82,8 @@ APK 生成路径：ndroid/app/build/outputs/apk/debug/app-debug.apk
 |------|--------|
 | 前端 | React + TypeScript + Tailwind CSS |
 | 容器 | Capacitor (WebView) |
-| 原生 | Kotlin (自定义 APK 扫描 / 文件系统插件) |
-| 翻译引擎 | OpenAI SDK (WebView 直接调用) |
+| 原生 | Kotlin（自定义 APK 扫描 / 文件系统插件） |
+| 翻译引擎 | OpenAI SDK（WebView 直接调用） |
 
 ## 项目结构
 
@@ -109,7 +111,8 @@ slg-translator-android/
 
 ## 优化建议
 
-- **翻译速度**：应用会自动并行处理文件，如需调整并发数可修改 src/App.tsx 中的 MAX_CONCURRENT_FILES 和 src/core/translator.ts 中的 MAX_CONCURRENT
+- **翻译速度**：应用会自动并行处理文件（3 并发），如需调整可修改 src/App.tsx 中的并行数
+- **API 并发**：每文件内 5 路并发请求，可在 src/core/translator.ts 中调整 MAX_CONCURRENT
 - **API 超时**：默认 30 秒超时 + 2 次重试，可在 	ranslator.ts 中调整
 
 ## License
