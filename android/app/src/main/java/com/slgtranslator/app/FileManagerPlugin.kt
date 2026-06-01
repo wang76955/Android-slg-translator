@@ -88,6 +88,37 @@ class FileManagerPlugin : Plugin() {
         }
     }
 
+
+    // ===== 自动获取默认输出目录 =====
+    @PluginMethod
+    fun getDefaultOutputDir(call: PluginCall) {
+        try {
+            val ctx = getContext()
+            val outputDir = java.io.File(ctx.getExternalFilesDir(null), "SLG-Translator-Output")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+            call.resolve(JSObject().apply {
+                put("uri", "file://" + outputDir.absolutePath)
+                put("path", outputDir.absolutePath)
+            })
+        } catch (e: Exception) {
+            try {
+                val ctx = getContext()
+                val outputDir = java.io.File(ctx.filesDir, "SLG-Translator-Output")
+                if (!outputDir.exists()) {
+                    outputDir.mkdirs()
+                }
+                call.resolve(JSObject().apply {
+                    put("uri", "file://" + outputDir.absolutePath)
+                    put("path", outputDir.absolutePath)
+                })
+            } catch (e2: Exception) {
+                call.reject("Failed to get output dir: " + e2.message)
+            }
+        }
+    }
+
     // ===== 选择输出目录 =====
     @PluginMethod
     fun pickOutputDir(call: PluginCall) {
@@ -321,12 +352,26 @@ class FileManagerPlugin : Plugin() {
         val content = call.getString("content") ?: run { call.reject("content required"); return }
         try {
             val ctx = getContext()
-            val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, Uri.parse(dirUri))
-            val newFile = docFile?.createFile("application/octet-stream", fileName)
-            if (newFile != null) {
-                ctx.contentResolver.openOutputStream(newFile.uri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+            val uri = Uri.parse(dirUri)
+            var success = false
+
+            if (dirUri.startsWith("file:")) {
+                val parentDir = java.io.File(uri.path!!)
+                if (!parentDir.exists()) parentDir.mkdirs()
+                val outFile = java.io.File(parentDir, fileName)
+                val parent = outFile.parentFile
+                if (parent != null && !parent.exists()) parent.mkdirs()
+                outFile.writeBytes(content.toByteArray(Charsets.UTF_8))
+                success = true
+            } else {
+                val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, uri)
+                val newFile = docFile?.createFile("application/octet-stream", fileName)
+                if (newFile != null) {
+                    ctx.contentResolver.openOutputStream(newFile.uri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                    success = true
+                }
             }
-            call.resolve(JSObject().apply { put("success", newFile != null) })
+            call.resolve(JSObject().apply { put("success", success) })
         } catch (e: Exception) {
             call.reject("Failed to write: ${e.message}")
         }
@@ -338,11 +383,24 @@ class FileManagerPlugin : Plugin() {
         val dirName = call.getString("dirName") ?: run { call.reject("dirName required"); return }
         try {
             val ctx = getContext()
-            val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, Uri.parse(dirUri))
-            val created = docFile?.createDirectory(dirName)
+            val uri = Uri.parse(dirUri)
+            var success = false
+            var resultUri = ""
+
+            if (dirUri.startsWith("file:")) {
+                val parentDir = java.io.File(uri.path!!)
+                val newDir = java.io.File(parentDir, dirName)
+                success = newDir.mkdirs() || newDir.exists()
+                resultUri = "file://" + java.io.File(parentDir, dirName).absolutePath
+            } else {
+                val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, uri)
+                val created = docFile?.createDirectory(dirName)
+                success = created != null
+                resultUri = created?.uri?.toString() ?: ""
+            }
             call.resolve(JSObject().apply {
-                put("success", created != null)
-                put("uri", created?.uri?.toString() ?: "")
+                put("success", success)
+                put("uri", resultUri)
             })
         } catch (e: Exception) {
             call.reject("Failed to create dir: ${e.message}")

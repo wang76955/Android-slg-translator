@@ -1,15 +1,12 @@
-﻿import OpenAI from 'openai'
-import type { TextItem, GlossaryEntry, ProgressCallback } from './types'
-
-/**
- * 核心翻译引擎 - 支持 OpenAI / DeepSeek / 任意兼容 API
- * 平台无关：只需 fetch/HTTP 能力
- */
+import OpenAI from "openai"
+import type { TextItem, GlossaryEntry, ProgressCallback } from "./types"
 
 const LANG_MAP: Record<string, string> = {
-  zh: '中文', en: 'English', ja: '日本語',
-  ko: '한국어', fr: 'Français', de: 'Deutsch'
+  zh: "����", en: "English", ja: "�ձ��Z",
+  ko: "???", fr: "Fran?ais", de: "Deutsch"
 }
+
+const MAX_CONCURRENT = 5  // 最大并行请求数（提高并发）
 
 export interface TranslateOptions {
   texts: TextItem[]
@@ -24,8 +21,8 @@ export interface TranslateOptions {
 }
 
 /**
- * 批量翻译文本
- * 支持流式进度反馈
+ * �Ż���������������
+ * ���ԣ������������ܺϲ����Զ�����С����
  */
 export async function translateBatch(options: TranslateOptions): Promise<{
   translations: Map<string, string>
@@ -34,107 +31,154 @@ export async function translateBatch(options: TranslateOptions): Promise<{
 }> {
   const {
     texts, sourceLang, targetLang, baseURL, apiKey, model,
-    glossary, batchSize = 20, onProgress
+    glossary, batchSize = 100, onProgress
   } = options
 
   if (!apiKey) {
-    return { translations: new Map(), successCount: 0, error: 'API Key 未设置' }
+    return { translations: new Map(), successCount: 0, error: "API Key δ����" }
   }
 
-    const client = new OpenAI({
-      apiKey,
-      baseURL,
-      dangerouslyAllowBrowser: true,
+  const client = new OpenAI({
     apiKey,
     baseURL,
+    dangerouslyAllowBrowser: true,
+    timeout: 30000,
+    maxRetries: 2,
   })
 
-  const supportsJson = !model.includes('reasoner')
-  const translations = new Map<string, string>()
-  let successCount = 0
-
-  // 分批次翻译
-  const totalBatches = Math.ceil(texts.length / batchSize)
-
-  for (let b = 0; b < totalBatches; b++) {
-    const batchTexts = texts.slice(b * batchSize, (b + 1) * batchSize)
-    const batch: TextItem[] = []
-    const batchKeys: string[] = []
-
-    // 收集未翻译的文本
-    for (const t of batchTexts) {
-      batch.push(t)
-      batchKeys.push(t.keyPath)
-    }
-
-    if (batch.length === 0) continue
-
-    try {
-      const systemPrompt = buildSystemPrompt(sourceLang, targetLang, glossary, supportsJson)
-
-      const userContent =
-        'Translate the following text items. Return a JSON object where each key is the keyPath and value is the translation:\n\n' +
-        JSON.stringify(Object.fromEntries(batch.map(t => [t.keyPath, t.text])), null, 2)
-
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        temperature: 0.3,
-        ...(supportsJson ? { response_format: { type: 'json_object' } as const } : {}),
-      })
-
-      const resultText = completion.choices[0]?.message?.content
-      if (!resultText) throw new Error('API 返回空结果')
-
-      // 解析 JSON 响应
-      const resultJson = JSON.parse(resultText)
-      for (const key of batchKeys) {
-        if (resultJson[key]) {
-          translations.set(key, resultJson[key])
-          successCount++
-        }
-      }
-    } catch (err: any) {
-      return { translations, successCount, error: err.message }
-    }
-
-    onProgress?.(Math.min((b + 1) * batchSize, texts.length), texts.length, 'translating')
+  if (texts.length === 0) {
+    return { translations: new Map(), successCount: 0 }
   }
 
-  return { translations, successCount }
+  const supportsJson = !model.includes("reasoner") && !model.includes("pro")
+  const translations = new Map<string, string>()
+  let successCount = 0
+  let hasError = false
+  const totalBatches = Math.ceil(texts.length / batchSize)
+
+  // ������������
+  interface Batch {
+    batchTexts: TextItem[]
+    batchKeys: string[]
+    index: number
+  }
+
+  const allBatches: Batch[] = []
+  for (let b = 0; b < totalBatches; b++) {
+    const batchTexts = texts.slice(b * batchSize, (b + 1) * batchSize)
+    const batchKeys = batchTexts.map(t => t.keyPath)
+    allBatches.push({ batchTexts, batchKeys, index: b })
+  }
+
+  // 并行执行批次（控制并发数 MAX_CONCURRENT）
+  for (let start = 0; start < allBatches.length; start += MAX_CONCURRENT) {
+    const concurrentBatches = allBatches.slice(start, start + MAX_CONCURRENT)
+
+    const results = await Promise.allSettled(
+      concurrentBatches.map(batch =>
+        translateOneBatch(
+          client, model, batch.batchTexts, batch.batchKeys,
+          sourceLang, targetLang, glossary, supportsJson
+        )
+      )
+    )
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      const batchIndex = concurrentBatches[i].index
+
+      if (result.status === "fulfilled") {
+        for (const [key, value] of result.value) {
+          translations.set(key, value)
+          successCount++
+        }
+      } else {
+        hasError = true
+      }
+    }
+
+    // ���Ȼص������µ���һ��ʧ�ܵ�����λ�ã�
+    const completedUpTo = Math.min((start + MAX_CONCURRENT) * batchSize, texts.length)
+    onProgress?.(completedUpTo, texts.length, "translating")
+  }
+
+  return {
+    translations,
+    successCount,
+    ...(hasError ? { error: `�ɹ� ${successCount}/${texts.length} ������������ʧ��` } : {}),
+  }
+}
+
+/** ���뵥������ */
+async function translateOneBatch(
+  client: OpenAI,
+  model: string,
+  batchTexts: TextItem[],
+  batchKeys: string[],
+  sourceLang: string,
+  targetLang: string,
+  glossary?: GlossaryEntry[],
+  supportsJson?: boolean
+): Promise<Map<string, string>> {
+  const translations = new Map<string, string>()
+
+  const systemPrompt = buildSystemPrompt(sourceLang, targetLang, glossary, supportsJson)
+
+  const userContent =
+    "Translate the following text items. Return a JSON object where each key is the keyPath and value is the translation:\n\n" +
+    JSON.stringify(Object.fromEntries(batchTexts.map(t => [t.keyPath, t.text])), null, 2)
+
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+    temperature: 0.3,
+    ...(supportsJson ? { response_format: { type: "json_object" } as const } : {}),
+  })
+
+  const resultText = completion.choices[0]?.message?.content
+  if (!resultText) throw new Error("API ���ؿս��")
+
+  // ���� JSON ��Ӧ
+  const resultJson = JSON.parse(resultText)
+  for (const key of batchKeys) {
+    if (resultJson[key]) {
+      translations.set(key, resultJson[key])
+    }
+  }
+
+  return translations
 }
 
 function buildSystemPrompt(
   sourceLang: string, targetLang: string,
   glossary?: GlossaryEntry[],
-  supportsJson: boolean
+  supportsJson?: boolean
 ): string {
   const srcName = LANG_MAP[sourceLang] ?? sourceLang
   const tgtName = LANG_MAP[targetLang] ?? targetLang
 
-  let prompt = 'You are a professional game localization translator. Translate the following ' +
-    srcName + ' text to ' + tgtName + '.'
+  let prompt = "You are a professional game localization translator. Translate the following " +
+    srcName + " text to " + tgtName + "."
 
-  // 术语表
   if (glossary && glossary.length > 0) {
-    prompt += '\n\nIMPORTANT: Maintain consistency for these terms:\n'
+    prompt += "\n\nIMPORTANT: Maintain consistency for these terms:\n"
     for (const g of glossary) {
-      prompt += '- ' + g.source + ' -> ' + g.target + '\n'
+      prompt += "- " + g.source + " -> " + g.target + "\n"
     }
   }
 
   prompt +=
-    '\nRules:\n' +
-    '1. Keep all HTML/XML tags, format strings (%s, {0}, etc.), and special characters unchanged\n' +
-    '2. Keep all variable placeholders like {name}, ${}, %d unchanged\n' +
-    '3. Ensure proper context for game UI, quests, skills, and items\n' +
-    '4. Maintain the original meaning and tone'
+    "\nRules:\n" +
+    "1. Keep all HTML/XML tags, format strings (%s, {0}, etc.), and special characters unchanged\n" +
+    "2. Keep all variable placeholders like {name}, ${}, %d unchanged\n" +
+    "3. Ensure proper context for game UI, quests, skills, and items\n" +
+    "4. Maintain the original meaning and tone"
 
   if (supportsJson) {
-    prompt += '\n5. Return ONLY a valid JSON object with keyPath -> translation mappings'
+    prompt += "\n5. Return ONLY a valid JSON object with keyPath -> translation mappings"
   }
 
   return prompt

@@ -25,6 +25,7 @@ export interface FileManagerPluginDef {
   /** 向后兼容 */
   readApkEntry(options: { uri: string; entryName: string }): Promise<{ content: string; name: string }>
   pickOutputDir(): Promise<{ uri: string }>
+  getDefaultOutputDir(): Promise<{ uri: string; path: string }>
   writeFileToDir(options: { dirUri: string; fileName: string; content: string }): Promise<{ success: boolean }>
   createDirectory(options: { dirUri: string; dirName: string }): Promise<{ success: boolean; uri: string }>
 }

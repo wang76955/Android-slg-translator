@@ -56,7 +56,10 @@ const App: React.FC = () => {
   }, [])
 
   // 权限授权后
-  const handlePermissionGranted = () => setStep("main")
+  const handlePermissionGranted = () => {
+    setStep("main")
+    initOutputDir()
+  }
 
   // 选择 APK
   const handlePickApk = async () => {
@@ -102,10 +105,10 @@ const App: React.FC = () => {
     }
   }
 
-  // 选择输出目录
-  const handlePickOutput = async () => {
+  // 初始化输出目录
+  const initOutputDir = async () => {
     try {
-      const result = await FileManager.pickOutputDir()
+      const result = await FileManager.getDefaultOutputDir()
       setOutputDirUri(result.uri)
       addLog("输出目录已选择", "success")
     } catch (e: any) {
@@ -117,7 +120,7 @@ const App: React.FC = () => {
 
   // 开始翻译
   const handleTranslate = async () => {
-    if (!apkUri || !outputDirUri || !apiKey || textFiles.length === 0) return
+    if (!apkUri || !apiKey || textFiles.length === 0) return
 
     setTranslating(true)
     setResult(null)
@@ -288,21 +291,6 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-
-            {/* 第二步：选择输出目录 */}
-            {textFiles.length > 0 && (
-              <div className="border border-slate-200 rounded-xl bg-white p-4">
-                <h2 className="text-sm font-semibold text-slate-700 mb-3">2. 选择输出目录</h2>
-                <button onClick={handlePickOutput}
-                  className="w-full py-2.5 border border-blue-300 text-blue-600 rounded-lg text-sm font-medium
-                    hover:bg-blue-50 transition-colors">
-                  {outputDirUri ? "更换输出目录" : "选择输出目录"}
-                </button>
-                {outputDirUri && (
-                  <p className="mt-2 text-xs text-green-600">已选择输出目录 ✓</p>
-                )}
-              </div>
-            )}
 
             {/* 第三步：翻译设置 */}
             {outputDirUri && textFiles.length > 0 && (
