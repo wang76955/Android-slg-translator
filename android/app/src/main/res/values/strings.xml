@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SLG 文本翻译</string>
+    <string name="title_activity_main">SLG 文本翻译</string>
+    <string name="package_name">com.slgtranslator.app</string>
+    <string name="custom_url_scheme">com.slgtranslator.app</string>
+</resources>
