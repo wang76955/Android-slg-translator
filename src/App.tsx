@@ -143,78 +143,67 @@ const App: React.FC = () => {
 
     addLog(`开始处理 ${textFiles.length} 个文件...`, "info")
 
-    for (let i = 0; i < textFiles.length; i++) {
-      const entry = textFiles[i]
-      const typeTag = TYPE_LABELS[entry.fileType] || "?"
-      addLog(`[${i + 1}/${textFiles.length}] [${typeTag}] ${entry.name}`, "progress")
+    for (let batchStart = 0; batchStart < textFiles.length; batchStart += 3) {
+      const batch = textFiles.slice(batchStart, batchStart + 3)
+      await Promise.allSettled(batch.map((entry, offset) => (async () => {
+        const index = batchStart + offset
+        const typeTag = TYPE_LABELS[entry.fileType] || "?"
+        addLog(`[${index + 1}/${textFiles.length}] [${typeTag}] ${entry.name}`, "progress")
 
-      try {
-        // 1. 读取文件内容（RPC2 等自动解压）
-        const { content, fileType } = await FileManager.readFileContent({ uri: apkUri, entryName: entry.name })
+        try {
+          const { content, fileType } = await FileManager.readFileContent({ uri: apkUri, entryName: entry.name })
+          const texts = extractTexts(content, fileType)
+          const rpycHint = fileType === "rpyc" ? `（从 RPC2 解压数据中提取 ${texts.length} 条）` : ""
+          if (rpycHint) addLog(`  ${rpycHint}`, "info")
 
-        // 2. 按格式提取文本
-        const texts = extractTexts(content, fileType)
-        const rpycHint = fileType === "rpyc" ? `（从 RPC2 解压数据中提取 ${texts.length} 条）` : ""
-        if (rpycHint) addLog(`  ${rpycHint}`, "info")
-
-        if (texts.length === 0) {
-          addLog("  无文本需要翻译，跳过", "info")
-          setProgress({ current: i + 1, total: textFiles.length })
-          continue
-        }
-
-        // 3. 调用 AI 翻译
-        addLog(`  翻译 ${texts.length} 条文本...`, "info")
-        const { translations, successCount, error: transError } = await translateBatch({
-          texts, sourceLang, targetLang, baseURL, apiKey,
-          model: selectedModel, batchSize: 50,
-        })
-
-        if (successCount === 0) {
-          if (transError) {
-            addLog(`  翻译失败: ${transError}`, "error")
-          } else {
-            addLog("  翻译失败，跳过", "error")
+          if (texts.length === 0) {
+            addLog("  无文本需要翻译，跳过", "info")
+            setProgress({ current: index + 1, total: textFiles.length })
+            return
           }
+
+          addLog(`  翻译 ${texts.length} 条文本...`, "info")
+          const { translations, successCount, error: transError } = await translateBatch({
+            texts, sourceLang, targetLang, baseURL, apiKey,
+            model: selectedModel, batchSize: 200,
+          })
+
+          if (successCount === 0) {
+            addLog(transError ? `  翻译失败: ${transError}` : "  翻译失败，跳过", "error")
+            hasError = true
+            setProgress({ current: index + 1, total: textFiles.length })
+            return
+          }
+
+          const outputContent = applyTranslations(content, translations, fileType)
+          const ext = entry.name.substring(entry.name.lastIndexOf("."))
+          const baseName = entry.name.substring(0, entry.name.lastIndexOf("."))
+          const translatedName = baseName + ".translated" + ext
+
+          const parts = entry.name.split("/")
+          let currentDirUri = outputDirUri
+          for (let p = 0; p < parts.length - 1; p++) {
+            try {
+              const result = await FileManager.createDirectory({ dirUri: currentDirUri, dirName: parts[p] })
+              if (result.success && result.uri) currentDirUri = result.uri
+            } catch (_) {}
+          }
+
+          await FileManager.writeFileToDir({
+            dirUri: currentDirUri,
+            fileName: translatedName,
+            content: outputContent,
+          })
+
+          totalTranslated += successCount
+          addLog(`  完成：翻译 ${successCount} 条`, "success")
+          setProgress({ current: index + 1, total: textFiles.length })
+        } catch (e) {
+          addLog(`  处理失败: ${e.message}`, "error")
           hasError = true
-          setProgress({ current: i + 1, total: textFiles.length })
-          continue
+          setProgress({ current: index + 1, total: textFiles.length })
         }
-
-        // 4. 按原格式重组翻译内容
-        const outputContent = applyTranslations(content, translations, fileType)
-
-        // 5. 保持目录结构写入
-        const ext = entry.name.substring(entry.name.lastIndexOf("."))
-        const baseName = entry.name.substring(0, entry.name.lastIndexOf("."))
-        const translatedName = baseName + ".translated" + ext
-
-        const parts = entry.name.split("/")
-        let currentDirUri = outputDirUri
-        for (let p = 0; p < parts.length - 1; p++) {
-          try {
-            const result = await FileManager.createDirectory({ dirUri: currentDirUri, dirName: parts[p] })
-            if (result.success && result.uri) currentDirUri = result.uri
-          } catch (_) {
-            // 目录已存在
-          }
-        }
-
-        // 写入翻译后文件
-        await FileManager.writeFileToDir({
-          dirUri: currentDirUri,
-          fileName: translatedName,
-          content: outputContent,
-        })
-
-        totalTranslated += successCount
-        addLog(`  完成：翻译 ${successCount} 条`, "success")
-        setProgress({ current: i + 1, total: textFiles.length })
-      } catch (e: any) {
-        addLog(`  处理失败: ${e.message}`, "error")
-        hasError = true
-        setProgress({ current: i + 1, total: textFiles.length })
-      }
+      })()))
     }
 
     setTranslating(false)

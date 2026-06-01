@@ -46,7 +46,25 @@ export async function translateBatch(options: TranslateOptions): Promise<{
     maxRetries: 2,
   })
 
-  if (texts.length === 0) {
+
+  const textMap = new Map<string, TextItem[]>()
+  for (const t of texts) {
+    const key = t.text.trim()
+    if (!textMap.has(key)) {
+      textMap.set(key, [])
+    }
+    textMap.get(key)!.push(t)
+  }
+  const uniqueTexts = Array.from(textMap.entries()).map(([text, items]) => ({
+    text: items[0].text,
+    keyPath: items[0].keyPath,
+    duplicateKeys: items.slice(1).map(i => i.keyPath),
+  }))
+  const dedupSaved = texts.length - uniqueTexts.length
+  const allTexts = dedupSaved > 0 ? (uniqueTexts as any) : texts
+
+
+    if (texts.length === 0) {
     return { translations: new Map(), successCount: 0 }
   }
 
@@ -91,6 +109,13 @@ export async function translateBatch(options: TranslateOptions): Promise<{
         for (const [key, value] of result.value) {
           translations.set(key, value)
           successCount++
+          // 传播翻译结果到重复的 keyPath
+          const batchItem = concurrentBatches[i].batchTexts.find(t => t.keyPath === key)
+          if (batchItem?.duplicateKeys) {
+            for (const dk of batchItem.duplicateKeys) {
+              translations.set(dk, value)
+            }
+          }
         }
       } else {
         hasError = true
