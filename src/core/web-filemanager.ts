@@ -1,4 +1,4 @@
-﻿import type { FileManagerPluginDef, FileEntry } from "./filemanager"
+﻿import type { FileManagerPluginDef } from "./filemanager"
 
 function notAvailable(name: string): never {
   throw new Error("FileManager." + name + "() 仅在 Android 设备上可用")
@@ -7,9 +7,10 @@ function notAvailable(name: string): never {
 export const WebFileManager: FileManagerPluginDef = {
   async checkPermission() { return { granted: false } },
   async requestPermission() { return { granted: false } },
-  async listDirectory() { notAvailable("listDirectory") },
-  async readFile() { notAvailable("readFile") },
-  async writeFile() { notAvailable("writeFile") },
-  async backupFile() { notAvailable("backupFile") },
-  async fileExists() { notAvailable("fileExists") },
+  async pickApkFile() { notAvailable("pickApkFile") },
+  async listApkEntries() { notAvailable("listApkEntries") },
+  async readApkEntry() { notAvailable("readApkEntry") },
+  async pickOutputDir() { notAvailable("pickOutputDir") },
+  async writeFileToDir() { notAvailable("writeFileToDir") },
+  async createDirectory() { notAvailable("createDirectory") },
 }

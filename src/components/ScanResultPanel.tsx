@@ -3,13 +3,13 @@ import FileManager from "../core/filemanager"
 import { extractTexts } from "../core/scanner-utils"
 
 interface ScanFileInfo {
-  path: string
+  uri: string
   relativePath: string
   textCount: number
 }
 
 interface Props {
-  directoryPath: string
+  directoryPath: string   // 现在是 SAF URI
   onScanComplete: (files: ScanFileInfo[], totalTexts: number) => void
   scanResult: { files: ScanFileInfo[]; totalTexts: number } | null
 }
@@ -25,12 +25,12 @@ const ScanResultPanel: React.FC<Props> = ({ directoryPath, onScanComplete, scanR
       const files: ScanFileInfo[] = []
       const jsonFiles = await findJsonFiles(directoryPath)
       let totalTexts = 0
-      for (const filePath of jsonFiles) {
+      for (const f of jsonFiles) {
         try {
-          const { content } = await FileManager.readFile({ path: filePath })
+          const { content } = await FileManager.readFileUri({ uri: f.uri })
           const data = JSON.parse(content)
           const texts = extractTexts(data)
-          files.push({ path: filePath, relativePath: filePath.slice(directoryPath.length + 1), textCount: texts.length })
+          files.push({ uri: f.uri, relativePath: f.relativePath, textCount: texts.length })
           totalTexts += texts.length
         } catch {}
       }
@@ -90,16 +90,29 @@ const ScanResultPanel: React.FC<Props> = ({ directoryPath, onScanComplete, scanR
   )
 }
 
-async function findJsonFiles(dirPath: string, maxDepth = 5, depth = 0): Promise<string[]> {
+interface JsonFileInfo {
+  uri: string
+  relativePath: string
+}
+
+async function findJsonFiles(dirUri: string, baseUri?: string, maxDepth = 5, depth = 0): Promise<JsonFileInfo[]> {
   if (depth > maxDepth) return []
-  const files: string[] = []
+  const files: JsonFileInfo[] = []
+  const base = baseUri || dirUri
   try {
-    const { entries } = await FileManager.listDirectory({ path: dirPath })
+    const { entries } = await FileManager.listDirectoryUri({ uri: dirUri })
     for (const entry of entries) {
       if (entry.isDirectory) {
-        files.push(...await findJsonFiles(entry.path, maxDepth, depth + 1))
+        try {
+          const sub = await FileManager.openSubDirectory({ parentUri: dirUri, dirName: entry.name })
+          files.push(...await findJsonFiles(sub.uri, base, maxDepth, depth + 1))
+        } catch {}
       } else if (entry.name.endsWith(".json")) {
-        files.push(entry.path)
+        const fullUri = entry.uri || dirUri + "/" + entry.name
+        files.push({
+          uri: fullUri,
+          relativePath: fullUri.replace(base + "/", "").replace(base, ""),
+        })
       }
     }
   } catch {}
