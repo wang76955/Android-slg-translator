@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback, useRef } from "react"
+﻿import React, { useState, useCallback, useMemo, useRef } from "react"
 import PermissionGate from "./components/PermissionGate"
 import TranslationConfig from "./components/TranslationConfig"
 import type { LogEntry } from "./components/ProgressLog"
@@ -8,6 +8,7 @@ import type { ApkEntry, FileType } from "./core/filemanager"
 import { extractTexts, applyTranslations } from "./core/scanner-utils"
 import { translateBatch } from "./core/translator"
 import { AI_PROVIDERS } from "./core/providers"
+import { filterTranslatableApkEntries } from "./core/apk-entry-filter"
 
 function getTimestamp(): string {
   return new Date().toTimeString().slice(0, 8)
@@ -28,8 +29,13 @@ const App: React.FC = () => {
   // APK
   const [apkUri, setApkUri] = useState<string | null>(null)
   const [apkName, setApkName] = useState("")
-  const [textFiles, setTextFiles] = useState<ApkEntry[]>([])
+  const [apkEntries, setApkEntries] = useState<ApkEntry[]>([])
+  const [includeAndroidXml, setIncludeAndroidXml] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const textFiles = useMemo(
+    () => filterTranslatableApkEntries(apkEntries, includeAndroidXml),
+    [apkEntries, includeAndroidXml],
+  )
 
   // 输出目录
   const [outputDirUri, setOutputDirUri] = useState<string | null>(null)
@@ -67,35 +73,22 @@ const App: React.FC = () => {
       const result = await FileManager.pickApkFile()
       setApkUri(result.uri)
       setApkName(result.uri.split("/").pop() || "Unknown.apk")
-      setTextFiles([])
+      setApkEntries([])
       setResult(null)
       setLogs([])
       // 扫描 APK
       setScanning(true)
       addLog("正在扫描 APK 中的文本文件...", "info")
       const entries = await FileManager.listApkEntries({ uri: result.uri })
-      setTextFiles(entries.entries)
+      setApkEntries(entries.entries)
 
-      // 自动过滤: 跳过 Ren'Py 引擎通用文件（只保留游戏特有文本）
-      const filteredFiles = entries.entries.filter((f: ApkEntry) => {
-        // 跳过 Ren'Py 引擎文件
-        if (f.name.includes('/x-renpy/x-common/')) return false
-        // 跳过已知的二进制/字体文件
-        const binaryExts = ["png", "jpg", "webp", "mp3", "ogg", "ttf", "woff"]
-        const ext = f.name.split('.').pop()?.toLowerCase() || ''
-        if (binaryExts.includes(ext)) return false
-        return true
-      })
-      setTextFiles(filteredFiles)
-
+      const filteredFiles = filterTranslatableApkEntries(entries.entries, includeAndroidXml)
 
       const byType = groupByType(filteredFiles)
       const typeSummary = Object.entries(byType)
         .map(([t, n]) => `${TYPE_LABELS[t as FileType] || t}×${n}`)
         .join(', ')
-      addLog(`共发现 ${filteredFiles.length} 个文本文件（${typeSummary}）`, 'success')
-      setScanning(false)
-      addLog(`共发现 ${entries.totalFiles} 个文本文件（${typeSummary}）`, "success")
+      addLog(`共发现 ${filteredFiles.length} 个可翻译文件（${typeSummary || "默认仅 Ren'Py"}）`, 'success')
       setScanning(false)
     } catch (e: any) {
       if (e.message !== "User cancelled") {
@@ -152,7 +145,7 @@ const App: React.FC = () => {
 
         try {
           const { content, fileType } = await FileManager.readFileContent({ uri: apkUri, entryName: entry.name })
-          const texts = extractTexts(content, fileType)
+          const texts = extractTexts(content, fileType, "", sourceLang)
           const rpycHint = fileType === "rpyc" ? `（从 RPC2 解压数据中提取 ${texts.length} 条）` : ""
           if (rpycHint) addLog(`  ${rpycHint}`, "info")
 
@@ -252,10 +245,22 @@ const App: React.FC = () => {
                   <p className="text-xs text-green-700 break-all">已选择：{apkName}</p>
                   <p className="text-xs text-green-600 mt-1">
                     {textFiles.length > 0
-                      ? `发现 ${textFiles.length} 个文本文件`
+                      ? `发现 ${textFiles.length} 个可翻译文件`
                       : scanning ? "正在扫描..." : ""}
                   </p>
                 </div>
+              )}
+
+              {apkEntries.length > 0 && (
+                <label className="mt-3 flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <span className="text-xs text-slate-600">翻译 Android 界面 XML</span>
+                  <input
+                    type="checkbox"
+                    checked={includeAndroidXml}
+                    onChange={(event) => setIncludeAndroidXml(event.target.checked)}
+                    className="h-4 w-4 accent-blue-500"
+                  />
+                </label>
               )}
 
               {textFiles.length > 0 && (

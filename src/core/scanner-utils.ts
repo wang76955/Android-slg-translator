@@ -21,32 +21,32 @@ export function detectTextFormat(content: string, fileType: FileType): "json" | 
 
 // ============== 主提取入口 ==============
 
-export function extractTexts(content: string, fileType: FileType, prefix = ""): TextItem[] {
+export function extractTexts(content: string, fileType: FileType, prefix = "", sourceLang?: string): TextItem[] {
   const format = detectTextFormat(content, fileType)
 
   switch (format) {
     case "json":
       try {
         const data = JSON.parse(content)
-        return extractTextsFromJson(data, prefix)
+        return extractTextsFromJson(data, prefix, sourceLang)
       } catch {
-        return extractTextsFromPlainText(content, prefix)
+        return extractTextsFromPlainText(content, prefix, sourceLang)
       }
     case "xml":
-      return extractTextsFromXml(content, prefix)
+      return extractTextsFromXml(content, prefix, sourceLang)
     case "rpyc":
-      return extractTextsFromRpyc(content, prefix)
+      return extractTextsFromRpyc(content, prefix, sourceLang)
     case "csv":
-      return extractTextsFromCsv(content, prefix)
+      return extractTextsFromCsv(content, prefix, sourceLang)
     case "text":
     default:
-      return extractTextsFromPlainText(content, prefix)
+      return extractTextsFromPlainText(content, prefix, sourceLang)
   }
 }
 
 // ============== JSON 提取 ==============
 
-export function extractTextsFromJson(obj: any, prefix = ""): TextItem[] {
+export function extractTextsFromJson(obj: any, prefix = "", sourceLang?: string): TextItem[] {
   const texts: TextItem[] = []
   if (typeof obj === "string") {
     if (/^\d+$/.test(obj)) return texts
@@ -54,13 +54,14 @@ export function extractTextsFromJson(obj: any, prefix = ""): TextItem[] {
     if (/^\{[\w.]+\}$/.test(obj)) return texts
     if (/^%[\w.]+%$/.test(obj)) return texts
     if (obj.trim().length === 0) return texts
+    if (!shouldTranslate(obj, sourceLang)) return texts
     texts.push({ keyPath: prefix, text: obj })
   } else if (Array.isArray(obj)) {
-    obj.forEach((item, i) => texts.push(...extractTextsFromJson(item, `${prefix}[${i}]`)))
+    obj.forEach((item, i) => texts.push(...extractTextsFromJson(item, `${prefix}[${i}]`, sourceLang)))
   } else if (obj !== null && typeof obj === "object") {
     for (const key of Object.keys(obj)) {
       const newPrefix = prefix ? `${prefix}.${key}` : key
-      texts.push(...extractTextsFromJson(obj[key], newPrefix))
+      texts.push(...extractTextsFromJson(obj[key], newPrefix, sourceLang))
     }
   }
   return texts
@@ -68,7 +69,7 @@ export function extractTextsFromJson(obj: any, prefix = ""): TextItem[] {
 
 // ============== XML 提取 ==============
 
-export function extractTextsFromXml(xmlContent: string, prefix = ""): TextItem[] {
+export function extractTextsFromXml(xmlContent: string, prefix = "", sourceLang?: string): TextItem[] {
   const texts: TextItem[] = []
   const lines = xmlContent.split("\n")
   let idx = 0
@@ -79,7 +80,7 @@ export function extractTextsFromXml(xmlContent: string, prefix = ""): TextItem[]
     const matches = line.matchAll(/>(.*?)<\//g)
     for (const m of matches) {
       const text = m[1].trim()
-      if (text && shouldTranslate(text)) {
+      if (text && shouldTranslate(text, sourceLang)) {
         texts.push({ keyPath: `${prefix}[line${idx}]`, text })
       }
     }
@@ -88,7 +89,7 @@ export function extractTextsFromXml(xmlContent: string, prefix = ""): TextItem[]
     const stringMatch = line.match(/<string\s+name="([^"]+)">(.*?)<\/string>/)
     if (stringMatch) {
       const text = stringMatch[2].trim()
-      if (text && shouldTranslate(text)) {
+      if (text && shouldTranslate(text, sourceLang)) {
         texts.push({ keyPath: `${prefix}.${stringMatch[1]}`, text })
       }
     }
@@ -96,7 +97,7 @@ export function extractTextsFromXml(xmlContent: string, prefix = ""): TextItem[]
     // 属性值: android:text="..."
     const attrMatches = line.matchAll(/(?:android:|app:)?text="([^"]*)"/g)
     for (const m of attrMatches) {
-      if (m[1] && shouldTranslate(m[1])) {
+      if (m[1] && shouldTranslate(m[1], sourceLang)) {
         texts.push({ keyPath: `${prefix}[attr${idx}]`, text: m[1] })
       }
     }
@@ -112,57 +113,117 @@ export function extractTextsFromXml(xmlContent: string, prefix = ""): TextItem[]
  * RPC2 解压后的数据是 Python pickle 序列化格式，包含大量 AST 节点
  * 我们用启发式方式从中提取文本
  */
-export function extractTextsFromRpyc(decodedContent: string, prefix = ""): TextItem[] {
+export function extractTextsFromRpyc(decodedContent: string, prefix = "", sourceLang?: string): TextItem[] {
+  if (looksLikeRenPySource(decodedContent)) {
+    return extractTextsFromRenPySource(decodedContent, prefix, sourceLang)
+  }
+
   const texts: TextItem[] = []
   const seen = new Set<string>()
   let idx = 0
 
-  // 策略1: 提取带引号的字符串（Ren'Py dialogue 文本）
-  // 匹配 "text" 或 'text' 形式的字符串
-  const quoteRegex = /(["'])((?:[^"']|\\.)+?)\1/g
+  idx = appendRenPyAstVisibleTexts(decodedContent, texts, seen, prefix, sourceLang, idx)
+
+  const translateRegex = /\bold\s+["']([^"']+)["']/g
   let match: RegExpExecArray | null
-  while ((match = quoteRegex.exec(decodedContent)) !== null) {
-    const text = match[2].trim()
-    if (text.length >= 3 && shouldTranslate(text) && !seen.has(text)) {
-      seen.add(text)
-      texts.push({ keyPath: `${prefix}str_${idx++}`, text })
-    }
-  }
-
-  // 策略2: 提取 Unicode 转义序列（\uXXXX 编码的中文文本）
-  const unicodeRegex = /(?:\\u[\da-fA-F]{4}){2,}/g
-  while ((match = unicodeRegex.exec(decodedContent)) !== null) {
-    try {
-      const decoded = match[0].replace(/\\u([\da-fA-F]{4})/g, (_, code) =>
-        String.fromCharCode(parseInt(code, 16))
-      )
-      if (decoded.length >= 2 && !seen.has(decoded)) {
-        seen.add(decoded)
-        texts.push({ keyPath: `${prefix}uni_${idx++}`, text: decoded })
-      }
-    } catch {
-      // 忽略解码失败
-    }
-  }
-
-  // 策略3: 提取 Ren'Py Translate 节点中的文本
-  // 匹配 "old" / "new" 翻译对
-  const translateRegex = /old\s+["']([^"']+)["']|new\s+["']([^"']+)["']/g
   while ((match = translateRegex.exec(decodedContent)) !== null) {
-    const text = (match[1] || match[2]).trim()
-    if (text.length >= 2 && shouldTranslate(text) && !seen.has(text)) {
+    const text = match[1].trim()
+    if (text.length >= 2 && shouldTranslate(text, sourceLang) && !seen.has(text)) {
       seen.add(text)
       texts.push({ keyPath: `${prefix}tl_${idx++}`, text })
     }
   }
 
-  // 策略4: 提取所有可见的中文/日文/韩文文本
-  const cjkRegex = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\uac00-\ud7af]{2,}/g
-  while ((match = cjkRegex.exec(decodedContent)) !== null) {
-    const text = match[0].trim()
-    if (text.length >= 2 && !seen.has(text)) {
+  return texts
+}
+
+function appendRenPyAstVisibleTexts(
+  content: string,
+  texts: TextItem[],
+  seen: Set<string>,
+  prefix: string,
+  sourceLang: string | undefined,
+  startIndex: number,
+): number {
+  let index = startIndex
+  const markerRegex = /\b(?:renpy\.ast\.)?(Say|Menu)\b/gi
+  const markers = Array.from(content.matchAll(markerRegex))
+
+  for (let markerIndex = 0; markerIndex < markers.length; markerIndex++) {
+    const marker = markers[markerIndex]
+    const markerName = marker[1].toLowerCase()
+    const segmentStart = marker.index ?? 0
+    const segmentEnd = markers[markerIndex + 1]?.index ?? content.length
+    const segment = content.slice(segmentStart, segmentEnd)
+    const candidates = extractQuotedOrEscapedTexts(segment)
+      .map((text) => text.trim())
+      .filter((text) => text.length >= 2 && shouldTranslate(text, sourceLang))
+
+    const visibleTexts = markerName === "say" || markerName === "menu"
+      ? candidates
+      : []
+
+    for (const text of visibleTexts) {
+      if (seen.has(text)) continue
       seen.add(text)
-      texts.push({ keyPath: `${prefix}cjk_${idx++}`, text })
+      texts.push({ keyPath: `${prefix}ast_${index++}`, text })
+    }
+  }
+
+  return index
+}
+
+function extractQuotedOrEscapedTexts(segment: string): string[] {
+  const texts: string[] = []
+  const quoteRegex = /(["'])((?:[^"']|\\.)+?)\1/g
+  let match: RegExpExecArray | null
+
+  while ((match = quoteRegex.exec(segment)) !== null) {
+    texts.push(match[2])
+  }
+
+  if (texts.length > 0) return texts
+
+  const unicodeRegex = /(?:\\u[\da-fA-F]{4}){2,}/g
+  while ((match = unicodeRegex.exec(segment)) !== null) {
+    try {
+      texts.push(match[0].replace(/\\u([\da-fA-F]{4})/g, (_, code) =>
+        String.fromCharCode(parseInt(code, 16))
+      ))
+    } catch {
+      // 忽略解码失败
+    }
+  }
+
+  return texts
+}
+
+function looksLikeRenPySource(content: string): boolean {
+  return content.split("\n").some((line) => {
+    const trimmed = line.trim()
+    return /^menu\s*:/.test(trimmed) ||
+      /^(['"])(?:[^"'\\]|\\.)+\1\s*:/.test(trimmed) ||
+      /^(?:[A-Za-z_]\w*\s+)?(['"])(?:[^"'\\]|\\.)+\1\s*$/.test(trimmed)
+  })
+}
+
+function extractTextsFromRenPySource(content: string, prefix = "", sourceLang?: string): TextItem[] {
+  const texts: TextItem[] = []
+  const seen = new Set<string>()
+  let index = 0
+
+  const lines = content.split("\n")
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+    const trimmed = lines[lineNumber].trim()
+    if (!trimmed || trimmed.startsWith("#")) continue
+
+    const optionMatch = trimmed.match(/^(['"])((?:[^"'\\]|\\.)+)\1\s*:/)
+    const dialogueMatch = trimmed.match(/^(?:(?:[A-Za-z_]\w*|\w+\.[A-Za-z_]\w*)\s+)?(['"])((?:[^"'\\]|\\.)+)\1\s*(?:#.*)?$/)
+    const text = optionMatch?.[2] ?? dialogueMatch?.[2]
+
+    if (text && shouldTranslate(text, sourceLang) && !seen.has(text)) {
+      seen.add(text)
+      texts.push({ keyPath: `${prefix}rpy_${index++}`, text })
     }
   }
 
@@ -171,7 +232,7 @@ export function extractTextsFromRpyc(decodedContent: string, prefix = ""): TextI
 
 // ============== CSV 提取 ==============
 
-export function extractTextsFromCsv(csvContent: string, prefix = ""): TextItem[] {
+export function extractTextsFromCsv(csvContent: string, prefix = "", sourceLang?: string): TextItem[] {
   const texts: TextItem[] = []
   const lines = csvContent.split("\n")
 
@@ -185,7 +246,7 @@ export function extractTextsFromCsv(csvContent: string, prefix = ""): TextItem[]
     const cells = parseCsvLine(line)
     for (let col = 0; col < cells.length; col++) {
       const text = cells[col].trim()
-      if (text && shouldTranslate(text)) {
+      if (text && shouldTranslate(text, sourceLang)) {
         texts.push({ keyPath: `${prefix}[r${row}c${col}]`, text })
       }
     }
@@ -216,7 +277,7 @@ function parseCsvLine(line: string): string[] {
 
 // ============== 纯文本提取 ==============
 
-export function extractTextsFromPlainText(textContent: string, prefix = ""): TextItem[] {
+export function extractTextsFromPlainText(textContent: string, prefix = "", sourceLang?: string): TextItem[] {
   const texts: TextItem[] = []
   const lines = textContent.split("\n")
 
@@ -228,9 +289,11 @@ export function extractTextsFromPlainText(textContent: string, prefix = ""): Tex
     if (/^\d+$/.test(line)) continue
     if (/^https?:\/\//.test(line)) continue
     if (/^[{}[\]]+$/.test(line)) continue
-    if (line.length < 3) continue
+    if (line.length < 2) continue
 
-    texts.push({ keyPath: `${prefix}[L${i + 1}]`, text: line })
+    if (shouldTranslate(line, sourceLang)) {
+      texts.push({ keyPath: `${prefix}[L${i + 1}]`, text: line })
+    }
   }
 
   return texts
@@ -238,14 +301,36 @@ export function extractTextsFromPlainText(textContent: string, prefix = ""): Tex
 
 // ============== 工具函数 ==============
 
-function shouldTranslate(text: string): boolean {
+function shouldTranslate(text: string, sourceLang?: string): boolean {
   if (!text || text.length < 2) return false
+  const trimmed = text.trim()
+  if (isNonDialogueTechnicalString(trimmed)) return false
   if (/^\d+$/.test(text)) return false
   if (/^https?:\/\//.test(text)) return false
   if (/^\{[\w.]+\}$/.test(text)) return false
   if (/^%[\w.]+%$/.test(text)) return false
   if (/^[0-9a-fA-F]{8,}$/.test(text)) return false  // 哈希值
+  if (!matchesSourceLanguage(trimmed, sourceLang)) return false
   return true
+}
+
+function matchesSourceLanguage(text: string, sourceLang?: string): boolean {
+  if (!sourceLang || sourceLang === "auto") return true
+
+  if (sourceLang === "zh") return /[\u3400-\u9fff]/.test(text)
+  if (sourceLang === "ja") return /[\u3040-\u30ff\u3400-\u9fff]/.test(text)
+  if (sourceLang === "ko") return /[\uac00-\ud7af]/.test(text)
+  if (sourceLang === "en") return /[A-Za-z]/.test(text)
+
+  return true
+}
+
+function isNonDialogueTechnicalString(text: string): boolean {
+  if (/^[A-Za-z0-9_./:-]+$/.test(text)) return true
+  if (/[/\\][A-Za-z0-9_. -]+[/\\]/.test(text)) return true
+  if (/^[A-Za-z_][\w.:-]*$/.test(text)) return true
+  if (/\.(rpy|rpyc|rpym|py|png|jpg|jpeg|webp|ogg|mp3|wav|ttf|otf|json|xml)$/i.test(text)) return true
+  return false
 }
 
 // ============== 翻译结果重组 ==============

@@ -1,120 +1,127 @@
-# SLG 文本翻译 - Android 版
+# SLG 文本翻译 - Android
 
-在 Android 手机上选择游戏 APK，自动扫描其中的文本文件，调用 AI 翻译后保存到输出目录。
+在 Android 手机上选择游戏 APK，自动扫描可翻译文本，调用 AI 翻译后保存到输出目录。
+
+## 当前策略
+
+- 默认只翻译 Ren'Py 游戏文本
+- 默认包含：角色名、对白、菜单选项
+- 默认跳过：图片名、变量、路径、调试文本、内部配置文本
+- XML 默认不翻译
+- 如需翻译 Android 界面文案，可在应用中手动打开 `翻译 Android 界面 XML`
 
 ## 功能
 
-- **APK 选择** — 使用系统文件选择器选择游戏 APK 文件
-- **自动扫描** — 扫描 APK 内所有文本文件，自动识别格式（JSON / XML / RPYC / CSV / TXT 等）
-- **Ren'Py 支持** — 自动解压 RPC2 格式的 rpyc 文件，提取可翻译文本
-- **AI 翻译** — 支持 OpenAI / DeepSeek / 任意兼容 API，可配置模型
-- **批量并行翻译** — 3 文件并行 + 每文件 5 路并发，最大 15 并发请求
-- **文本去重** — 自动去重相同文本，减少 API 调用次数
-- **自动输出** — 翻译结果自动保存到应用目录，无需手动选择输出位置
-- **目录结构保留** — 翻译后的文件保持原 APK 内的目录结构
-- **免 Root** — 无需 Root 权限
+- **APK 选择**：使用系统文件选择器选择游戏 APK
+- **Ren'Py 优先**：自动解压 RPC2 格式的 `.rpyc` 文件，并优先提取可见游戏文本
+- **可选 XML 翻译**：可选翻译 `res/values/*.xml` 和 `res/layout/*.xml` 中的 Android 界面文本
+- **AI 翻译**：支持 OpenAI / DeepSeek / 兼容 OpenAI 的 API
+- **文本去重**：相同原文只请求一次，减少 token 消耗
+- **本地缓存**：相同语言对和模型下的译文会复用
+- **占位符保护**：自动保护 Ren'Py / 格式化占位符，如 `{color}`、`[name]`、`%s`、`${name}`
+- **批量并发**：按文件并行处理，批量请求翻译
+- **输出结构保留**：翻译结果保留 APK 内原始目录结构
+- **无需 Root**
 
-## 快速开始
-
-### 构建 APK
-
-`ash
-# 1. 安装依赖
-npm install
-
-# 2. 构建前端
-npm run build
-
-# 3. 同步 Capacitor
-npx cap sync
-
-# 4. 构建 APK
-cd android
-./gradlew assembleDebug
-`
-
-APK 生成路径：ndroid/app/build/outputs/apk/debug/app-debug.apk
-
-### 使用流程
+## 使用流程
 
 1. 安装 APK 并打开应用
-2. 授权「所有文件访问权限」
-3. 点击「选择 APK 文件」选择游戏 APK
-4. 应用自动扫描并列出所有文本文件
-5. 选择翻译提供商（OpenAI / DeepSeek）和模型
-6. 输入 API Key
-7. 点击「开始翻译」— 翻译结果自动保存
+2. 授予文件访问权限
+3. 点击 `选择 APK 文件`
+4. 应用会扫描并列出当前可翻译文件
+5. 如需翻译 Android 界面文字，打开 `翻译 Android 界面 XML`
+6. 配置翻译提供商、模型和 API Key
+7. 点击 `开始翻译`
 
-### 翻译结果位置
+## 默认会翻译什么
 
-翻译后的文件保存在：
+- Ren'Py `Say` 节点中的角色名和对白
+- Ren'Py `Menu` 节点中的选项文本
+- Ren'Py 源码 `.rpy` 中的对白和菜单选项
 
-`
-内部存储/Android/data/com.slgtranslator.app/files/SLG-Translator-Output/
-`
+## 默认不会翻译什么
 
-每个文件会生成 .translated.扩展名 的副本，保留原始目录结构。
+- `x-renpy/x-common` 下的引擎通用脚本
+- 图片、字体、音频等二进制资源
+- 路径、变量名、哈希、调试文本
+- Android `AndroidManifest.xml`
+- 普通 JSON / CSV / XML 配置文件
 
-## 支持的格式
+## XML 可选模式
 
-| 格式 | 扩展名 | 说明 |
-|------|--------|------|
-| JSON | .json | 标准 JSON 文本文件 |
-| XML | .xml | Android strings.xml 等 |
-| Ren'Py RPC2 | .rpyc | Ren'Py 引擎编译脚本（自动解压） |
-| CSV | .csv | 逗号分隔值 |
-| 纯文本 | .txt | 普通文本文件 |
-| YAML | .yaml / .yml | YAML 配置 |
-| Properties | .properties | Java 属性文件 |
-| Lua | .lua | Lua 脚本 |
-| HTML | .html / .htm | HTML 文件 |
-| INI | .ini | 配置文件 |
+打开 `翻译 Android 界面 XML` 后，会额外包含：
 
-## 设备要求
+- `res/values/*.xml`
+- `res/layout/*.xml`
 
-- Android 11+（API 30+）
-- 需授予「所有文件访问权限」（MANAGE_EXTERNAL_STORAGE）
-- 无需 Root
+不会包含：
+
+- `AndroidManifest.xml`
+- 非界面用途的 XML 配置
+
+## 输出位置
+
+翻译结果默认保存到：
+
+```text
+Android/data/com.slgtranslator.app/files/SLG-Translator-Output/
+```
+
+每个文件会生成一个 `.translated` 副本，并保留原有目录结构。
+
+## 构建
+
+```bash
+npm install
+npm run build
+
+cd android
+./gradlew assembleDebug
+```
+
+APK 路径：
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## 技术栈
 
-| 层 | 技术 |
-|------|--------|
-| 前端 | React + TypeScript + Tailwind CSS |
-| 容器 | Capacitor (WebView) |
-| 原生 | Kotlin（自定义 APK 扫描 / 文件系统插件） |
-| 翻译引擎 | OpenAI SDK（WebView 直接调用） |
+- React + TypeScript
+- Tailwind CSS
+- Capacitor
+- Kotlin
+- OpenAI SDK
 
 ## 项目结构
 
-`
-slg-translator-android/
-├── src/
-│   ├── core/                    # 翻译核心逻辑
-│   │   ├── translator.ts        # AI 翻译引擎（批量并行）
-│   │   ├── types.ts             # 类型定义
-│   │   ├── providers.ts         # AI 提供商配置
-│   │   ├── scanner-utils.ts     # 多格式文本提取工具
-│   │   └── filemanager.ts      # Capacitor 原生插件桥接
-│   ├── components/              # React UI 组件
-│   │   ├── PermissionGate.tsx   # 权限授权引导
-│   │   ├── TranslationConfig.tsx # 翻译设置面板
-│   │   └── ProgressLog.tsx      # 翻译进度日志
-│   └── App.tsx                  # 主组件
-├── android/
-│   └── app/src/main/java/com/slgtranslator/app/
-│       ├── MainActivity.kt
-│       └── FileManagerPlugin.kt # 自定义 APK 扫描 + 文件系统插件
-├── package.json
-└── vite.config.ts
-`
+```text
+src/
+  core/
+    apk-entry-filter.ts
+    scanner-utils.ts
+    translator.ts
+    filemanager.ts
+  components/
+  App.tsx
+android/
+```
 
-## 优化建议
+## 验证
 
-- **翻译速度**：应用会自动并行处理文件（3 并发），如需调整可修改 src/App.tsx 中的并行数
-- **API 并发**：每文件内 5 路并发请求，可在 src/core/translator.ts 中调整 MAX_CONCURRENT
-- **API 超时**：默认 30 秒超时 + 2 次重试，可在 	ranslator.ts 中调整
+当前仓库已补充核心测试，覆盖：
 
-## License
+- Ren'Py 文本筛选
+- XML 可选过滤
+- 翻译去重与紧凑请求
+- 占位符保护与恢复
+
+运行：
+
+```bash
+npm test
+```
+
+## 许可证
 
 MIT
