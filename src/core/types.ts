@@ -52,5 +52,11 @@ export interface ExportResult {
   translated: any
 }
 
+/** 文件类型 */
+export type FileType =
+  | "json" | "xml" | "rpyc" | "csv" | "yaml"
+  | "properties" | "lua" | "html" | "markdown" | "ini"
+  | "text" | "strings" | "bytes" | "dat" | "rpy" | "unknown"
+
 // 进度回调
-export type ProgressCallback = (current: number, total: number, phase: 'scanning' | 'translating' | 'exporting') => void
+export type ProgressCallback = (current: number, total: number, phase: "scanning" | "translating" | "exporting") => void

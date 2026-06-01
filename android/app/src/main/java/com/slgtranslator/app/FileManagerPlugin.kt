@@ -14,11 +14,23 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import java.io.ByteArrayOutputStream
+import java.util.zip.Inflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
 @CapacitorPlugin(name = "FileManager")
 class FileManagerPlugin : Plugin() {
+
+    companion object {
+        // 支持扫描的文本文件扩展名
+        private val TEXT_EXTENSIONS = setOf(
+            "json", "xml", "txt", "csv", "lua", "yaml", "yml",
+            "properties", "cfg", "dat", "html", "htm", "md", "ini",
+            "rpyc", "rpymc", "rpy",  // Ren'Py
+            "strings", "bytes"       // Unity / Android
+        )
+    }
 
     // ===== 权限 =====
     @PluginMethod
@@ -103,7 +115,7 @@ class FileManagerPlugin : Plugin() {
         }
     }
 
-    // ===== 解析 APK/ZIP =====
+    // ===== 扫描 APK 内文件 =====
     @PluginMethod
     fun listApkEntries(call: PluginCall) {
         val uriStr = call.getString("uri") ?: run { call.reject("uri required"); return }
@@ -113,12 +125,17 @@ class FileManagerPlugin : Plugin() {
             val entries = JSArray()
             var entry: ZipEntry? = zipStream.nextEntry
             while (entry != null) {
-                if (!entry.isDirectory && entry.name.endsWith(".json", ignoreCase = true)) {
-                    entries.put(JSObject().apply {
-                        put("name", entry.name)
-                        put("size", entry.size)
-                        put("compressedSize", entry.compressedSize)
-                    })
+                if (!entry.isDirectory) {
+                    val ext = entry.name.substringAfterLast('.', "").lowercase()
+                    if (ext in TEXT_EXTENSIONS || isLikelyTextFile(entry.name)) {
+                        val fileType = detectFileType(entry.name, ext)
+                        entries.put(JSObject().apply {
+                            put("name", entry.name)
+                            put("size", entry.size)
+                            put("compressedSize", entry.compressedSize)
+                            put("fileType", fileType)
+                        })
+                    }
                 }
                 zipStream.closeEntry()
                 entry = zipStream.nextEntry
@@ -126,27 +143,63 @@ class FileManagerPlugin : Plugin() {
             zipStream.close()
             call.resolve(JSObject().apply {
                 put("entries", entries)
-                put("totalJsonFiles", entries.length())
+                put("totalFiles", entries.length())
             })
         } catch (e: Exception) {
             call.reject("Failed to read APK: ${e.message}")
         }
     }
 
+    private fun detectFileType(name: String, ext: String): String {
+        return when (ext) {
+            "json" -> "json"
+            "xml" -> "xml"
+            "rpyc", "rpymc" -> "rpyc"
+            "csv", "tsv" -> "csv"
+            "yaml", "yml" -> "yaml"
+            "properties" -> "properties"
+            "lua" -> "lua"
+            "html", "htm" -> "html"
+            "md" -> "markdown"
+            "ini", "cfg" -> "ini"
+            "txt" -> "text"
+            "strings" -> "strings"
+            "bytes" -> "bytes"
+            "dat" -> "dat"
+            "rpy" -> "rpy" // Ren'Py 源码
+            else -> "unknown"
+        }
+    }
+
+    private fun isLikelyTextFile(name: String): Boolean {
+        // 对一些无扩展名的文件也尝试检测
+        val baseName = name.substringAfterLast('/').substringBeforeLast('.')
+        return baseName.contains("text") || baseName.contains("string") ||
+               baseName.contains("dialogue") || name.endsWith(".txt", ignoreCase = true)
+    }
+
+    // ===== 读取文件内容 =====
     @PluginMethod
-    fun readApkEntry(call: PluginCall) {
+    fun readFileContent(call: PluginCall) {
         val uriStr = call.getString("uri") ?: run { call.reject("uri required"); return }
         val entryName = call.getString("entryName") ?: run { call.reject("entryName required"); return }
         try {
             val ctx = getContext()
             val zipStream = ZipInputStream(ctx.contentResolver.openInputStream(Uri.parse(uriStr)))
             var found = false
-            var text = ""
+            var content = ""
+            var fileType = "unknown"
             var entry: ZipEntry? = zipStream.nextEntry
             while (entry != null) {
                 if (entry.name == entryName) {
-                    text = zipStream.bufferedReader(Charsets.UTF_8).readText()
                     found = true
+                    val ext = entry.name.substringAfterLast('.', "").lowercase()
+                    fileType = detectFileType(entry.name, ext)
+
+                    content = when (fileType) {
+                        "rpyc" -> readRpycContent(zipStream, entry)
+                        else -> zipStream.bufferedReader(Charsets.UTF_8).readText()
+                    }
                     break
                 }
                 zipStream.closeEntry()
@@ -154,10 +207,100 @@ class FileManagerPlugin : Plugin() {
             }
             zipStream.close()
             if (!found) { call.reject("Entry not found: $entryName"); return }
-            call.resolve(JSObject().apply { put("content", text) })
+            call.resolve(JSObject().apply {
+                put("content", content)
+                put("fileType", fileType)
+                put("fileExt", entryName.substringAfterLast('.', "").lowercase())
+            })
         } catch (e: Exception) {
             call.reject("Failed to read entry: ${e.message}")
         }
+    }
+
+    /**
+     * 读取 Ren'Py RPC2 格式的 rpyc 文件，解压后提取可读字符串
+     */
+    private fun readRpycContent(stream: ZipInputStream, entry: ZipEntry): String {
+        // 读取整个文件的字节数据
+        val allBytes = stream.readBytes()
+        return parseRpyc(allBytes)
+    }
+
+    private fun parseRpyc(data: ByteArray): String {
+        val magic = "RENPY RPC2".toByteArray(Charsets.US_ASCII)
+        if (data.size < magic.size || !data.copyOfRange(0, magic.size).contentEquals(magic)) {
+            // 不是标准的 RPC2 格式，尝试直接读 UTF-8 文本
+            return data.toString(Charsets.UTF_8)
+        }
+
+        val hdrLen = magic.size // 10 bytes
+        val decompressed = ByteArrayOutputStream()
+
+        // 读取 slot 表并解压每个 slot
+        var slotPos = hdrLen
+        while (slotPos + 12 <= data.size) {
+            val slotNum = byteArrayToInt(data, slotPos)
+            if (slotNum == 0 || slotNum > 100) break
+
+            val offset = byteArrayToInt(data, slotPos + 4)
+            val compSize = byteArrayToInt(data, slotPos + 8)
+
+            if (offset + compSize > data.size) break
+
+            try {
+                val compressed = data.copyOfRange(offset, offset + compSize)
+                val decompressedBytes = zlibDecompress(compressed)
+                decompressed.write(decompressedBytes)
+            } catch (_: Exception) {
+                // 解压失败，跳过此 slot
+            }
+
+            slotPos += 12
+        }
+
+        if (decompressed.size() == 0) {
+            // 解压失败，返回原始数据（可能不是标准的 RPC2）
+            return data.toString(Charsets.UTF_8)
+        }
+
+        val fullText = decompressed.toString(Charsets.UTF_8.name())
+        return fullText
+    }
+
+    private fun byteArrayToInt(data: ByteArray, offset: Int): Int {
+        return ((data[offset].toInt() and 0xFF) shl 0) or
+               ((data[offset + 1].toInt() and 0xFF) shl 8) or
+               ((data[offset + 2].toInt() and 0xFF) shl 16) or
+               ((data[offset + 3].toInt() and 0xFF) shl 24)
+    }
+
+    private fun zlibDecompress(data: ByteArray): ByteArray {
+        val inflater = Inflater()
+        inflater.setInput(data)
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        try {
+            while (!inflater.finished()) {
+                val count = inflater.inflate(buffer)
+                output.write(buffer, 0, count)
+            }
+        } finally {
+            inflater.end()
+        }
+        return output.toByteArray()
+    }
+
+    // ===== 向后兼容：旧 API =====
+    @PluginMethod
+    fun listApkEntriesLegacy(call: PluginCall) {
+        // 兼容旧代码
+        listApkEntries(call)
+    }
+
+    @PluginMethod
+    fun readApkEntry(call: PluginCall) {
+        // 使用新方法读取
+        readFileContent(call)
     }
 
     // ===== 文件写入 =====
@@ -169,7 +312,7 @@ class FileManagerPlugin : Plugin() {
         try {
             val ctx = getContext()
             val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, Uri.parse(dirUri))
-            val newFile = docFile?.createFile("application/json", fileName)
+            val newFile = docFile?.createFile("application/octet-stream", fileName)
             if (newFile != null) {
                 ctx.contentResolver.openOutputStream(newFile.uri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
             }

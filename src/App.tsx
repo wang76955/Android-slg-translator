@@ -4,7 +4,7 @@ import TranslationConfig from "./components/TranslationConfig"
 import type { LogEntry } from "./components/ProgressLog"
 import ProgressLog from "./components/ProgressLog"
 import FileManager from "./core/filemanager"
-import type { ApkEntry } from "./core/filemanager"
+import type { ApkEntry, FileType } from "./core/filemanager"
 import { extractTexts, applyTranslations } from "./core/scanner-utils"
 import { translateBatch } from "./core/translator"
 import { AI_PROVIDERS } from "./core/providers"
@@ -13,13 +13,22 @@ function getTimestamp(): string {
   return new Date().toTimeString().slice(0, 8)
 }
 
+/** 文件类型标签映射 */
+const TYPE_LABELS: Record<FileType, string> = {
+  json: "JSON", xml: "XML", rpyc: "RPYC", csv: "CSV",
+  yaml: "YAML", properties: "Props", lua: "Lua",
+  html: "HTML", markdown: "MD", ini: "INI",
+  text: "TXT", strings: "STR", bytes: "Bytes",
+  dat: "DAT", rpy: "RPY", unknown: "?"
+}
+
 const App: React.FC = () => {
   const [step, setStep] = useState<"permission" | "main">("permission")
 
   // APK
   const [apkUri, setApkUri] = useState<string | null>(null)
   const [apkName, setApkName] = useState("")
-  const [jsonFiles, setJsonFiles] = useState<ApkEntry[]>([])
+  const [textFiles, setTextFiles] = useState<ApkEntry[]>([])
   const [scanning, setScanning] = useState(false)
 
   // 输出目录
@@ -46,21 +55,28 @@ const App: React.FC = () => {
     setLogs(logsRef.current)
   }, [])
 
+  // 权限授权后
+  const handlePermissionGranted = () => setStep("main")
+
   // 选择 APK
   const handlePickApk = async () => {
     try {
       const result = await FileManager.pickApkFile()
       setApkUri(result.uri)
       setApkName(result.uri.split("/").pop() || "Unknown.apk")
-      setJsonFiles([])
+      setTextFiles([])
       setResult(null)
       setLogs([])
       // 扫描 APK
       setScanning(true)
-      addLog("正在解析 APK 文件...", "info")
+      addLog("正在扫描 APK 中的文本文件...", "info")
       const entries = await FileManager.listApkEntries({ uri: result.uri })
-      setJsonFiles(entries.entries)
-      addLog(`发现 ${entries.totalJsonFiles} 个 JSON 文件`, "success")
+      setTextFiles(entries.entries)
+      const byType = groupByType(entries.entries)
+      const typeSummary = Object.entries(byType)
+        .map(([t, n]) => `${TYPE_LABELS[t as FileType] || t}×${n}`)
+        .join(", ")
+      addLog(`共发现 ${entries.totalFiles} 个文本文件（${typeSummary}）`, "success")
       setScanning(false)
     } catch (e: any) {
       if (e.message !== "User cancelled") {
@@ -85,11 +101,11 @@ const App: React.FC = () => {
 
   // 开始翻译
   const handleTranslate = async () => {
-    if (!apkUri || !outputDirUri || !apiKey || jsonFiles.length === 0) return
+    if (!apkUri || !outputDirUri || !apiKey || textFiles.length === 0) return
 
     setTranslating(true)
     setResult(null)
-    setProgress({ current: 0, total: jsonFiles.length })
+    setProgress({ current: 0, total: textFiles.length })
     logsRef.current = []
     setLogs([])
 
@@ -101,30 +117,34 @@ const App: React.FC = () => {
     let totalTranslated = 0
     let hasError = false
 
-    // 创建输出目录结构
+    // 创建输出根目录
     try {
       await FileManager.createDirectory({ dirUri: outputDirUri, dirName: outputDirName })
     } catch (_) {}
 
-    addLog(`开始翻译 ${jsonFiles.length} 个文件...`, "info")
+    addLog(`开始处理 ${textFiles.length} 个文件...`, "info")
 
-    for (let i = 0; i < jsonFiles.length; i++) {
-      const entry = jsonFiles[i]
-      addLog(`[${i + 1}/${jsonFiles.length}] ${entry.name}`, "progress")
+    for (let i = 0; i < textFiles.length; i++) {
+      const entry = textFiles[i]
+      const typeTag = TYPE_LABELS[entry.fileType] || "?"
+      addLog(`[${i + 1}/${textFiles.length}] [${typeTag}] ${entry.name}`, "progress")
 
       try {
-        // 1. 从 APK 读取文件
-        const { content } = await FileManager.readApkEntry({ uri: apkUri, entryName: entry.name })
-        const data = JSON.parse(content)
-        const texts = extractTexts(data)
+        // 1. 读取文件内容（RPC2 等自动解压）
+        const { content, fileType } = await FileManager.readFileContent({ uri: apkUri, entryName: entry.name })
+
+        // 2. 按格式提取文本
+        const texts = extractTexts(content, fileType)
+        const rpycHint = fileType === "rpyc" ? `（从 RPC2 解压数据中提取 ${texts.length} 条）` : ""
+        if (rpycHint) addLog(`  ${rpycHint}`, "info")
 
         if (texts.length === 0) {
           addLog("  无文本需要翻译，跳过", "info")
-          setProgress({ current: i + 1, total: jsonFiles.length })
+          setProgress({ current: i + 1, total: textFiles.length })
           continue
         }
 
-        // 2. 调用 AI 翻译
+        // 3. 调用 AI 翻译
         addLog(`  翻译 ${texts.length} 条文本...`, "info")
         const { translations, successCount } = await translateBatch({
           texts, sourceLang, targetLang, baseURL, apiKey,
@@ -134,63 +154,71 @@ const App: React.FC = () => {
         if (successCount === 0) {
           addLog("  翻译失败，跳过", "error")
           hasError = true
-          setProgress({ current: i + 1, total: jsonFiles.length })
+          setProgress({ current: i + 1, total: textFiles.length })
           continue
         }
 
-        // 3. 写入翻译后的文件到输出目录
-        const translatedData = applyTranslations(data, translations)
-        const outputContent = JSON.stringify(translatedData, null, 2)
+        // 4. 按原格式重组翻译内容
+        const outputContent = applyTranslations(content, translations, fileType)
 
-        // 保持目录结构
+        // 5. 保持目录结构写入
+        const ext = entry.name.substring(entry.name.lastIndexOf("."))
+        const baseName = entry.name.substring(0, entry.name.lastIndexOf("."))
+        const translatedName = baseName + ".translated" + ext
+
         const parts = entry.name.split("/")
         let currentDirUri = outputDirUri
         for (let p = 0; p < parts.length - 1; p++) {
           try {
-            const dirResult = await FileManager.createDirectory({
-              dirUri: currentDirUri,
-              dirName: parts[p],
-            })
-            if (dirResult.success) {
-              currentDirUri = dirResult.uri
-            }
-          } catch (_) {}
+            const result = await FileManager.createDirectory({ dirUri: currentDirUri, dirName: parts[p] })
+            if (result.success && result.uri) currentDirUri = result.uri
+          } catch (_) {
+            // 目录已存在
+          }
         }
 
+        // 写入翻译后文件
         await FileManager.writeFileToDir({
-          dirUri: outputDirUri,
-          fileName: parts[parts.length - 1],
+          dirUri: currentDirUri,
+          fileName: translatedName,
           content: outputContent,
         })
 
-        addLog(`  完成 (${successCount} 条)`, "success")
         totalTranslated += successCount
+        addLog(`  完成：翻译 ${successCount} 条`, "success")
+        setProgress({ current: i + 1, total: textFiles.length })
       } catch (e: any) {
-        addLog(`  错误: ${e.message}`, "error")
+        addLog(`  处理失败: ${e.message}`, "error")
         hasError = true
+        setProgress({ current: i + 1, total: textFiles.length })
       }
-
-      setProgress({ current: i + 1, total: jsonFiles.length })
     }
 
     setTranslating(false)
-
-    if (totalTranslated > 0) {
-      addLog(`全部完成！共翻译 ${totalTranslated} 条文本`, "success")
-      setResult({ success: true, count: totalTranslated })
-    } else {
-      addLog("未成功翻译任何文本", "error")
-      setResult({ success: false, count: 0, error: "未成功翻译任何文本" })
-    }
+    setResult({
+      success: !hasError,
+      count: totalTranslated,
+      ...(hasError ? { error: "部分文件处理失败，请查看日志" } : {}),
+    })
   }
 
-  const handlePermissionGranted = () => setStep("main")
+  // 按类型分组统计
+  function groupByType(files: ApkEntry[]): Record<string, number> {
+    const groups: Record<string, number> = {}
+    for (const f of files) {
+      const t = f.fileType || "unknown"
+      groups[t] = (groups[t] || 0) + 1
+    }
+    return groups
+  }
+
+  
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-slate-200 px-4 py-3 shrink-0">
         <h1 className="text-base font-bold text-slate-800">SLG 文本翻译</h1>
-        <p className="text-xs text-slate-400 mt-0.5">选择 APK → 自动解析 → AI 翻译 → 导出</p>
+        <p className="text-xs text-slate-400 mt-0.5">选择 APK → 自动扫描 → AI 翻译 → 导出</p>
       </header>
 
       <main className="flex-1 overflow-y-auto p-4 space-y-4 safe-bottom">
@@ -213,19 +241,30 @@ const App: React.FC = () => {
                 <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
                   <p className="text-xs text-green-700 break-all">已选择：{apkName}</p>
                   <p className="text-xs text-green-600 mt-1">
-                    {jsonFiles.length > 0
-                      ? `发现 ${jsonFiles.length} 个 JSON 文件`
-                      : scanning ? "正在解析..." : ""}
+                    {textFiles.length > 0
+                      ? `发现 ${textFiles.length} 个文本文件`
+                      : scanning ? "正在扫描..." : ""}
                   </p>
                 </div>
               )}
 
-              {jsonFiles.length > 0 && (
-                <div className="mt-3 max-h-40 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
-                  {jsonFiles.map((f, i) => (
+              {textFiles.length > 0 && (
+                <div className="mt-3 max-h-48 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+                  {textFiles.map((f, i) => (
                     <div key={i} className="flex items-center justify-between px-3 py-1.5 text-xs">
-                      <span className="text-slate-600 truncate mr-2">{f.name}</span>
-                      <span className="text-slate-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {/* 文件类型标签 */}
+                        <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium
+                          ${f.fileType === "json" ? "bg-blue-50 text-blue-600" : ""}
+                          ${f.fileType === "xml" ? "bg-orange-50 text-orange-600" : ""}
+                          ${f.fileType === "rpyc" ? "bg-purple-50 text-purple-600" : ""}
+                          ${f.fileType === "text" || f.fileType === "unknown" ? "bg-gray-50 text-gray-500" : ""}
+                          ${!"json xml rpyc text unknown".includes(f.fileType) ? "bg-teal-50 text-teal-600" : ""}`}>
+                          {TYPE_LABELS[f.fileType] || f.fileType}
+                        </span>
+                        <span className="text-slate-600 truncate">{f.name}</span>
+                      </div>
+                      <span className="text-slate-400 shrink-0 ml-2">{(f.size / 1024).toFixed(1)} KB</span>
                     </div>
                   ))}
                 </div>
@@ -233,7 +272,7 @@ const App: React.FC = () => {
             </div>
 
             {/* 第二步：选择输出目录 */}
-            {jsonFiles.length > 0 && (
+            {textFiles.length > 0 && (
               <div className="border border-slate-200 rounded-xl bg-white p-4">
                 <h2 className="text-sm font-semibold text-slate-700 mb-3">2. 选择输出目录</h2>
                 <button onClick={handlePickOutput}
@@ -248,7 +287,7 @@ const App: React.FC = () => {
             )}
 
             {/* 第三步：翻译设置 */}
-            {outputDirUri && jsonFiles.length > 0 && (
+            {outputDirUri && textFiles.length > 0 && (
               <>
                 <div className="border border-slate-200 rounded-xl bg-white p-4">
                   <h2 className="text-sm font-semibold text-slate-700 mb-3">3. 翻译设置</h2>

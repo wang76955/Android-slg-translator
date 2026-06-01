@@ -9,6 +9,7 @@ export const WebFileManager: FileManagerPluginDef = {
   async requestPermission() { return { granted: false } },
   async pickApkFile() { notAvailable("pickApkFile") },
   async listApkEntries() { notAvailable("listApkEntries") },
+  async readFileContent() { notAvailable("readFileContent") },
   async readApkEntry() { notAvailable("readApkEntry") },
   async pickOutputDir() { notAvailable("pickOutputDir") },
   async writeFileToDir() { notAvailable("writeFileToDir") },
