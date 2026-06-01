@@ -72,10 +72,26 @@ const App: React.FC = () => {
       addLog("正在扫描 APK 中的文本文件...", "info")
       const entries = await FileManager.listApkEntries({ uri: result.uri })
       setTextFiles(entries.entries)
-      const byType = groupByType(entries.entries)
+
+      // 自动过滤: 跳过 Ren'Py 引擎通用文件（只保留游戏特有文本）
+      const filteredFiles = entries.entries.filter((f: ApkEntry) => {
+        // 跳过 Ren'Py 引擎文件
+        if (f.name.includes('/x-renpy/x-common/')) return false
+        // 跳过已知的二进制/字体文件
+        const binaryExts = ["png", "jpg", "webp", "mp3", "ogg", "ttf", "woff"]
+        const ext = f.name.split('.').pop()?.toLowerCase() || ''
+        if (binaryExts.includes(ext)) return false
+        return true
+      })
+      setTextFiles(filteredFiles)
+
+
+      const byType = groupByType(filteredFiles)
       const typeSummary = Object.entries(byType)
         .map(([t, n]) => `${TYPE_LABELS[t as FileType] || t}×${n}`)
-        .join(", ")
+        .join(', ')
+      addLog(`共发现 ${filteredFiles.length} 个文本文件（${typeSummary}）`, 'success')
+      setScanning(false)
       addLog(`共发现 ${entries.totalFiles} 个文本文件（${typeSummary}）`, "success")
       setScanning(false)
     } catch (e: any) {
@@ -146,13 +162,17 @@ const App: React.FC = () => {
 
         // 3. 调用 AI 翻译
         addLog(`  翻译 ${texts.length} 条文本...`, "info")
-        const { translations, successCount } = await translateBatch({
+        const { translations, successCount, error: transError } = await translateBatch({
           texts, sourceLang, targetLang, baseURL, apiKey,
-          model: selectedModel, batchSize: 20,
+          model: selectedModel, batchSize: 50,
         })
 
         if (successCount === 0) {
-          addLog("  翻译失败，跳过", "error")
+          if (transError) {
+            addLog(`  翻译失败: ${transError}`, "error")
+          } else {
+            addLog("  翻译失败，跳过", "error")
+          }
           hasError = true
           setProgress({ current: i + 1, total: textFiles.length })
           continue
@@ -211,8 +231,6 @@ const App: React.FC = () => {
     }
     return groups
   }
-
-  
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -312,7 +330,7 @@ const App: React.FC = () => {
                     current={progress.current} total={progress.total}
                     logs={logs}
                     status={translating ? "translating" : result ? "done" : "idle"}
-                    result={result}
+
                   />
                 )}
               </>

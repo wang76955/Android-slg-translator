@@ -41,7 +41,10 @@ export async function translateBatch(options: TranslateOptions): Promise<{
     return { translations: new Map(), successCount: 0, error: 'API Key 未设置' }
   }
 
-  const client = new OpenAI({
+    const client = new OpenAI({
+      apiKey,
+      baseURL,
+      dangerouslyAllowBrowser: true,
     apiKey,
     baseURL,
   })
@@ -95,7 +98,7 @@ export async function translateBatch(options: TranslateOptions): Promise<{
         }
       }
     } catch (err: any) {
-      console.error('Batch ' + (b + 1) + '/' + totalBatches + ' failed:', err.message)
+      return { translations, successCount, error: err.message }
     }
 
     onProgress?.(Math.min((b + 1) * batchSize, texts.length), texts.length, 'translating')

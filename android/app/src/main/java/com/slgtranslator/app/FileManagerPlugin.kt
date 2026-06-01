@@ -24,11 +24,11 @@ class FileManagerPlugin : Plugin() {
 
     companion object {
         // 支持扫描的文本文件扩展名
-        private val TEXT_EXTENSIONS = setOf(
+                private val TEXT_EXTENSIONS = setOf(
             "json", "xml", "txt", "csv", "lua", "yaml", "yml",
-            "properties", "cfg", "dat", "html", "htm", "md", "ini",
+            "properties", "cfg", "html", "htm", "md", "ini",
             "rpyc", "rpymc", "rpy",  // Ren'Py
-            "strings", "bytes"       // Unity / Android
+            "strings"                 // Android strings
         )
     }
 
@@ -172,10 +172,20 @@ class FileManagerPlugin : Plugin() {
     }
 
     private fun isLikelyTextFile(name: String): Boolean {
-        // 对一些无扩展名的文件也尝试检测
+        // 跳过已知的二进制/媒体文件扩展名
+        val binaryExts = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico",
+                               "mp3", "wav", "ogg", "aac", "flac", "m4a",
+                               "mp4", "webm", "avi", "mkv", "mov",
+                               "ttf", "otf", "woff", "woff2", "eot",
+                               "so", "dll", "dex", "oat", "vdex")
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext in binaryExts) return false
+
+        // 对无扩展名或非标准扩展名的文件进行内容试探
         val baseName = name.substringAfterLast('/').substringBeforeLast('.')
         return baseName.contains("text") || baseName.contains("string") ||
-               baseName.contains("dialogue") || name.endsWith(".txt", ignoreCase = true)
+               baseName.contains("dialogue") || baseName.contains("script") ||
+               name.endsWith(".txt", ignoreCase = true)
     }
 
     // ===== 读取文件内容 =====
