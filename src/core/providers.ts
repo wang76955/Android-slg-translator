@@ -20,8 +20,8 @@ export const AI_PROVIDERS: AiProvider[] = [
     name: 'DeepSeek',
     baseURL: 'https://api.deepseek.com',
     models: [
-      { id: 'deepseek-chat', name: 'DeepSeek Chat（推荐，性价比高）', supportsJsonMode: true },
-      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner（推理模型）', supportsJsonMode: false },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash（推荐，快速性价比高）', supportsJsonMode: true },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro（质量最高）', supportsJsonMode: false },
     ],
   },
   {

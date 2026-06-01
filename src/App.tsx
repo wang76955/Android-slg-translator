@@ -312,7 +312,7 @@ const App: React.FC = () => {
                   <TranslationConfig
                     sourceLang={sourceLang} targetLang={targetLang}
                     onSourceLangChange={setSourceLang} onTargetLangChange={setTargetLang}
-                    providerId={providerId} onProviderChange={setProviderId}
+                    providerId={providerId} onProviderChange={(id) => { setProviderId(id); const p = AI_PROVIDERS.find(x => x.id === id); if (p && p.models.length > 0) setSelectedModel(p.models[0].id); }}
                     selectedModel={selectedModel} onModelChange={setSelectedModel}
                     apiKey={apiKey} onApiKeyChange={setApiKey}
                     customBaseURL={customBaseURL} onCustomBaseURLChange={setCustomBaseURL}
