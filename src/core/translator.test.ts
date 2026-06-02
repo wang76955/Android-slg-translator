@@ -5,6 +5,7 @@ import {
   parseTranslationResponse,
   protectTextForTranslation,
   restoreProtectedText,
+  translateBatch,
 } from "./translator"
 import type { TextItem } from "./types"
 
@@ -50,5 +51,23 @@ describe("translation batching efficiency", () => {
 
   it("extracts JSON from markdown fenced model responses", () => {
     expect(parseTranslationResponse('```json\n{"translations":["Hello","Bye"]}\n```')).toEqual(["Hello", "Bye"])
+  })
+
+  it("uses local phrase rules without calling an API", async () => {
+    const result = await translateBatch({
+      texts: [
+        { keyPath: "save", text: "Save" },
+        { keyPath: "episode", text: "Episode 2" },
+      ],
+      sourceLang: "en",
+      targetLang: "zh",
+      baseURL: "",
+      apiKey: "",
+      model: "local-test",
+    })
+
+    expect(result.successCount).toBe(2)
+    expect(result.translations.get("save")).toBe("保存")
+    expect(result.translations.get("episode")).toBe("第 2 集")
   })
 })

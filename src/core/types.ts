@@ -59,4 +59,21 @@ export type FileType =
   | "text" | "strings" | "bytes" | "dat" | "rpy" | "unknown"
 
 // 进度回调
-export type ProgressCallback = (current: number, total: number, phase: "scanning" | "translating" | "exporting") => void
+export interface ProgressDetail {
+  cachedCount?: number
+  localRuleCount?: number
+  completedBatches?: number
+  totalBatches?: number
+  currentBatch?: number
+  batchSize?: number
+  failedBatches?: number
+  splitBatches?: number
+  estimatedSecondsRemaining?: number
+}
+
+export type ProgressCallback = (
+  current: number,
+  total: number,
+  phase: "scanning" | "translating" | "exporting",
+  detail?: ProgressDetail,
+) => void

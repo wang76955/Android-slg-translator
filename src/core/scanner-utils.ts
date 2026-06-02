@@ -1,5 +1,7 @@
 ﻿import type { TextItem, FileType } from "./types"
 
+import { isKnownLocalPhrase } from "./local-translation"
+
 // ============== 格式检测 ==============
 
 /** 根据内容检测文本格式 */
@@ -114,6 +116,10 @@ export function extractTextsFromXml(xmlContent: string, prefix = "", sourceLang?
  * 我们用启发式方式从中提取文本
  */
 export function extractTextsFromRpyc(decodedContent: string, prefix = "", sourceLang?: string): TextItem[] {
+  if (decodedContent.includes("RPYC_STRING\t")) {
+    return extractTextsFromRpycStringLines(decodedContent, prefix, sourceLang)
+  }
+
   if (looksLikeRenPySource(decodedContent)) {
     return extractTextsFromRenPySource(decodedContent, prefix, sourceLang)
   }
@@ -132,6 +138,23 @@ export function extractTextsFromRpyc(decodedContent: string, prefix = "", source
       seen.add(text)
       texts.push({ keyPath: `${prefix}tl_${idx++}`, text })
     }
+  }
+
+  return texts
+}
+
+function extractTextsFromRpycStringLines(content: string, prefix = "", sourceLang?: string): TextItem[] {
+  const texts: TextItem[] = []
+  const seen = new Set<string>()
+  let index = 0
+
+  for (const line of content.split("\n")) {
+    if (!line.startsWith("RPYC_STRING\t")) continue
+    const text = line.slice("RPYC_STRING\t".length).trim()
+    if (!shouldTranslate(text, sourceLang) || seen.has(text)) continue
+
+    seen.add(text)
+    texts.push({ keyPath: `${prefix}rpyc_string_${index++}`, text })
   }
 
   return texts
@@ -304,6 +327,8 @@ export function extractTextsFromPlainText(textContent: string, prefix = "", sour
 function shouldTranslate(text: string, sourceLang?: string): boolean {
   if (!text || text.length < 2) return false
   const trimmed = text.trim()
+  if (isKnownLocalPhrase(trimmed, sourceLang)) return true
+  if (isLowValueText(trimmed, sourceLang)) return false
   if (isNonDialogueTechnicalString(trimmed)) return false
   if (/^\d+$/.test(text)) return false
   if (/^https?:\/\//.test(text)) return false
@@ -312,6 +337,19 @@ function shouldTranslate(text: string, sourceLang?: string): boolean {
   if (/^[0-9a-fA-F]{8,}$/.test(text)) return false  // 哈希值
   if (!matchesSourceLanguage(trimmed, sourceLang)) return false
   return true
+}
+
+function isLowValueText(text: string, sourceLang?: string): boolean {
+  if (/^[\s.。!！?？,，:：;；'"“”‘’()[\]{}<>-]+$/.test(text)) return true
+  if (/^#?[0-9a-fA-F]{3,8}$/.test(text)) return true
+
+  if (sourceLang === "en") {
+    if (/^[A-Za-z]{1,2}$/.test(text)) return true
+    if (/^[A-Z0-9_-]{2,12}$/.test(text)) return true
+    if (/^[a-z_][a-z0-9_]{1,24}$/.test(text)) return true
+  }
+
+  return false
 }
 
 function matchesSourceLanguage(text: string, sourceLang?: string): boolean {

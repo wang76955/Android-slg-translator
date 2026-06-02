@@ -1,6 +1,8 @@
 import OpenAI from "openai"
 import type { TextItem, GlossaryEntry, ProgressCallback } from "./types"
+import { getLocalTranslation } from "./local-translation"
 
+import { buildCacheContext, readCachedTranslation, writeCachedTranslation, loadCache, persistCache } from "./translation-cache"
 const LANG_MAP: Record<string, string> = {
   zh: "Chinese",
   en: "English",
@@ -10,12 +12,10 @@ const LANG_MAP: Record<string, string> = {
   de: "German",
 }
 
-const MAX_CONCURRENT = 5
-const DEFAULT_BATCH_SIZE = 200
-const MAX_BATCH_CHARS = 12000
-const CACHE_PREFIX = "slg-translator-cache:"
+const MAX_CONCURRENT = 4
+const DEFAULT_BATCH_SIZE = 80
+const MAX_BATCH_CHARS = 6000
 const MAX_MEMORY_CACHE_ENTRIES = 5000
-const memoryCache = new Map<string, CacheRecord>()
 
 interface CacheRecord {
   sourceText: string
@@ -30,6 +30,12 @@ export interface ProtectedText {
 
 interface PreparedTextItem extends UniqueTextItem {
   protectedText: ProtectedText
+}
+
+interface BatchRetryResult {
+  translations: Map<number, string>
+  splitCount: number
+  failedCount: number
 }
 
 export interface UniqueTextItem extends TextItem {
@@ -113,12 +119,51 @@ export async function translateBatch(options: TranslateOptions): Promise<{
     onProgress,
   } = options
 
-  if (!apiKey) {
-    return { translations: new Map(), successCount: 0, error: "API Key is missing" }
-  }
-
+  await loadCache()
   if (texts.length === 0) {
     return { translations: new Map(), successCount: 0 }
+  }
+
+  const supportsJson = !model.includes("reasoner") && !model.includes("pro")
+  const translations = new Map<string, string>()
+  const uniqueTexts = collectUniqueTranslatableTexts(texts)
+  const cacheContext = buildCacheContext(sourceLang, targetLang, model, glossary)
+  const uncachedTexts: UniqueTextItem[] = []
+  let cachedCount = 0
+  let localRuleCount = 0
+
+  for (const item of uniqueTexts) {
+    const localTranslation = getLocalTranslation(item.text, sourceLang, targetLang)
+    if (localTranslation) {
+      setTranslationForAllKeys(translations, item, localTranslation)
+      writeCachedTranslation(cacheContext, item.text, localTranslation)
+      localRuleCount += 1 + item.duplicateKeys.length
+      continue
+    }
+
+    const cachedTranslation = readCachedTranslation(cacheContext, item.text)
+    if (cachedTranslation) {
+      setTranslationForAllKeys(translations, item, cachedTranslation)
+      cachedCount += 1 + item.duplicateKeys.length
+    } else {
+      uncachedTexts.push(item)
+    }
+  }
+
+  onProgress?.(translations.size, texts.length, "translating", { cachedCount, localRuleCount })
+
+  if (uncachedTexts.length === 0) {
+    await persistCache()
+    return { translations, successCount: translations.size }
+  }
+
+  if (!apiKey) {
+    await persistCache()
+    return {
+      translations,
+      successCount: translations.size,
+      error: `API Key is missing; translated ${translations.size}/${texts.length} items with local rules/cache`,
+    }
   }
 
   const client = new OpenAI({
@@ -129,58 +174,63 @@ export async function translateBatch(options: TranslateOptions): Promise<{
     maxRetries: 2,
   })
 
-  const supportsJson = !model.includes("reasoner") && !model.includes("pro")
-  const translations = new Map<string, string>()
-  const uniqueTexts = collectUniqueTranslatableTexts(texts)
-  const cacheContext = buildCacheContext(sourceLang, targetLang, model, glossary)
-  const uncachedTexts: UniqueTextItem[] = []
-
-  for (const item of uniqueTexts) {
-    const cachedTranslation = readCachedTranslation(cacheContext, item.text)
-    if (cachedTranslation) {
-      setTranslationForAllKeys(translations, item, cachedTranslation)
-    } else {
-      uncachedTexts.push(item)
-    }
-  }
-
-  onProgress?.(translations.size, texts.length, "translating")
-
-  if (uncachedTexts.length === 0) {
-    return { translations, successCount: translations.size }
-  }
-
   let hasError = false
   const allBatches = createTranslationBatches(uncachedTexts.map(prepareTextItem), batchSize)
+  let nextBatchIndex = 0
+  let completedBatches = 0
+  let failedBatches = 0
+  let splitBatches = 0
+  const startedAt = Date.now()
 
-  for (let start = 0; start < allBatches.length; start += MAX_CONCURRENT) {
-    const concurrentBatches = allBatches.slice(start, start + MAX_CONCURRENT)
+  const workerCount = Math.min(MAX_CONCURRENT, allBatches.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextBatchIndex < allBatches.length) {
+      const batchIndex = nextBatchIndex++
+      const batch = allBatches[batchIndex]
 
-    const results = await Promise.allSettled(
-      concurrentBatches.map((batch) =>
-        translateOneBatch(client, model, batch, sourceLang, targetLang, glossary, supportsJson),
-      ),
-    )
+      try {
+        const result = await translateOneBatchWithFallback(
+          client,
+          model,
+          batch,
+          sourceLang,
+          targetLang,
+          glossary,
+          supportsJson,
+        )
+        splitBatches += result.splitCount
+        failedBatches += result.failedCount
+        if (result.failedCount > 0) hasError = true
 
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]
-      const batch = concurrentBatches[i]
-
-      if (result.status === "fulfilled") {
-        for (const [index, translatedText] of result.value.entries()) {
+        for (const [index, translatedText] of result.translations.entries()) {
           const item = batch[index]
           if (!item || !translatedText) continue
 
           setTranslationForAllKeys(translations, item, translatedText)
           writeCachedTranslation(cacheContext, item.text, translatedText)
         }
-      } else {
+      } catch {
         hasError = true
+        failedBatches += 1
       }
-    }
 
-    onProgress?.(translations.size, texts.length, "translating")
-  }
+      completedBatches += 1
+      onProgress?.(translations.size, texts.length, "translating", {
+        cachedCount,
+        localRuleCount,
+        completedBatches,
+        totalBatches: allBatches.length,
+        currentBatch: batchIndex + 1,
+        batchSize: batch.length,
+        failedBatches,
+        splitBatches,
+        estimatedSecondsRemaining: estimateSecondsRemaining(startedAt, completedBatches, allBatches.length),
+      })
+    }
+  })
+
+  await Promise.all(workers)
+  await persistCache()
 
   return {
     translations,
@@ -221,6 +271,71 @@ function createTranslationBatches(texts: PreparedTextItem[], maxItems: number): 
   }
 
   return batches
+}
+
+async function translateOneBatchWithFallback(
+  client: OpenAI,
+  model: string,
+  batchTexts: PreparedTextItem[],
+  sourceLang: string,
+  targetLang: string,
+  glossary?: GlossaryEntry[],
+  supportsJson?: boolean,
+  depth = 0,
+): Promise<BatchRetryResult> {
+  try {
+    return {
+      translations: await translateOneBatch(client, model, batchTexts, sourceLang, targetLang, glossary, supportsJson),
+      splitCount: 0,
+      failedCount: 0,
+    }
+  } catch {
+    if (batchTexts.length <= 1 || depth >= 4) {
+      return {
+        translations: new Map(),
+        splitCount: 0,
+        failedCount: 1,
+      }
+    }
+
+    const midpoint = Math.ceil(batchTexts.length / 2)
+    const left = batchTexts.slice(0, midpoint)
+    const right = batchTexts.slice(midpoint)
+    const leftResult = await translateOneBatchWithFallback(
+      client,
+      model,
+      left,
+      sourceLang,
+      targetLang,
+      glossary,
+      supportsJson,
+      depth + 1,
+    )
+    const rightResult = await translateOneBatchWithFallback(
+      client,
+      model,
+      right,
+      sourceLang,
+      targetLang,
+      glossary,
+      supportsJson,
+      depth + 1,
+    )
+
+    const translations = new Map<number, string>()
+    for (const [index, translatedText] of leftResult.translations.entries()) {
+      translations.set(index, translatedText)
+    }
+    for (const [index, translatedText] of rightResult.translations.entries()) {
+      translations.set(index + midpoint, translatedText)
+    }
+
+    return {
+      translations,
+      splitCount: 1 + leftResult.splitCount + rightResult.splitCount,
+      failedCount: leftResult.failedCount + rightResult.failedCount,
+    }
+  }
 }
 
 async function translateOneBatch(
@@ -323,8 +438,8 @@ function buildSystemPrompt(
   const tgtName = LANG_MAP[targetLang] ?? targetLang
 
   let prompt =
-    `You are a professional game localization translator. Translate ${srcName} text to ${tgtName}. ` +
-    "Keep __PH0__ style placeholder tokens unchanged. Preserve line breaks and formatting."
+    `Translate game dialogue ${srcName}->${tgtName}. ` +
+    "Keep __PH0__ tokens, line breaks, and formatting."
 
   if (glossary && glossary.length > 0) {
     prompt += "\nUse these terms consistently:\n"
@@ -340,92 +455,10 @@ function buildSystemPrompt(
   return prompt
 }
 
-function buildCacheContext(
-  sourceLang: string,
-  targetLang: string,
-  model: string,
-  glossary?: GlossaryEntry[],
-): string {
-  const glossarySignature = glossary?.length
-    ? glossary.map((entry) => `${entry.source}=${entry.target}`).sort().join("|")
-    : ""
+function estimateSecondsRemaining(startedAt: number, completed: number, total: number): number | undefined {
+  if (completed <= 0 || total <= completed) return undefined
 
-  return `${sourceLang}|${targetLang}|${model}|${hashString(glossarySignature)}`
-}
-
-function buildCacheKey(context: string, sourceText: string): string {
-  return `${CACHE_PREFIX}${context}|${hashString(sourceText)}`
-}
-
-function readCachedTranslation(context: string, sourceText: string): string | null {
-  const cacheKey = buildCacheKey(context, sourceText)
-  const memoryRecord = memoryCache.get(cacheKey)
-  if (memoryRecord?.sourceText === sourceText) {
-    return memoryRecord.translatedText
-  }
-
-  const storage = getLocalStorage()
-  if (!storage) return null
-
-  try {
-    const rawRecord = storage.getItem(cacheKey)
-    if (!rawRecord) return null
-
-    const record = JSON.parse(rawRecord) as CacheRecord
-    if (record.sourceText !== sourceText || !record.translatedText) return null
-
-    rememberInMemory(cacheKey, record)
-    return record.translatedText
-  } catch {
-    return null
-  }
-}
-
-function writeCachedTranslation(context: string, sourceText: string, translatedText: string): void {
-  const cacheKey = buildCacheKey(context, sourceText)
-  const record: CacheRecord = {
-    sourceText,
-    translatedText,
-    updatedAt: Date.now(),
-  }
-
-  rememberInMemory(cacheKey, record)
-
-  const storage = getLocalStorage()
-  if (!storage) return
-
-  try {
-    storage.setItem(cacheKey, JSON.stringify(record))
-  } catch {
-    // Storage quota can be small in WebView. The memory cache still helps this run.
-  }
-}
-
-function rememberInMemory(cacheKey: string, record: CacheRecord): void {
-  memoryCache.set(cacheKey, record)
-
-  if (memoryCache.size <= MAX_MEMORY_CACHE_ENTRIES) return
-
-  const oldestKey = memoryCache.keys().next().value
-  if (oldestKey) {
-    memoryCache.delete(oldestKey)
-  }
-}
-
-function getLocalStorage(): Storage | null {
-  try {
-    if (typeof globalThis.localStorage === "undefined") return null
-    return globalThis.localStorage
-  } catch {
-    return null
-  }
-}
-
-function hashString(value: string): string {
-  let hash = 2166136261
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(36)
+  const elapsedSeconds = (Date.now() - startedAt) / 1000
+  const secondsPerBatch = elapsedSeconds / completed
+  return Math.max(1, Math.round(secondsPerBatch * (total - completed)))
 }

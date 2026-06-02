@@ -14,6 +14,11 @@ export interface ApkEntry {
   fileType: FileType
 }
 
+export interface ApkPatchFile {
+  path: string
+  content: string
+}
+
 export interface FileManagerPluginDef {
   checkPermission(): Promise<{ granted: boolean }>
   requestPermission(): Promise<{ granted: boolean }>
@@ -27,6 +32,37 @@ export interface FileManagerPluginDef {
   pickOutputDir(): Promise<{ uri: string }>
   getDefaultOutputDir(): Promise<{ uri: string; path: string }>
   writeFileToDir(options: { dirUri: string; fileName: string; content: string }): Promise<{ success: boolean }>
+  buildPatchedApk(options: {
+    uri: string
+    files: ApkPatchFile[]
+    outputDirUri?: string | null
+    outputName?: string
+    targetRenpyLanguage?: string
+    sourceRenpyLanguage?: string
+  }): Promise<{
+    success: boolean
+    uri: string
+    path: string
+    fileCount: number
+    copiedCount: number
+    replacedCount: number
+    mirroredRenpyCount?: number
+    skippedSignatureCount: number
+    unsigned: boolean
+    signed?: boolean
+    signatureVerified?: boolean
+    verifiedUsingV1?: boolean
+    verifiedUsingV2?: boolean
+    verifiedUsingV3?: boolean
+  }>
+  installApk(options: { uri: string }): Promise<{ success: boolean; needsPermission?: boolean }>
+  uninstallAndInstallApk(options: { packageName: string; uri: string }): Promise<{ success: boolean; needsPermission?: boolean; uninstallCancelled?: boolean }>
+  uninstallApk(options: { packageName: string }): Promise<{ success: boolean }>
+  openAppSettings(options: { packageName: string }): Promise<{ success: boolean }>
+  launchApp(options: { packageName: string }): Promise<{ success: boolean }>
+  loadTranslationCache(): Promise<{ data: string }>
+  saveTranslationCache(options: { data: string }): Promise<{ success: boolean }>
+  getApkPackageName(options: { uri: string }): Promise<{ packageName: string }>
   createDirectory(options: { dirUri: string; dirName: string }): Promise<{ success: boolean; uri: string }>
 }
 

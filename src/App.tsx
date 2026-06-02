@@ -4,11 +4,12 @@ import TranslationConfig from "./components/TranslationConfig"
 import type { LogEntry } from "./components/ProgressLog"
 import ProgressLog from "./components/ProgressLog"
 import FileManager from "./core/filemanager"
-import type { ApkEntry, FileType } from "./core/filemanager"
+import type { ApkEntry, ApkPatchFile, FileType } from "./core/filemanager"
 import { extractTexts, applyTranslations } from "./core/scanner-utils"
 import { translateBatch } from "./core/translator"
 import { AI_PROVIDERS } from "./core/providers"
 import { filterTranslatableApkEntries } from "./core/apk-entry-filter"
+import { buildRenPyTranslationFile, getRenPyLanguageName, isRenPyEntry } from "./core/renpy-translation-pack"
 
 function getTimestamp(): string {
   return new Date().toTimeString().slice(0, 8)
@@ -23,6 +24,19 @@ const TYPE_LABELS: Record<FileType, string> = {
   dat: "DAT", rpy: "RPY", unknown: "?"
 }
 
+const FILE_CONCURRENCY = 2
+const TRANSLATION_BATCH_SIZE = 80
+
+interface TranslationResult {
+  success: boolean
+  count: number
+  error?: string
+  patchedApkUri?: string
+  patchedApkPath?: string
+  patchedApkSigned?: boolean
+  signatureVerified?: boolean
+}
+
 const App: React.FC = () => {
   const [step, setStep] = useState<"permission" | "main">("permission")
 
@@ -32,27 +46,33 @@ const App: React.FC = () => {
   const [apkEntries, setApkEntries] = useState<ApkEntry[]>([])
   const [includeAndroidXml, setIncludeAndroidXml] = useState(false)
   const [scanning, setScanning] = useState(false)
-  const textFiles = useMemo(
-    () => filterTranslatableApkEntries(apkEntries, includeAndroidXml),
-    [apkEntries, includeAndroidXml],
-  )
+  const [apkPackageName, setApkPackageName] = useState("")
 
   // 输出目录
   const [outputDirUri, setOutputDirUri] = useState<string | null>(null)
 
   // 翻译配置
-  const [sourceLang, setSourceLang] = useState("zh")
-  const [targetLang, setTargetLang] = useState("en")
+  const [sourceLang, setSourceLang] = useState("en")
+  const [targetLang, setTargetLang] = useState("zh")
   const [providerId, setProviderId] = useState("openai")
   const [selectedModel, setSelectedModel] = useState(AI_PROVIDERS[0].models[0].id)
   const [apiKey, setApiKey] = useState("")
   const [customBaseURL, setCustomBaseURL] = useState("")
+  const textFiles = useMemo(
+    () => filterTranslatableApkEntries(apkEntries, includeAndroidXml, sourceLang),
+    [apkEntries, includeAndroidXml, sourceLang],
+  )
+  const canMirrorExistingRenpyPack = useMemo(
+    () => hasExistingRenPyLanguagePack(apkEntries, targetLang),
+    [apkEntries, targetLang],
+  )
 
   // 翻译进度
   const [translating, setTranslating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [result, setResult] = useState<{ success: boolean; count: number; error?: string } | null>(null)
+  const [result, setResult] = useState<TranslationResult | null>(null)
+  const [installingPatch, setInstallingPatch] = useState(false)
   const logsRef = useRef<LogEntry[]>([])
 
   const addLog = useCallback((message: string, type: LogEntry["type"] = "info") => {
@@ -81,8 +101,15 @@ const App: React.FC = () => {
       addLog("正在扫描 APK 中的文本文件...", "info")
       const entries = await FileManager.listApkEntries({ uri: result.uri })
       setApkEntries(entries.entries)
+      try {
+        const pkgResult = await FileManager.getApkPackageName({ uri: result.uri })
+        if (pkgResult.packageName) {
+          setApkPackageName(pkgResult.packageName)
+          addLog("识别到包名: " + pkgResult.packageName, "info")
+        }
+      } catch {}
 
-      const filteredFiles = filterTranslatableApkEntries(entries.entries, includeAndroidXml)
+      const filteredFiles = filterTranslatableApkEntries(entries.entries, includeAndroidXml, sourceLang)
 
       const byType = groupByType(filteredFiles)
       const typeSummary = Object.entries(byType)
@@ -113,7 +140,8 @@ const App: React.FC = () => {
 
   // 开始翻译
   const handleTranslate = async () => {
-    if (!apkUri || !apiKey || textFiles.length === 0) return
+    if (!apkUri || textFiles.length === 0) return
+    if (!apiKey && !canMirrorExistingRenpyPack) return
 
     setTranslating(true)
     setResult(null)
@@ -125,19 +153,30 @@ const App: React.FC = () => {
       ? customBaseURL
       : AI_PROVIDERS.find(p => p.id === providerId)?.baseURL || ""
 
-    const outputDirName = "SLG-Translator-Output"
     let totalTranslated = 0
     let hasError = false
+    const renpyPatchFiles: ApkPatchFile[] = []
+    let patchedApkUri = ""
+    let patchedApkPath = ""
+    let patchedApkSigned = false
+    let signatureVerified = false
 
     // 创建输出根目录
     try {
-      await FileManager.createDirectory({ dirUri: outputDirUri, dirName: outputDirName })
+      if (outputDirUri) {
+        await FileManager.createDirectory({ dirUri: outputDirUri, dirName: "SLG-Translator-Output" })
+      }
     } catch (_) {}
 
     addLog(`开始处理 ${textFiles.length} 个文件...`, "info")
 
-    for (let batchStart = 0; batchStart < textFiles.length; batchStart += 3) {
-      const batch = textFiles.slice(batchStart, batchStart + 3)
+    if (!apiKey && canMirrorExistingRenpyPack) {
+      addLog(
+        `检测到 APK 已内置 ${getRenPyLanguageName(targetLang)} Ren'Py 语言包，将直接镜像到 ${getRenPyLanguageName(sourceLang)}/None，无需 API 翻译。`,
+        "info",
+      )
+    } else for (let batchStart = 0; batchStart < textFiles.length; batchStart += FILE_CONCURRENCY) {
+      const batch = textFiles.slice(batchStart, batchStart + FILE_CONCURRENCY)
       await Promise.allSettled(batch.map((entry, offset) => (async () => {
         const index = batchStart + offset
         const typeTag = TYPE_LABELS[entry.fileType] || "?"
@@ -155,10 +194,34 @@ const App: React.FC = () => {
             return
           }
 
-          addLog(`  翻译 ${texts.length} 条文本...`, "info")
+          let lastLoggedBatch = 0
+          addLog(`  翻译 ${texts.length} 条文本（小批并发，缓存优先）...`, "info")
           const { translations, successCount, error: transError } = await translateBatch({
             texts, sourceLang, targetLang, baseURL, apiKey,
-            model: selectedModel, batchSize: 200,
+            model: selectedModel, batchSize: TRANSLATION_BATCH_SIZE,
+            onProgress: (current, total, phase, detail) => {
+              if (phase !== "translating") return
+              if (!detail?.totalBatches) {
+                const savedCount = (detail?.cachedCount || 0) + (detail?.localRuleCount || 0)
+                if (savedCount > 0) {
+                  addLog(`  省 token：本地规则 ${detail?.localRuleCount || 0} 条，缓存 ${detail?.cachedCount || 0} 条`, "info")
+                }
+                return
+              }
+
+              if (detail.completedBatches === lastLoggedBatch) return
+              lastLoggedBatch = detail.completedBatches || 0
+
+              const failedText = detail.failedBatches ? `，失败批次 ${detail.failedBatches}` : ""
+              const cachedText = detail.cachedCount ? `，缓存 ${detail.cachedCount}` : ""
+              const localText = detail.localRuleCount ? `，本地 ${detail.localRuleCount}` : ""
+              const splitText = detail.splitBatches ? `，自动拆批 ${detail.splitBatches}` : ""
+              const etaText = detail.estimatedSecondsRemaining ? `，预计剩余 ${formatDuration(detail.estimatedSecondsRemaining)}` : ""
+              addLog(
+                `  批次 ${detail.completedBatches}/${detail.totalBatches} 完成，文本 ${current}/${total}${localText}${cachedText}${splitText}${failedText}${etaText}`,
+                "progress",
+              )
+            },
           })
 
           if (successCount === 0) {
@@ -168,25 +231,34 @@ const App: React.FC = () => {
             return
           }
 
-          const outputContent = applyTranslations(content, translations, fileType)
-          const ext = entry.name.substring(entry.name.lastIndexOf("."))
-          const baseName = entry.name.substring(0, entry.name.lastIndexOf("."))
-          const translatedName = baseName + ".translated" + ext
+          if (isRenPyEntry(entry)) {
+            const translationFiles = [
+              buildRenPyTranslationFile(entry, texts, translations, "None"),
+              buildRenPyTranslationFile(entry, texts, translations, sourceLang),
+            ]
+            if (!canMirrorExistingRenpyPack) {
+              translationFiles.unshift(buildRenPyTranslationFile(entry, texts, translations, targetLang))
+            }
+            const uniqueTranslationFiles = new Map<string, (typeof translationFiles)[number]>()
 
-          const parts = entry.name.split("/")
-          let currentDirUri = outputDirUri
-          for (let p = 0; p < parts.length - 1; p++) {
-            try {
-              const result = await FileManager.createDirectory({ dirUri: currentDirUri, dirName: parts[p] })
-              if (result.success && result.uri) currentDirUri = result.uri
-            } catch (_) {}
+            for (const file of translationFiles) {
+              uniqueTranslationFiles.set(file.outputPath, file)
+            }
+
+            for (const file of uniqueTranslationFiles.values()) {
+              await writeOutputFile(file.outputPath, file.content)
+              renpyPatchFiles.push({
+                path: file.outputPath,
+                content: file.content,
+              })
+              addLog(`  生成 Ren'Py 翻译包：${file.outputPath}`, "success")
+            }
+          } else {
+            const outputContent = applyTranslations(content, translations, fileType)
+            const ext = entry.name.substring(entry.name.lastIndexOf("."))
+            const baseName = entry.name.substring(0, entry.name.lastIndexOf("."))
+            await writeOutputFile(baseName + ".translated" + ext, outputContent)
           }
-
-          await FileManager.writeFileToDir({
-            dirUri: currentDirUri,
-            fileName: translatedName,
-            content: outputContent,
-          })
 
           totalTranslated += successCount
           addLog(`  完成：翻译 ${successCount} 条`, "success")
@@ -199,12 +271,126 @@ const App: React.FC = () => {
       })()))
     }
 
+    if (renpyPatchFiles.length > 0 || canMirrorExistingRenpyPack) {
+      addLog(`正在生成 Ren'Py 补丁 APK...`, "info")
+      try {
+        const patchedApk = await FileManager.buildPatchedApk({
+          uri: apkUri,
+          files: renpyPatchFiles,
+          outputDirUri,
+          outputName: buildPatchedApkName(apkName),
+          targetRenpyLanguage: getRenPyLanguageName(targetLang),
+          sourceRenpyLanguage: getRenPyLanguageName(sourceLang),
+        })
+        patchedApkUri = patchedApk.uri
+        patchedApkPath = patchedApk.path || patchedApk.uri
+        patchedApkSigned = Boolean(patchedApk.signed)
+        signatureVerified = Boolean(patchedApk.signatureVerified)
+        addLog(
+          `已生成补丁 APK：${patchedApkPath}（注入 ${patchedApk.fileCount} 个 .rpy，替换 ${patchedApk.replacedCount} 个旧文件，镜像 ${patchedApk.mirroredRenpyCount || 0} 个 Ren'Py 编译资源到 English/None）`,
+          "success",
+        )
+        addLog(
+          signatureVerified
+            ? "已自动完成 APK 签名并通过校验，可直接尝试安装。"
+            : "APK 已签名，但签名校验未通过，请不要安装。",
+          signatureVerified ? "success" : "error",
+        )
+      } catch (e: any) {
+        hasError = true
+        addLog(`写入补丁 APK 失败: ${e.message}`, "error")
+      }
+    }
+
     setTranslating(false)
     setResult({
       success: !hasError,
       count: totalTranslated,
+      ...(patchedApkPath ? { patchedApkUri, patchedApkPath, patchedApkSigned, signatureVerified } : {}),
       ...(hasError ? { error: "部分文件处理失败，请查看日志" } : {}),
     })
+  }
+
+
+  const handleUninstallAndInstall = async () => {
+    const pkg = apkPackageName
+    const uri = result?.patchedApkUri || (result?.patchedApkPath ? "file://" + result.patchedApkPath : "")
+    if (!pkg || !uri) {
+      addLog("缺少包名或补丁 APK 路径", "error")
+      return
+    }
+    setInstallingPatch(true)
+    try {
+      addLog("正在打开系统卸载器，确认卸载后会继续安装补丁版...", "info")
+      const installResult = await FileManager.uninstallAndInstallApk({ packageName: pkg, uri })
+      if (installResult.needsPermission) {
+        addLog("请在系统页面允许本应用安装未知来源应用", "info")
+      } else if (installResult.uninstallCancelled) {
+        addLog("原版游戏仍在手机上，补丁版会因签名不同无法覆盖安装", "error")
+      } else {
+        addLog("已打开补丁版安装器", "success")
+        addLog("安装完成后建议启动游戏验证。若仍显示原语言，请清理游戏旧缓存/数据。", "info")
+      }
+    } catch (e: any) {
+      addLog("操作失败: " + e.message, "error")
+    } finally {
+      setInstallingPatch(false)
+    }
+  }
+  const handleInstallPatchedApk = async () => {
+    const uri = result?.patchedApkUri || (result?.patchedApkPath ? `file://${result.patchedApkPath}` : "")
+    if (!uri) return
+
+    setInstallingPatch(true)
+    try {
+      const installResult = await FileManager.installApk({ uri })
+      if (installResult.needsPermission) {
+        addLog("请在系统页面允许本应用安装未知来源应用，然后回来再次点击安装。", "info")
+      } else {
+        addLog("已打开系统安装器。若提示签名冲突，请先卸载原版游戏。", "success")
+        addLog("安装完成后如仍显示原语言，请点击“清理旧缓存/数据”让 Ren'Py 重新解包脚本。", "info")
+      }
+    } catch (e: any) {
+      addLog(`打开安装器失败: ${e.message}`, "error")
+    } finally {
+      setInstallingPatch(false)
+    }
+  }
+
+  const handleOpenGameSettings = async () => {
+    const pkg = apkPackageName
+    if (!pkg) {
+      addLog("缺少包名，无法打开游戏系统设置", "error")
+      return
+    }
+
+    setInstallingPatch(true)
+    try {
+      addLog("正在打开游戏系统设置。请进入“存储占用/存储”并清除数据或缓存，然后返回翻译器。", "info")
+      await FileManager.openAppSettings({ packageName: pkg })
+    } catch (e: any) {
+      addLog(`打开游戏设置失败: ${e.message}`, "error")
+    } finally {
+      setInstallingPatch(false)
+    }
+  }
+
+  const handleLaunchGame = async () => {
+    const pkg = apkPackageName
+    if (!pkg) {
+      addLog("缺少包名，无法启动游戏", "error")
+      return
+    }
+
+    setInstallingPatch(true)
+    try {
+      addLog("正在启动补丁版游戏，请选择原语言入口验证目标语言是否生效。", "info")
+      await FileManager.launchApp({ packageName: pkg })
+    } catch (e: any) {
+      addLog(`启动游戏失败: ${e.message}`, "error")
+    } finally {
+      setInstallingPatch(false)
+    }
   }
 
   // 按类型分组统计
@@ -215,6 +401,49 @@ const App: React.FC = () => {
       groups[t] = (groups[t] || 0) + 1
     }
     return groups
+  }
+
+  function hasExistingRenPyLanguagePack(entries: ApkEntry[], language: string): boolean {
+    const renpyLanguage = getRenPyLanguageName(language)
+    return entries.some((entry) => {
+      const normalizedName = entry.name.replace(/\\/g, "/").toLowerCase()
+      return normalizedName.includes(`/x-tl/x-${renpyLanguage.toLowerCase()}/`) ||
+        normalizedName.includes(`/tl/${renpyLanguage.toLowerCase()}/`)
+    })
+  }
+
+  function formatDuration(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`
+
+    const minutes = Math.floor(seconds / 60)
+    const restSeconds = seconds % 60
+    return restSeconds > 0 ? `${minutes}m${restSeconds}s` : `${minutes}m`
+  }
+
+  function buildPatchedApkName(name: string): string {
+    const decodedName = decodeURIComponent(name || "translated.apk")
+    const cleanedName = decodedName.split(/[\\/]/).pop() || "translated.apk"
+    const baseName = cleanedName.replace(/\.apk$/i, "") || "translated"
+    return `${baseName}-patched-signed.apk`
+  }
+
+  async function writeOutputFile(outputPath: string, content: string): Promise<void> {
+    const parts = outputPath.split("/")
+    const fileName = parts.at(-1) || "translation.rpy"
+    let currentDirUri = outputDirUri
+
+    for (let index = 0; index < parts.length - 1; index++) {
+      try {
+        const result = await FileManager.createDirectory({ dirUri: currentDirUri, dirName: parts[index] })
+        if (result.success && result.uri) currentDirUri = result.uri
+      } catch (_) {}
+    }
+
+    await FileManager.writeFileToDir({
+      dirUri: currentDirUri,
+      fileName,
+      content,
+    })
   }
 
   return (
@@ -301,7 +530,7 @@ const App: React.FC = () => {
                   />
                 </div>
 
-                <button onClick={handleTranslate} disabled={translating || !apiKey}
+                <button onClick={handleTranslate} disabled={translating || (!apiKey && !canMirrorExistingRenpyPack)}
                   className="w-full py-3 bg-blue-500 text-white rounded-xl text-sm font-medium
                     hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                   {translating ? "翻译中..." : "开始翻译"}
@@ -312,7 +541,13 @@ const App: React.FC = () => {
                     current={progress.current} total={progress.total}
                     logs={logs}
                     status={translating ? "translating" : result ? "done" : "idle"}
-
+                    result={result}
+                    onInstallPatchedApk={handleInstallPatchedApk}
+                    onUninstallAndInstall={handleUninstallAndInstall}
+                    onOpenGameSettings={handleOpenGameSettings}
+                    onLaunchGame={handleLaunchGame}
+                    apkPackageName={apkPackageName}
+                    installingPatch={installingPatch}
                   />
                 )}
               </>

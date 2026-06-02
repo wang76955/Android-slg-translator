@@ -75,4 +75,29 @@ describe("source language filtering", () => {
 
     expect(texts.map((item) => item.text)).toEqual([speakerName, dialogue, optionText])
   })
+
+  it("extracts clean strings from native RPYC string lines", () => {
+    const texts = extractTextsFromRpyc(
+      [
+        "RPYC_STRING\tassets/x-game/x-dialogue/x-episode1.rpyc",
+        "RPYC_STRING\treny.ast.Say",
+        "RPYC_STRING\tWhy the mystery? You mean me?",
+        "RPYC_STRING\tmc_name",
+      ].join("\n"),
+      "",
+      "en",
+    )
+
+    expect(texts.map((item) => item.text)).toEqual(["Why the mystery? You mean me?"])
+  })
+
+  it("keeps English common choices but skips identifiers", () => {
+    const texts = extractTextsFromRpyc(
+      `renpy.ast.Menu "Continue" "jump_label" renpy.ast.Say "unknown" "One moment. Almost done."`,
+      "",
+      "en",
+    )
+
+    expect(texts.map((item) => item.text)).toEqual(["Continue", "One moment. Almost done."])
+  })
 })

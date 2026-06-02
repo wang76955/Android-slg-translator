@@ -39,4 +39,29 @@ describe("APK translatable entry filtering", () => {
         "res/layout/main.xml",
       ])
   })
+
+  it("keeps only matching Ren'Py translation dirs for Chinese source", () => {
+    const entries = [
+      entry("assets/x-game/x-dialogue/x-episode1.rpyc", "rpyc"),
+      entry("assets/x-game/x-tl/x-schinese/x-dialogue/x-episode1.rpyc", "rpyc"),
+      entry("assets/x-game/x-tl/x-japanese/x-dialogue/x-episode1.rpyc", "rpyc"),
+      entry("assets/x-game/x-tl/x-indonesian/x-dialogue/x-episode1.rpyc", "rpyc"),
+    ]
+
+    expect(filterTranslatableApkEntries(entries, false, "zh").map((item) => item.name))
+      .toEqual([
+        "assets/x-game/x-dialogue/x-episode1.rpyc",
+        "assets/x-game/x-tl/x-schinese/x-dialogue/x-episode1.rpyc",
+      ])
+  })
+
+  it("keeps only matching Ren'Py translation dirs for Japanese source", () => {
+    const entries = [
+      entry("assets/x-game/x-tl/x-schinese/x-dialogue/x-episode1.rpyc", "rpyc"),
+      entry("assets/x-game/x-tl/x-japanese/x-dialogue/x-episode1.rpyc", "rpyc"),
+    ]
+
+    expect(filterTranslatableApkEntries(entries, false, "ja").map((item) => item.name))
+      .toEqual(["assets/x-game/x-tl/x-japanese/x-dialogue/x-episode1.rpyc"])
+  })
 })

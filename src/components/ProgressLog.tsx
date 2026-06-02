@@ -11,10 +11,34 @@ interface Props {
   total: number
   logs: LogEntry[]
   status: "idle" | "translating" | "done" | "error"
-  result: { success: boolean; count: number; error?: string } | null
+  result: {
+    success: boolean
+    count: number
+    error?: string
+    patchedApkPath?: string
+    patchedApkSigned?: boolean
+  } | null
+  onInstallPatchedApk?: () => void
+  installingPatch?: boolean
+  onUninstallAndInstall?: () => void
+  onOpenGameSettings?: () => void
+  onLaunchGame?: () => void
+  apkPackageName?: string
 }
 
-const ProgressLog: React.FC<Props> = ({ current, total, logs, status, result }) => {
+const ProgressLog: React.FC<Props> = ({
+  current,
+  total,
+  logs,
+  status,
+  result,
+  onInstallPatchedApk,
+  installingPatch,
+  onUninstallAndInstall,
+  onOpenGameSettings,
+  onLaunchGame,
+  apkPackageName,
+}) => {
   const progressPct = total > 0 ? Math.round((current / total) * 100) : 0
   const logEndRef = useRef<HTMLDivElement>(null)
 
@@ -62,8 +86,62 @@ const ProgressLog: React.FC<Props> = ({ current, total, logs, status, result }) 
         <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
           <p className="text-sm text-green-700 font-medium">翻译完成</p>
           <p className="text-xs text-green-600 mt-1">
-            共翻译 {result.count} 条文本，原始文件已备份为 .bak
+            共翻译 {result.count} 条文本{result.patchedApkPath ? "，已生成补丁 APK" : "，已导出翻译文件"}
           </p>
+          {result.patchedApkPath && (
+            <>
+              <p className="text-xs text-green-600 mt-1 break-all">
+                {result.patchedApkPath}{result.patchedApkSigned ? "（已签名）" : ""}
+              </p>
+              {onInstallPatchedApk && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <button
+                    onClick={onInstallPatchedApk}
+                    disabled={installingPatch}
+                    className="py-2.5 bg-green-500 text-white rounded-xl text-sm font-medium
+                      hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    {installingPatch ? "打开安装器..." : "安装补丁版"}
+                  </button>
+                  {onUninstallAndInstall && apkPackageName && (
+                    <button
+                      onClick={onUninstallAndInstall}
+                      disabled={installingPatch}
+                      className="py-2.5 bg-red-500 text-white rounded-xl text-sm font-medium
+                        hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      {installingPatch ? "处理中..." : "卸载原版+安装补丁"}
+                    </button>
+                  )}
+                </div>
+              )}
+              {apkPackageName && (onOpenGameSettings || onLaunchGame) && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    安装完成后如果游戏仍显示原语言，通常是 Ren’Py 旧缓存未刷新。请先清理游戏数据/缓存，再启动验证。
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    {onOpenGameSettings && (
+                      <button
+                        onClick={onOpenGameSettings}
+                        disabled={installingPatch}
+                        className="py-2.5 bg-amber-500 text-white rounded-xl text-sm font-medium
+                          hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                        清理旧缓存/数据
+                      </button>
+                    )}
+                    {onLaunchGame && (
+                      <button
+                        onClick={onLaunchGame}
+                        disabled={installingPatch}
+                        className="py-2.5 bg-blue-500 text-white rounded-xl text-sm font-medium
+                          hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                        启动游戏验证
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
       {result && !result.success && (
