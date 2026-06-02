@@ -96,8 +96,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 A signed APK is published on GitHub Releases and can be installed directly:
 
-- [Releases page](https://github.com/wang76955/Android-slg-translator/releases)
-- [Current signed APK](https://github.com/wang76955/Android-slg-translator/releases/download/android-release-2026-06-02/app-release-signed.apk)
+- [Releases page](https://github.com/wang76955/Android-slg-translator/releases/latest)
+- [Current signed APK](https://github.com/wang76955/Android-slg-translator/releases/latest/download/slg-translator-android.apk)
 
 If Android asks for permission to install from unknown sources, allow it first. If an older version is already installed and the upgrade fails, uninstall the old app before installing the patch build.
 
