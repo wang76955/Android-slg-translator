@@ -92,6 +92,15 @@ cd android
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## GitHub 发布页
+
+正式签名 APK 已发布在 GitHub Releases，可直接下载安装：
+
+- [Releases 页面](https://github.com/wang76955/Android-slg-translator/releases)
+- [当前正式签名 APK](https://github.com/wang76955/Android-slg-translator/releases/download/android-release-2026-06-02/app-release-signed.apk)
+
+安装时如果系统提示未知来源，请先允许安装；如果是旧版本升级失败，先卸载旧版再装补丁版。
+
 ## 测试
 
 仓库里包含针对以下行为的测试：

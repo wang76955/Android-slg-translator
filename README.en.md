@@ -92,6 +92,15 @@ Debug APK output:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## GitHub Release
+
+A signed APK is published on GitHub Releases and can be installed directly:
+
+- [Releases page](https://github.com/wang76955/Android-slg-translator/releases)
+- [Current signed APK](https://github.com/wang76955/Android-slg-translator/releases/download/android-release-2026-06-02/app-release-signed.apk)
+
+If Android asks for permission to install from unknown sources, allow it first. If an older version is already installed and the upgrade fails, uninstall the old app before installing the patch build.
+
 ## Tests
 
 The repository includes focused tests for:
