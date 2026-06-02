@@ -52,7 +52,7 @@ const App: React.FC = () => {
   const [outputDirUri, setOutputDirUri] = useState<string | null>(null)
 
   // 翻译配置
-  const [sourceLang, setSourceLang] = useState("en")
+  const [sourceLang, setSourceLang] = useState("auto")
   const [targetLang, setTargetLang] = useState("zh")
   const [providerId, setProviderId] = useState("openai")
   const [selectedModel, setSelectedModel] = useState(AI_PROVIDERS[0].models[0].id)

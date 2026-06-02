@@ -14,6 +14,8 @@ const save = "\u4fdd\u5b58"
 const hello = "\u4f60\u597d"
 const goodbye = "\u518d\u89c1"
 const playerName = "\u73a9\u5bb6"
+const translatedSave = "\u4fdd\u5b58"
+const translatedEpisode = "\u7b2c 2 \u96c6"
 
 describe("translation batching efficiency", () => {
   it("deduplicates repeated source text and keeps duplicate key paths", () => {
@@ -67,7 +69,25 @@ describe("translation batching efficiency", () => {
     })
 
     expect(result.successCount).toBe(2)
-    expect(result.translations.get("save")).toBe("保存")
-    expect(result.translations.get("episode")).toBe("第 2 集")
+    expect(result.translations.get("save")).toBe(translatedSave)
+    expect(result.translations.get("episode")).toBe(translatedEpisode)
+  })
+
+  it("uses local phrase rules when source language is auto", async () => {
+    const result = await translateBatch({
+      texts: [
+        { keyPath: "save", text: "Save" },
+        { keyPath: "episode", text: "Episode 2" },
+      ],
+      sourceLang: "auto",
+      targetLang: "zh",
+      baseURL: "",
+      apiKey: "",
+      model: "local-test",
+    })
+
+    expect(result.successCount).toBe(2)
+    expect(result.translations.get("save")).toBe(translatedSave)
+    expect(result.translations.get("episode")).toBe(translatedEpisode)
   })
 })

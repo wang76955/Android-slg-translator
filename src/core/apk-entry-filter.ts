@@ -45,7 +45,7 @@ function isAndroidUiXml(entry: ApkEntry, normalizedName: string): boolean {
 function isSourceLanguageTranslationDir(normalizedName: string, sourceLang?: string): boolean {
   const languageDir = getRenpyTranslationLanguageDir(normalizedName)
   if (!languageDir) return true
-  if (!sourceLang) return true
+  if (!sourceLang || sourceLang === "auto") return true
 
   return getSourceLanguageAliases(sourceLang).has(normalizeLanguageName(languageDir))
 }

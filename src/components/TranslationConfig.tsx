@@ -17,6 +17,7 @@ interface Props {
 }
 
 const LANGUAGES = [
+  { value: "auto", label: "自动识别" },
   { value: "zh", label: "中文" },
   { value: "en", label: "English" },
   { value: "ja", label: "日本語" },

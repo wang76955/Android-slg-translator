@@ -52,25 +52,40 @@ const EXACT_PHRASES: Record<string, Record<string, string>> = {
   },
 }
 
+const ALL_SOURCE_LANGS = Array.from(new Set(
+  Object.keys(EXACT_PHRASES).map((key) => key.split(">")[0]),
+))
+
 export function getLocalTranslation(
   text: string,
   sourceLang: string,
   targetLang: string,
 ): string | null {
   const normalized = normalizePhrase(text)
-  const exact = EXACT_PHRASES[`${sourceLang}>${targetLang}`]?.[normalized]
-  if (exact) return preserveOuterWhitespace(text, exact)
+  for (const candidateSourceLang of getCandidateSourceLangs(sourceLang)) {
+    const exact = EXACT_PHRASES[`${candidateSourceLang}>${targetLang}`]?.[normalized]
+    if (exact) return preserveOuterWhitespace(text, exact)
 
-  const patternTranslation = translatePattern(normalized, sourceLang, targetLang)
-  return patternTranslation ? preserveOuterWhitespace(text, patternTranslation) : null
+    const patternTranslation = translatePattern(normalized, candidateSourceLang, targetLang)
+    if (patternTranslation) return preserveOuterWhitespace(text, patternTranslation)
+  }
+
+  return null
 }
 
 export function isKnownLocalPhrase(text: string, sourceLang?: string): boolean {
   if (!sourceLang) return false
   const normalized = normalizePhrase(text)
-  return Object.keys(EXACT_PHRASES)
-    .filter((key) => key.startsWith(`${sourceLang}>`))
-    .some((key) => Boolean(EXACT_PHRASES[key][normalized]) || Boolean(translatePattern(normalized, sourceLang, key.split(">")[1])))
+  return getCandidateSourceLangs(sourceLang).some((candidateSourceLang) =>
+    Object.keys(EXACT_PHRASES)
+      .filter((key) => key.startsWith(`${candidateSourceLang}>`))
+      .some((key) => Boolean(EXACT_PHRASES[key][normalized]) || Boolean(translatePattern(normalized, candidateSourceLang, key.split(">")[1]))),
+  )
+}
+
+function getCandidateSourceLangs(sourceLang: string): string[] {
+  if (sourceLang === "auto") return ALL_SOURCE_LANGS
+  return [sourceLang]
 }
 
 function translatePattern(normalized: string, sourceLang: string, targetLang: string): string | null {
