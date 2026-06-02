@@ -1,51 +1,45 @@
 # SLG Text Translator - Android
 
-Select a game APK on your Android phone, scan translatable text, send it to an AI model, and save the translated output to a local directory.
+Select a game APK on your Android device, scan Ren'Py and selected Android UI text, translate it with AI, and generate a patched APK. This project is meant for SLG and Ren'Py localization, back-translation, and reusable translation packs.
 
-## Current Strategy
+## What It Does
 
-- Ren'Py text is translated by default
-- Included by default: speaker names, dialogue lines, and menu choices
-- Excluded by default: image names, variables, paths, debug text, and internal config text
-- XML is off by default
-- Android UI XML can be enabled manually with the `Translate Android UI XML` toggle
+- `APK picker`: opens game APKs through the system file picker
+- `Ren'Py first`: prioritizes visible in-game text, including speaker names, dialogue, and menu choices
+- `Optional XML`: can include `res/values/*.xml` and `res/layout/*.xml`
+- `Text deduplication`: translates repeated source text once to reduce token usage
+- `Local cache`: reuses translations for the same language pair and model
+- `Placeholder protection`: preserves formatting tokens such as `{color}`, `[name]`, `%s`, and `${name}`
+- `Patched APK output`: builds and signs a patched APK after translation
+- `Install flow`: supports the system installer, uninstall-then-install, and launch verification
+- `Cache guidance`: if the patched game still shows the old language, the app can jump to the target game's system settings so you can clear cache or data
+- `No root required`: works on ordinary Android devices
 
-## Features
-
-- **APK picker**: choose a game APK with the system file picker
-- **Ren'Py-first extraction**: decompresses `.rpyc` RPC2 files and focuses on visible game text
-- **Optional XML translation**: can include Android UI strings from `res/values/*.xml` and `res/layout/*.xml`
-- **AI translation**: supports OpenAI, DeepSeek, and OpenAI-compatible APIs
-- **Deduplication**: identical source text is translated once
-- **Local cache**: reuses translations for the same language pair and model
-- **Placeholder protection**: preserves Ren'Py and formatting tokens such as `{color}`, `[name]`, `%s`, and `${name}`
-- **Batch concurrency**: processes files in parallel with compact batch requests
-- **Directory preservation**: keeps the original APK folder structure
-- **No root required**
-
-## App Flow
+## Workflow
 
 1. Install the APK and open the app
 2. Grant file access permission
-3. Tap `Select APK File`
-4. The app scans and lists currently translatable files
-5. If needed, enable `Translate Android UI XML`
-6. Configure provider, model, and API key
-7. Tap `Start Translation`
+3. Select a game APK
+4. Choose source language, target language, provider, model, and API key
+5. Enable `Translate Android UI XML` only if you need UI strings
+6. Tap `Start Translation`
+7. Install the patched APK when translation finishes
+8. If the game still shows the original language, clear the target app's cache or data and launch it again for verification
 
 ## What Gets Translated by Default
 
 - Speaker names and dialogue from Ren'Py `Say` nodes
 - Choice text from Ren'Py `Menu` nodes
-- Dialogue and menu choices from Ren'Py source `.rpy` files
+- Dialogue and menu text from Ren'Py source `.rpy` files
+- Android UI text if the XML option is enabled
 
 ## What Is Skipped by Default
 
 - Shared engine files under `x-renpy/x-common`
 - Binary assets such as images, fonts, and audio
-- Paths, variable names, hashes, and debug strings
-- Android `AndroidManifest.xml`
-- Regular JSON / CSV / XML config files
+- Paths, variable names, hashes, and debug text
+- `AndroidManifest.xml`
+- Ordinary JSON / CSV / XML configuration files
 
 ## Optional XML Mode
 
@@ -59,6 +53,19 @@ Still excluded:
 - `AndroidManifest.xml`
 - non-UI XML configuration files
 
+## When the Patch Does Not Take Effect
+
+Some Ren'Py games keep extracted script cache or app data after the patch is installed, so the game still opens in the original language. This is not normal RAM usage. It is persistent app data or cache.
+
+Recommended order:
+
+1. Use `Uninstall original + install patch`
+2. If the original language still appears, tap `Clear old cache/data`
+3. Clear storage or cache from the target game's Android settings page
+4. Return to the translator and tap `Launch game verification`
+
+Normal Android apps cannot silently clear another app's data, so the app guides you to the system settings page instead.
+
 ## Output Location
 
 Translated files are written to:
@@ -67,7 +74,7 @@ Translated files are written to:
 Android/data/com.slgtranslator.app/files/SLG-Translator-Output/
 ```
 
-Each file generates a `.translated` copy while keeping the original directory layout.
+The patched APK is also generated inside the output flow and keeps the original folder structure intact.
 
 ## Build
 
@@ -79,19 +86,28 @@ cd android
 ./gradlew assembleDebug
 ```
 
-APK output:
+Debug APK output:
 
 ```text
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Stack
+## Tests
 
-- React + TypeScript
-- Tailwind CSS
-- Capacitor
-- Kotlin
-- OpenAI SDK
+The repository includes focused tests for:
+
+- Ren'Py text filtering
+- optional XML filtering
+- translation deduplication and compact requests
+- placeholder protection and restoration
+- Ren'Py patch APK packaging
+- translation cache persistence
+
+Run:
+
+```bash
+npm test
+```
 
 ## Project Layout
 
@@ -107,20 +123,13 @@ src/
 android/
 ```
 
-## Verification
+## Stack
 
-The repo now includes focused tests for:
-
-- Ren'Py text filtering
-- optional XML filtering
-- translation deduplication and compact payloads
-- placeholder protection and restoration
-
-Run:
-
-```bash
-npm test
-```
+- React + TypeScript
+- Tailwind CSS
+- Capacitor
+- Kotlin
+- OpenAI SDK
 
 ## License
 
