@@ -125,6 +125,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
             "openSettings",
             "setReactInputValue",
             "我的",
+            'input.id="settingsApiKey"',
+            'label.htmlFor="settingsApiKey"',
         ):
             self.assertIn(token, js)
         self.assertIn("workshop-settings-card", css)
