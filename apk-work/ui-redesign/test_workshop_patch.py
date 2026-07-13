@@ -305,6 +305,46 @@ check(bo===!1,`preserved v2 is not marked dirty`);
             Path(module.__file__).read_text("utf-8"),
         )
 
+    def test_network_failures_stop_batches_without_recursive_splitting(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        for token in (
+            'function isNetworkFailure(e)',
+            'function providerLabel(e)',
+            'maxRetries:1',
+            'if(isNetworkFailure(e))throw e',
+            'b=y.length',
+            '无法连接 ${providerLabel(i)}',
+            '前往“我的”切换供应商',
+        ):
+            self.assertIn(token, js)
+        self.assertNotIn('maxRetries:2', js)
+        self.assertIn('let c=Math.ceil(n.length/2)', js)
+
+        helpers_start = js.index('function isNetworkFailure(e)')
+        helpers_end = js.index('async function Lo(e){', helpers_start)
+        helpers = js[helpers_start:helpers_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+check(isNetworkFailure(new Error(`net::ERR_CONNECTION_TIMED_OUT`)),`browser timeout classification`);
+check(isNetworkFailure(new Error(`Connection error`)),`SDK connection classification`);
+check(!isNetworkFailure(new Error(`Invalid translation JSON`)),`content error classification`);
+check(providerLabel(`https://api.deepseek.com/v1`)===`DeepSeek`,`DeepSeek label`);
+check(providerLabel(`https://api.openai.com/v1`)===`OpenAI`,`OpenAI label`);
+check(providerLabel(`https://example.invalid/v1`)===`自定义接口`,`custom label`);
+'''
+        result = subprocess.run(
+            ["node", "-e", helpers + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_long_running_phases_are_not_reported_as_directory_scanning(self):
         module = self.load_patch()
         js, css = module.patch_assets(

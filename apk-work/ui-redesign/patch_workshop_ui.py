@@ -292,9 +292,50 @@ async function wo()'''
     return js.replace(old_lookup, new_lookup, 1)
 
 
+def patch_translation_network(js: str) -> str:
+    helpers_anchor = 'async function Lo(e){'
+    helpers = r'''function isNetworkFailure(e){const t=String(e?.message||e||``);return/ERR_|network|fetch failed|failed to fetch|timed?\s*out|timeout|dns|offline|connection|ENOTFOUND|ECONNREFUSED/i.test(t)}
+function providerLabel(e){return/deepseek/i.test(e)?`DeepSeek`:/openai/i.test(e)?`OpenAI`:`自定义接口`}
+async function Lo(e){'''
+    if js.count(helpers_anchor) != 1:
+        raise ValueError("Translation coordinator signature not found")
+    js = js.replace(helpers_anchor, helpers, 1)
+
+    if js.count('timeout:3e4,maxRetries:2') != 1:
+        raise ValueError("OpenAI retry signature not found")
+    js = js.replace('timeout:3e4,maxRetries:2', 'timeout:3e4,maxRetries:1', 1)
+
+    old_worker_catch = 'catch{v=!0,ee+=1}await wo(),x+=1'
+    new_worker_catch = (
+        'catch(e){v=!0,ee+=1,isNetworkFailure(e)&&(N=`无法连接 ${providerLabel(i)}。'
+        '请检查网络，或前往“我的”切换供应商。`,b=y.length)}await wo(),x+=1'
+    )
+    state_anchor = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,y='
+    state_replacement = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,N="",y='
+    if js.count(state_anchor) != 1 or js.count(old_worker_catch) != 1:
+        raise ValueError("Translation worker signature not found")
+    js = js.replace(state_anchor, state_replacement, 1)
+    js = js.replace(old_worker_catch, new_worker_catch, 1)
+
+    old_return = '...v?{error:`Translated ${d.size}/${t.length} items; some batches failed`}:{}'
+    new_return = '...N?{error:N}:v?{error:`Translated ${d.size}/${t.length} items; some batches failed`}:{}'
+    if js.count(old_return) != 1:
+        raise ValueError("Translation result signature not found")
+    js = js.replace(old_return, new_return, 1)
+
+    old_split = 'async function Bo(e,t,n,r,i,a,o,s=0){try{return{translations:await Vo(e,t,n,r,i,a,o),splitCount:0,failedCount:0}}catch{'
+    new_split = 'async function Bo(e,t,n,r,i,a,o,s=0){try{return{translations:await Vo(e,t,n,r,i,a,o),splitCount:0,failedCount:0}}catch(e){if(isNetworkFailure(e))throw e;'
+    if js.count(old_split) != 1:
+        raise ValueError("Recursive batch signature not found")
+    return js.replace(old_split, new_split, 1)
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
-    return patch_translation_cache(patch_scan_flow(js)) + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
+    patched = patch_scan_flow(js)
+    patched = patch_translation_cache(patched)
+    patched = patch_translation_network(patched)
+    return patched + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:
