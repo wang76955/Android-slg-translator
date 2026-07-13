@@ -46,3 +46,32 @@
 - [ ] Verify zip alignment and v2/v3 signatures.
 - [ ] Install with ADB and reproduce the real selection/start flow.
 - [ ] Confirm the visible shell leaves `scanning` after directory inspection and enters `translating` after start.
+
+### Task 4: Mirror live translation logs into the task shell
+
+**Files:**
+- Modify: `apk-work/ui-redesign/test_workshop_patch.py`
+- Modify: `apk-work/ui-redesign/patch_workshop_ui.py`
+
+**Interfaces:**
+- Consumes: the existing React `<details>` log panel and its `.font-mono` log rows.
+- Produces: `readProgressLog() -> {raw: string, latest: string}` and persistent `detailsOpen` state.
+
+- [ ] Add a failing contract test requiring `readProgressLog()`, the last 40 rows, latest-line rendering, preserved expansion, and automatic scroll.
+- [ ] Run `python -m unittest apk-work/ui-redesign/test_workshop_patch.py -v` and confirm failure because the visible shell currently uses static text.
+- [ ] Extract logs with:
+
+```javascript
+function readProgressLog(){
+  const source=[...document.querySelectorAll("#root details")]
+    .find(el=>!el.closest(".workshop-task-shell")&&el.querySelector('[class*="font-mono"]'));
+  const panel=source?.querySelector('[class*="font-mono"]');
+  const lines=[...(panel?.children||[])].slice(-40)
+    .map(row=>(row.innerText||row.textContent||"").trim()).filter(Boolean);
+  return{raw:lines.join("\n"),latest:lines.at(-1)||""};
+}
+```
+
+- [ ] Include `raw` and `latest` in `translating`, `patching`, and `completed` snapshots so `snapshotKey` refreshes when logs change.
+- [ ] Render `payload.latest` below progress, pass live logs to `detailToggle`, preserve `detailsOpen`, and scroll the open body to `scrollHeight` after rerender.
+- [ ] Run the focused and full unit suites, rebuild the APK, verify signatures, install with `adb install -r`, and inspect the installed WebView during a real translation.

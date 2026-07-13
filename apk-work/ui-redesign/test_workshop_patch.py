@@ -253,6 +253,30 @@ class WorkshopPatchContractTest(unittest.TestCase):
                 f'workshop-task-shell[data-workshop-state="{state}"]', css
             )
 
+    def test_translation_logs_are_mirrored_into_the_visible_shell(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        self.assertIn('function readProgressLog()', js)
+        self.assertIn('querySelectorAll("#root details")', js)
+        self.assertIn('querySelector(\'[class*="font-mono"]\')', js)
+        self.assertIn('.slice(-40)', js)
+        self.assertIn(
+            'return{raw:lines.join("\\n"),latest:lines.at(-1)||""}', js
+        )
+        self.assertGreaterEqual(js.count('raw:log.raw,latest:log.latest'), 3)
+        self.assertIn('workshop-live-line', js)
+        self.assertIn('workshop-live-line', css)
+        self.assertIn('detailsOpen=false', js)
+        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0;', js)
+        self.assertIn('body.dataset.open=String(detailsOpen)', js)
+        self.assertIn('body.scrollTop=body.scrollHeight', js)
+        compact_css = ''.join(css.split())
+        self.assertIn('max-height:240px', compact_css)
+        self.assertIn('overflow:auto', compact_css)
+
 
 if __name__ == "__main__":
     unittest.main()
