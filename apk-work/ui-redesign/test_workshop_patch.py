@@ -145,8 +145,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
             '!el.closest(".workshop-settings-shell")',
             'function closeSettings(){settingsOpen=false;manualIdle=false',
             'state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
-            'const target=button===startButton?(findButton("开始翻译")||button):button',
             'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
+            'const isInstall=button===installButton||button?.textContent?.includes("安装补丁版")',
+            'isInstall?(findButton("安装补丁版")||button):button',
             'if(isStart&&target?.disabled)',
         ):
             self.assertIn(token, js)
@@ -243,6 +244,51 @@ class WorkshopPatchContractTest(unittest.TestCase):
             self.assertIn(token, js)
         self.assertIn('min-height:48px', ''.join(css.split()))
         self.assertIn('.workshop-settings-error', css)
+
+    def test_install_bridge_refreshes_stale_react_button(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("function triggerReactButton(button)")
+        end = js.index("function sourceText()", start)
+        trigger_runtime = js[start:end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+let dispatched=[];
+globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
+globalThis.window=globalThis;
+let manualIdle=true;
+const startButton={textContent:`start`,disabled:false,dispatchEvent(){dispatched.push(`start`)}};
+const staleInstall={textContent:`安装补丁版`,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
+const freshInstall={textContent:`安装补丁版`,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
+let installButton=staleInstall;
+function findButton(label){return label===`安装补丁版`?freshInstall:null}
+function readTaskSnapshot(){return{state:`completed`}}
+function setWorkshopState(){throw new Error(`unexpected state change`)}
+triggerReactButton(staleInstall);
+check(manualIdle===false,`manual idle reset`);
+check(dispatched.length===1&&dispatched[0]===`fresh`,`fresh install target`);
+'''
+        result = subprocess.run(
+            ["node", "-e", trigger_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_completed_shell_only_offers_install_for_a_current_react_action(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn('installAvailable:!!installButton?.isConnected', js)
+        self.assertIn(
+            'if(payload.installAvailable)body.append(actionButton("安装补丁版",()=>triggerReactButton(installButton)))',
+            js,
+        )
+        self.assertIn('s.installAvailable?"install":""', js)
 
     def test_translation_cache_is_reused_across_models(self):
         module = self.load_patch()

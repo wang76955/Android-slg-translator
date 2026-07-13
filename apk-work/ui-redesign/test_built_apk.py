@@ -28,6 +28,15 @@ class BuiltApkTest(unittest.TestCase):
             self.assertIn(b"FastApkScanner", archive.read("classes7.dex"))
             self.assertIn("t.packageName", js)
             self.assertIn("workshop-scan-elapsed", js)
+            for token in (
+                "slg-workshop-settings-v1",
+                "settingsProvider",
+                "settingsCustomBaseURL",
+                "function cacheV2Key(e,t){return _o+`v2|`+cacheIdentity(e,t)}",
+                "function isNetworkFailure(e)",
+                "maxRetries:1",
+            ):
+                self.assertIn(token, js)
 
 
 if __name__ == "__main__":
