@@ -116,6 +116,19 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('const snap=readTaskSnapshot()', js)
         self.assertIn('setWorkshopState("ready",{...snap,apiRequired:true})', js)
         self.assertIn('正在处理脚本', js)
+        for token in (
+            "workshop-settings-shell",
+            "workshop-settings-input",
+            "workshop-settings-save",
+            "API Key",
+            "我的设置",
+            "openSettings",
+            "setReactInputValue",
+            "我的",
+        ):
+            self.assertIn(token, js)
+        self.assertIn("workshop-settings-card", css)
+        self.assertIn("workshop-settings-input", css)
         self.assertIn('function retryTask(payload)', js)
         self.assertIn('triggerReactButton(startButton||sourceButton)', js)
         self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)
