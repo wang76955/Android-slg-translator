@@ -53,6 +53,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
             "workshop-state-idle",
             "workshop-state-scanning",
             "workshop-state-ready",
+            "workshop-state-translating",
+            "workshop-state-patching",
+            "workshop-state-completed",
             "workshop-state-failed",
             "setWorkshopState",
             "处理详情",
@@ -84,6 +87,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn("workshop-task-shell", css)
         self.assertIn('workshop-task-shell[data-workshop-state="scanning"]', css)
         self.assertIn('workshop-task-shell[data-workshop-state="ready"]', css)
+        self.assertIn('workshop-task-shell[data-workshop-state="translating"]', css)
+        self.assertIn('workshop-task-shell[data-workshop-state="patching"]', css)
+        self.assertIn('workshop-task-shell[data-workshop-state="completed"]', css)
         self.assertIn('workshop-task-shell[data-workshop-state="failed"]', css)
         self.assertIn(
             '.workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav',
@@ -137,7 +143,7 @@ class WorkshopPatchContractTest(unittest.TestCase):
             'applyApiKeyToReact()',
             '!el.closest(".workshop-settings-shell")',
             'function closeSettings(){settingsOpen=false;manualIdle=false',
-            'state==="scanning"?"处理中":state==="ready"?"已就绪":state==="failed"?"失败":""',
+            'state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
             'const target=button===startButton?(findButton("开始翻译")||button):button',
             'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
             'if(isStart&&target?.disabled)',
@@ -208,6 +214,44 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('newMutationObserver(schedule)', compact_js)
         self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', compact_js)
         self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', compact_js)
+
+    def test_long_running_phases_are_not_reported_as_directory_scanning(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        self.assertIn(
+            'if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating"',
+            js,
+        )
+        self.assertNotIn(
+            'if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"scanning"',
+            js,
+        )
+        self.assertIn(
+            'if(/正在生成 Ren\'Py 补丁 APK/.test(text))return{state:"patching"',
+            js,
+        )
+        self.assertIn(
+            'if(/翻译完成/.test(text))return{state:"completed"',
+            js,
+        )
+        self.assertIn('const progress=text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)
+        self.assertIn('if(state==="translating")', js)
+        self.assertIn('正在翻译文本', js)
+        self.assertIn('if(state==="patching")', js)
+        self.assertIn('正在生成补丁 APK', js)
+        self.assertIn('if(state==="completed")', js)
+        self.assertIn('补丁 APK 已生成', js)
+        self.assertIn('actionButton("安装补丁版"', js)
+        self.assertIn('state==="scanning"?startScanClock():stopScanClock()', js)
+        self.assertIn('characterData:true', ''.join(js.split()))
+        for state in ("translating", "patching", "completed"):
+            self.assertIn(f'workshop-state-{state}', js)
+            self.assertIn(
+                f'workshop-task-shell[data-workshop-state="{state}"]', css
+            )
 
 
 if __name__ == "__main__":
