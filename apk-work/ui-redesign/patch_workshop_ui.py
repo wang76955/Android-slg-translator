@@ -13,8 +13,8 @@ WORKSHOP_COPY = (
 )
 
 WORKSHOP_CSS = r"""
-:root{--workshop-bg:oklch(1 0 0);--workshop-surface:oklch(.965 .004 95);--workshop-ink:oklch(.22 .018 112);--workshop-muted:oklch(.46 .025 108);--workshop-primary:oklch(.36 .082 120);--workshop-on-primary:oklch(.98 .004 95);--workshop-accent:oklch(.84 .145 84);--workshop-on-accent:oklch(.24 .035 84);color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--workshop-bg:oklch(.11 0 0);--workshop-surface:oklch(.17 .012 112);--workshop-ink:oklch(.94 .008 95);--workshop-muted:oklch(.72 .018 105);--workshop-primary:oklch(.72 .10 120);--workshop-on-primary:oklch(.14 .025 120);--workshop-accent:oklch(.78 .13 84);--workshop-on-accent:oklch(.16 .025 84)}}
+:root{--workshop-bg:oklch(1 0 0);--workshop-surface:oklch(.965 .004 95);--workshop-ink:oklch(.22 .018 112);--workshop-muted:oklch(.46 .025 108);--workshop-primary:oklch(.36 .082 120);--workshop-on-primary:oklch(.98 .004 95);--workshop-accent:oklch(.84 .145 84);--workshop-on-accent:oklch(.24 .035 84);--workshop-error:oklch(.56 .17 28);color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--workshop-bg:oklch(.11 0 0);--workshop-surface:oklch(.17 .012 112);--workshop-ink:oklch(.94 .008 95);--workshop-muted:oklch(.72 .018 105);--workshop-primary:oklch(.72 .10 120);--workshop-on-primary:oklch(.14 .025 120);--workshop-accent:oklch(.78 .13 84);--workshop-on-accent:oklch(.16 .025 84);--workshop-error:oklch(.72 .15 28)}}
 .workshop-touch{min-width:48px;min-height:48px}
 .workshop-runtime{min-height:100dvh;padding-top:env(safe-area-inset-top);background:var(--workshop-bg);color:var(--workshop-ink)}
 .workshop-runtime>header,.workshop-runtime>nav,.workshop-runtime>footer{display:none!important}
@@ -22,6 +22,8 @@ WORKSHOP_CSS = r"""
 .workshop-hero small{display:block;font-size:13px;opacity:.8}.workshop-hero h1{margin:7px 0 18px;font-size:26px;line-height:1.18;font-weight:750;letter-spacing:-.02em}
 .workshop-runtime main{padding:16px 16px 104px!important;background:var(--workshop-bg)!important}.workshop-runtime main>div,.workshop-runtime main>section,.workshop-runtime main details{border-color:color-mix(in oklch,var(--workshop-ink) 12%,transparent)!important;background:var(--workshop-surface)!important;border-radius:18px!important;box-shadow:none!important}.workshop-runtime button[class*="bg-blue"]{min-height:48px;background:var(--workshop-primary)!important;color:var(--workshop-on-primary)!important;border-radius:16px!important}.workshop-runtime [class*="text-blue"]{color:var(--workshop-primary)!important}
 .workshop-picker-source>h2,.workshop-picker-source>button{display:none!important}
+/* Legacy hook retained for pre-task-shell markup; the task CTA uses .workshop-primary-action. */
+.workshop-start-button{position:fixed!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;bottom:84px!important;z-index:25!important;width:min(220px,calc(100vw - 48px))!important;min-height:48px!important;padding:0 22px!important;border:1px solid color-mix(in oklch,var(--workshop-primary) 46%,transparent)!important;border-radius:18px!important;background:color-mix(in oklch,var(--workshop-primary) 14%,var(--workshop-surface))!important;color:var(--workshop-primary)!important;box-shadow:0 8px 22px color-mix(in oklch,var(--workshop-ink) 12%,transparent)!important;font-weight:700!important;white-space:nowrap!important}
 .workshop-task-shell{position:relative;display:flex;flex-direction:column;gap:16px;min-height:calc(100dvh - 24px);padding:20px 16px 112px;background:var(--workshop-bg);color:var(--workshop-ink)}
 .workshop-task-topbar{display:flex;align-items:center;justify-content:space-between;min-height:48px}
 .workshop-task-topbar h1{margin:0;font-size:20px;line-height:1.25;font-weight:700;letter-spacing:-.01em}
@@ -44,12 +46,17 @@ WORKSHOP_CSS = r"""
 .workshop-detail-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;margin-top:12px;padding:0;border:0;background:transparent;color:var(--workshop-primary);font-weight:700;text-align:left}
 .workshop-detail-body{display:none;margin-top:8px;padding:12px;border-radius:12px;background:color-mix(in oklch,var(--workshop-ink) 5%,var(--workshop-surface));color:var(--workshop-muted);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
 .workshop-detail-body[data-open="true"]{display:block}
+.workshop-task-shell[data-workshop-state="idle"] .workshop-progress{display:none}
+.workshop-task-shell[data-workshop-state="scanning"] .workshop-progress{display:block}
+.workshop-task-shell[data-workshop-state="ready"] .workshop-progress{display:none}
+.workshop-task-shell[data-workshop-state="failed"] .workshop-progress{display:none}
 .workshop-primary-action{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;margin-top:auto;border:0;border-radius:16px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px}
 .workshop-secondary-action{min-height:48px;margin-top:8px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}
 .workshop-error-card{border-color:color-mix(in oklch,var(--workshop-error) 30%,transparent);background:color-mix(in oklch,var(--workshop-error) 7%,var(--workshop-surface))}
 .workshop-error-title{margin:0;color:var(--workshop-error);font-size:18px;font-weight:750}
 .workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav{display:none!important}
 .workshop-runtime[data-workshop-task="active"] main{display:none!important}
+body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{display:none!important}
 .workshop-bottom-nav{position:fixed;z-index:30;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,1fr);padding:6px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:22px;background:color-mix(in oklch,var(--workshop-bg) 94%,transparent);box-shadow:0 10px 35px color-mix(in oklch,var(--workshop-ink) 16%,transparent)}
 .workshop-bottom-nav button{min-height:52px;border:0;border-radius:16px;background:transparent;color:var(--workshop-muted);font-size:13px;font-weight:650}.workshop-bottom-nav button[aria-current="page"]{background:var(--workshop-surface);color:var(--workshop-primary)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
