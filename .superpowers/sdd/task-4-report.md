@@ -35,3 +35,6 @@ Result: **3 tests passed, 1 expected failure**. The only failure is
 `test_built_apk.BuiltApkTest.test_signed_apk_contains_workshop_assets`, because
 `apk-work/slg-workshop-ui-signed.apk` has not been generated yet. Task 5 owns
 the APK build and will remove this pre-build limitation.
+
+After the Task 5 APK was generated, the same full discover command was rerun:
+**4 tests passed** (including the signed-APK asset check).
