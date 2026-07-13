@@ -95,6 +95,62 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertNotIn(".workshop-picker-source{display:none!important}", css)
         self.assertNotIn("clip-path", picker_rule)
 
+    def test_task_runtime_bridges_and_recovery_contract(self):
+        """The visible shell must bridge to React without taking ownership of it."""
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        # Native React handlers are reached through a bubbling event, so the
+        # picker, start, and retry paths continue to use the existing app API.
+        self.assertIn('dispatchEvent(new MouseEvent("click"', js)
+        self.assertIn('bubbles:true,cancelable:true,view:window', js)
+        self.assertIn('function triggerReactButton(button)', js)
+        self.assertIn('function retryTask(payload)', js)
+        self.assertIn('triggerReactButton(startButton||sourceButton)', js)
+        self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)
+
+        # State changes are reflected on both data attributes and state
+        # classes, which lets the CSS keep idle navigation and active task
+        # content mutually exclusive.
+        self.assertIn('shell.dataset.workshopState=state', js)
+        self.assertIn('shell.dataset.workshopTask=state==="idle"?"idle":"active"', js)
+        self.assertIn('shell.setAttribute("data-workshop-state",state)', js)
+        self.assertIn('shell.setAttribute("data-workshop-task",shell.dataset.workshopTask)', js)
+        for state in ("idle", "scanning", "ready", "failed"):
+            self.assertIn(f'workshop-state-{state}', js)
+            self.assertIn(f'workshop-task-shell[data-workshop-state="{state}"]', css)
+        self.assertIn(
+            '.workshop-runtime[data-workshop-task="idle"] .workshop-bottom-nav',
+            css,
+        )
+        self.assertIn(
+            '.workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav',
+            css,
+        )
+
+        # ENOSPC is recoverable: the user sees a concise localized message,
+        # while the raw diagnostic remains behind the details disclosure.
+        self.assertIn('ENOSPC|No space left', js)
+        self.assertIn('手机空间不足', js)
+        self.assertIn('释放空间后重试', js)
+        self.assertIn('detailToggle(payload.raw||"ENOSPC|No space left")', js)
+
+        # Keep React-managed controls mounted and avoid direct click shortcuts;
+        # the shell may only dispatch events to those existing nodes.
+        self.assertNotIn('hero.append(sourceButton)', js)
+        self.assertNotIn('hero.append(startButton)', js)
+        self.assertNotIn('shell.append(sourceButton)', js)
+        self.assertNotIn('shell.append(startButton)', js)
+        self.assertNotIn('button&&button.click()', js)
+
+        # A single debounced observer prevents React's intermediate renders
+        # from causing duplicate shell mounts or state flicker.
+        self.assertIn('new MutationObserver(schedule)', js)
+        self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', js)
+        self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', js)
+
 
 if __name__ == "__main__":
     unittest.main()
