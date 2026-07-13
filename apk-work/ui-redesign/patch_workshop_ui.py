@@ -252,9 +252,47 @@ function setReactInputValue(input,value)""",
     return runtime
 
 
+# Contract marker: function patch_translation_cache(js: str) -> str:
+def patch_translation_cache(js: str) -> str:
+    old_state = 'var _o=`slg-translator-cache:`,vo={},yo=!1,bo=!1,bp=Promise.resolve();'
+    new_state = 'var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();'
+    if js.count(old_state) != 1:
+        raise ValueError("Translation cache state signature not found")
+    js = js.replace(old_state, new_state, 1)
+
+    old_cache = (
+        'async function Co(){if(!yo){try{let e=await E.loadTranslationCache();'
+        'e.data&&e.data!==`{}`&&(vo=JSON.parse(e.data))}catch{vo={}}Do(),yo=!0}}'
+        'async function wo()'
+    )
+    new_cache = r'''function cacheIdentity(e,t){let[n,r,,i]=e.split(`|`);return`${n}|${r}|${i}|${U(t)}`}
+function cacheV2Key(e,t){return `slg-translator-cache:v2|`+cacheIdentity(e,t)}
+function rebuildCacheIndex(){cacheIndex={};for(const[e,t]of Object.entries(vo)){let n=null;if(e.startsWith(_o+`v2|`))n=e.slice((_o+`v2|`).length);else{const r=e.match(/^slg-translator-cache:([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)$/);r&&(n=`${r[1]}|${r[2]}|${r[4]}|${r[5]}`)}if(!n||!t?.sourceText||!t?.translatedText)continue;const r=cacheIndex[n];(!r||(t.updatedAt||0)>(r.updatedAt||0))&&(cacheIndex[n]=t)}}
+async function Co(){if(!yo){try{let e=await E.loadTranslationCache();e.data&&e.data!==`{}`&&(vo=JSON.parse(e.data))}catch{vo={}}Do(),rebuildCacheIndex(),yo=!0}}
+async function wo()'''
+    if js.count(old_cache) != 1:
+        raise ValueError("Translation cache loader signature not found")
+    js = js.replace(old_cache, new_cache, 1)
+
+    old_lookup = (
+        'function To(e,t){let n=So(e,t),r=vo[n];return r&&r.sourceText===t?'
+        'r.translatedText:null}function Eo(e,t,n){let r=So(e,t);vo[r]={sourceText:t,'
+        'translatedText:n,updatedAt:Date.now()},bo=!0}'
+    )
+    new_lookup = (
+        'function To(e,t){let n=cacheIdentity(e,t),r=vo[cacheV2Key(e,t)]||cacheIndex[n];'
+        'return r&&r.sourceText===t?r.translatedText:null}'
+        'function Eo(e,t,n){let r={sourceText:t,translatedText:n,updatedAt:Date.now()},'
+        'i=cacheV2Key(e,t);vo[i]=r,cacheIndex[cacheIdentity(e,t)]=r,bo=!0}'
+    )
+    if js.count(old_lookup) != 1:
+        raise ValueError("Translation cache lookup signature not found")
+    return js.replace(old_lookup, new_lookup, 1)
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
-    return patch_scan_flow(js) + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
+    return patch_translation_cache(patch_scan_flow(js)) + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:

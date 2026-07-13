@@ -243,6 +243,26 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('min-height:48px', ''.join(css.split()))
         self.assertIn('.workshop-settings-error', css)
 
+    def test_translation_cache_is_reused_across_models(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        for token in (
+            'function cacheIdentity(e,t)',
+            'function cacheV2Key(e,t)',
+            'function rebuildCacheIndex()',
+            'slg-translator-cache:v2|',
+            'updatedAt||0',
+            'rebuildCacheIndex(),yo=!0',
+            'vo[cacheV2Key(e,t)]',
+        ):
+            self.assertIn(token, js)
+        self.assertIn(
+            'function patch_translation_cache(js: str) -> str:',
+            Path(module.__file__).read_text("utf-8"),
+        )
+
     def test_long_running_phases_are_not_reported_as_directory_scanning(self):
         module = self.load_patch()
         js, css = module.patch_assets(
