@@ -181,7 +181,7 @@ function findButton(label){return[...document.querySelectorAll("#root button")].
 function triggerReactButton(button){manualIdle=false;const target=button===startButton?(findButton("开始翻译")||button):button;const isStart=button===startButton||button?.textContent?.includes("开始翻译");if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
 function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();return clone.textContent||""}
 function readProgressLog(){const source=[...document.querySelectorAll("#root details")].find(el=>!el.closest(".workshop-task-shell")&&el.querySelector('[class*="font-mono"]'));const panel=source?.querySelector('[class*="font-mono"]');const lines=[...(panel?.children||[])].slice(-40).map(row=>(row.innerText||row.textContent||"").trim()).filter(Boolean);return{raw:lines.join("\n"),latest:lines.at(-1)||""}}
-function readTaskSnapshot(){const text=sourceText();const selected=text.match(/已选择\s*[:：]?\s*([^\n]{1,180}?)(?=发现|正在|处理|$)/);const fileName=selected?.[1]?.trim()||"";const found=text.match(/发现\s*(\d+)\s*个可翻译文件/);const count=found?.[1]||"";const progress=text.match(/正在处理脚本\s*(\d+)\s*\/\s*(\d+)/);const current=progress?.[1]||"0",total=progress?.[2]||count||"0";const translated=text.match(/共翻译\s*(\d+)\s*条文本/)?.[1]||"";const log=readProgressLog();const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))return{state:"failed",reason:"space",raw:failed.textContent};if(/翻译完成/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest};if(/正在生成 Ren'Py 补丁 APK/.test(text))return{state:"patching",fileName,count,current,total,raw:log.raw,latest:log.latest};if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating",fileName,count,current,total,raw:log.raw,latest:log.latest};if(count!=="")return{state:"ready",fileName,count};if(fileName||/正在扫描|正在检查文件|检查文件/.test(text))return{state:"scanning",fileName};return{state:"idle"}}
+function readTaskSnapshot(){const text=sourceText();const selected=text.match(/已选择\s*[:：]?\s*([^\n]{1,180}?)(?=发现|正在|处理|$)/);const fileName=selected?.[1]?.trim()||"";const found=text.match(/发现\s*(\d+)\s*个可翻译文件/);const count=found?.[1]||"";const progress=text.match(/正在处理脚本\s*(\d+)\s*\/\s*(\d+)/);const current=progress?.[1]||"0",total=progress?.[2]||count||"0";const translated=text.match(/共翻译\s*(\d+)\s*条文本/)?.[1]||"";const log=readProgressLog();const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))return{state:"failed",reason:"space",raw:failed.textContent};const networkFailed=text.match(/翻译失败\s*[:：]?\s*(无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。)/);if(networkFailed)return{state:"failed",reason:"network",raw:networkFailed[1]};if(/翻译完成/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest};if(/正在生成 Ren'Py 补丁 APK/.test(text))return{state:"patching",fileName,count,current,total,raw:log.raw,latest:log.latest};if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating",fileName,count,current,total,raw:log.raw,latest:log.latest};if(count!=="")return{state:"ready",fileName,count};if(fileName||/正在扫描|正在检查文件|检查文件/.test(text))return{state:"scanning",fileName};return{state:"idle"}}
 function detailToggle(raw,live=false){const wrap=textNode("div","workshop-detail-wrap");const toggle=textNode("button","workshop-detail-toggle",detailsOpen?"收起详情":"处理详情");toggle.type="button";toggle.setAttribute("aria-expanded",String(detailsOpen));const body=textNode("div","workshop-detail-body",raw||"暂无更多信息");body.dataset.open=String(detailsOpen);const scrollLatest=()=>{if(live&&detailsOpen)window.requestAnimationFrame(()=>{body.scrollTop=body.scrollHeight})};toggle.onclick=()=>{detailsOpen=!detailsOpen;body.dataset.open=String(detailsOpen);toggle.setAttribute("aria-expanded",String(detailsOpen));toggle.textContent=detailsOpen?"收起详情":"处理详情";scrollLatest()};wrap.append(toggle,body);scrollLatest();return wrap}
  function renderTopbar(state){const bar=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回");back.onclick=()=>setWorkshopState("idle",{fromBack:true});const label=state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":"";bar.append(back,textNode("h1","","APK 翻译"),textNode("span","workshop-topbar-state",label));return bar}
 function fileRow(fileName){const row=textNode("div","workshop-file-row");row.append(textNode("span","workshop-file-icon","APK"));const copy=textNode("div","workshop-file-copy");copy.append(textNode("div","workshop-file-name",fileName||"尚未选择 APK"),textNode("div","workshop-file-meta",fileName?"已选择文件":"支持 Android APK 文件"));row.append(copy);return row}
@@ -192,6 +192,7 @@ if(state==="ready"){card.append(textNode("p","workshop-state-copy","可以开始
 if(state==="translating"){card.append(textNode("p","workshop-state-copy","正在翻译文本"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","脚本进度"),textNode("span","",`${payload.current||0} / ${payload.total||payload.count||0}`));list.append(row);const progress=textNode("div","workshop-progress");const fill=textNode("i","","");const current=Number(payload.current)||0,total=Number(payload.total)||0;fill.style.width=`${total?Math.max(6,Math.min(100,Math.round(current/total*100))):20}%`;progress.append(fill);card.append(list,progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"正在翻译脚本文本，请保持应用在前台。",true));body.append(card);return body}
 if(state==="patching"){card.append(textNode("p","workshop-state-copy","正在生成补丁 APK"));const progress=textNode("div","workshop-progress");progress.append(textNode("i","",""));card.append(progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"译文已经完成，正在写入并签名补丁 APK。",true));body.append(card);return body}
 if(state==="completed"){card.append(textNode("p","workshop-state-copy","补丁 APK 已生成"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","已翻译文本"),textNode("span","",`${payload.translated||0} 条`));list.append(row);card.append(list);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"翻译和补丁写入已经完成。",true));body.append(card,actionButton("安装补丁版",()=>triggerReactButton(installButton)));return body}
+if(payload.reason==="network"){const title=textNode("h2","workshop-error-title","无法连接翻译服务");const copy=textNode("p","workshop-state-copy",payload.raw||"请检查网络，或切换翻译供应商后重试。");card.append(title,copy,detailToggle(payload.raw||"Network failure"));body.append(card,actionButton("前往“我的”切换供应商",openSettings),actionButton("重试翻译",()=>retryTask({fileName:payload.fileName,raw:""}),true));return body}
 const title=textNode("h2","workshop-error-title","手机空间不足");const copy=textNode("p","workshop-state-copy","请释放空间后重试。"),details=detailToggle(payload.raw||"ENOSPC|No space left");card.append(title,copy,details);body.append(card,actionButton("释放空间后重试",()=>retryTask({fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}
 function setWorkshopState(state,payload={}){if(!shell)return;shell.dataset.workshopState=state;shell.setAttribute("data-workshop-state",state);shell.dataset.workshopTask=state==="idle"?"idle":"active";const task=shell.dataset.workshopTask;shell.setAttribute("data-workshop-task",shell.dataset.workshopTask);runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",task);shell.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");shell.classList.add(`workshop-state-${state}`);runtimeRoot?.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");runtimeRoot?.classList.add(`workshop-state-${state}`);shell.replaceChildren(renderTopbar(state),renderStateBody(state,payload))}
 function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.current||"",s.total||"",s.translated||"",s.reason||"",s.raw||""].join("|")}
@@ -294,8 +295,11 @@ async function wo()'''
 
 def patch_translation_network(js: str) -> str:
     helpers_anchor = 'async function Lo(e){'
-    helpers = r'''function isNetworkFailure(e){const t=String(e?.message||e||``);return/ERR_|network|fetch failed|failed to fetch|timed?\s*out|timeout|dns|offline|connection|ENOTFOUND|ECONNREFUSED/i.test(t)}
+    helpers = r'''function isNetworkFailure(e){return networkFailureParts(e).some(e=>/^(?:APIConnectionError|Connection error\.?)$/i.test(e)||/\b(?:ERR_NETWORK|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT)\b/i.test(e)||/net::ERR_CONNECTION_TIMED_OUT/i.test(e)||/^(?:failed(?: to |-to-)fetch|fetch failed)(?:\b|:)/i.test(e)||/\b(?:offline|dns(?: error| lookup failed)?|timed out|timeout)\b/i.test(e))}
+function networkFailureParts(e){let t=[],n=e;for(let r=0;r<4&&n!=null;r++){if(typeof n===`object`){for(const e of[`name`,`code`,`message`])n[e]!=null&&t.push(String(n[e]));n=n.cause}else{t.push(String(n));break}}return t}
 function providerLabel(e){return/deepseek/i.test(e)?`DeepSeek`:/openai/i.test(e)?`OpenAI`:`自定义接口`}
+function isProviderNetworkFailure(e){return/^无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。$/.test(String(e||``))}
+async function runFileTasksUntilFatal(e,t){for(let n=0;n<e.length;n++){let r=await t(e[n],n);if(r)return r}return``}
 async function Lo(e){'''
     if js.count(helpers_anchor) != 1:
         raise ValueError("Translation coordinator signature not found")
@@ -307,11 +311,11 @@ async function Lo(e){'''
 
     old_worker_catch = 'catch{v=!0,ee+=1}await wo(),x+=1'
     new_worker_catch = (
-        'catch(e){v=!0,ee+=1,isNetworkFailure(e)&&(N=`无法连接 ${providerLabel(i)}。'
+        'catch(e){v=!0,ee+=1,isNetworkFailure(e)&&(N=`无法连接 ${P}。'
         '请检查网络，或前往“我的”切换供应商。`,b=y.length)}await wo(),x+=1'
     )
     state_anchor = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,y='
-    state_replacement = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,N="",y='
+    state_replacement = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,N="",P=providerLabel(i),y='
     if js.count(state_anchor) != 1 or js.count(old_worker_catch) != 1:
         raise ValueError("Translation worker signature not found")
     js = js.replace(state_anchor, state_replacement, 1)
@@ -327,7 +331,38 @@ async function Lo(e){'''
     new_split = 'async function Bo(e,t,n,r,i,a,o,s=0){try{return{translations:await Vo(e,t,n,r,i,a,o),splitCount:0,failedCount:0}}catch(e){if(isNetworkFailure(e))throw e;'
     if js.count(old_split) != 1:
         raise ValueError("Recursive batch signature not found")
-    return js.replace(old_split, new_split, 1)
+    js = js.replace(old_split, new_split, 1)
+
+    outer_state = 'let e=x===`custom`?re:_e.find(e=>e.id===x)?.baseURL||``,t=0,r=!1,a=[],o=``,s=``,c=!1,l=!1;'
+    outer_state_with_fatal = 'let e=x===`custom`?re:_e.find(e=>e.id===x)?.baseURL||``,t=0,r=!1,N="",a=[],o=``,s=``,c=!1,l=!1;'
+    outer_start = 'for(let i=0;i<ae.length;i+=fs){let o=ae.slice(i,i+fs);await Promise.allSettled(o.map((o,s)=>(async()=>{let c=i+s,l='
+    outer_start_sequential = 'N=await runFileTasksUntilFatal(ae,async(o,c)=>{let l='
+    outer_end = '})()))}if(a.length>0||oe){'
+    outer_end_sequential = 'return N});if(a.length>0||oe){'
+    if (
+        js.count(outer_state) != 1
+        or js.count(outer_start) != 1
+        or js.count(outer_end) != 1
+    ):
+        raise ValueError("Translation file controller signature not found")
+    js = js.replace(outer_state, outer_state_with_fatal, 1)
+    js = js.replace(outer_start, outer_start_sequential, 1)
+    js = js.replace(outer_end, outer_end_sequential, 1)
+
+    result_anchor = '}});if(p===0){'
+    result_with_fatal = '}});m&&isProviderNetworkFailure(m)&&(N=m,r=!0,p>0&&O(`  翻译失败: ${m}`,`error`));if(p===0){'
+    empty_return = 'r=!0,ue({current:c+1,total:ae.length});return}'
+    empty_return_with_fatal = 'r=!0,ue({current:c+1,total:ae.length});return N}'
+    if js.count(result_anchor) != 1 or js.count(empty_return) != 1:
+        raise ValueError("Translation file result signature not found")
+    js = js.replace(result_anchor, result_with_fatal, 1)
+    js = js.replace(empty_return, empty_return_with_fatal, 1)
+
+    final_error = '...r?{error:`部分文件处理失败，请查看日志`}:{}})'
+    final_error_with_fatal = '...r?{error:N||`部分文件处理失败，请查看日志`}:{}})'
+    if js.count(final_error) != 1:
+        raise ValueError("Translation final result signature not found")
+    return js.replace(final_error, final_error_with_fatal, 1)
 
 
 def patch_assets(js: str, css: str) -> tuple[str, str]:

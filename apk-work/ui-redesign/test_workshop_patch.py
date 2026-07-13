@@ -316,7 +316,8 @@ check(bo===!1,`preserved v2 is not marked dirty`);
             'maxRetries:1',
             'if(isNetworkFailure(e))throw e',
             'b=y.length',
-            '无法连接 ${providerLabel(i)}',
+            'P=providerLabel(i)',
+            '无法连接 ${P}',
             '前往“我的”切换供应商',
         ):
             self.assertIn(token, js)
@@ -324,19 +325,187 @@ check(bo===!1,`preserved v2 is not marked dirty`);
         self.assertIn('let c=Math.ceil(n.length/2)', js)
 
         helpers_start = js.index('function isNetworkFailure(e)')
-        helpers_end = js.index('async function Lo(e){', helpers_start)
-        helpers = js[helpers_start:helpers_end]
+        coordinator_end = js.index('function Ro(e)', helpers_start)
+        split_start = js.index('async function Bo(', coordinator_end)
+        split_end = js.index('async function Vo(', split_start)
+        coordinator = js[helpers_start:coordinator_end]
+        recursive_split = js[split_start:split_end]
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
-check(isNetworkFailure(new Error(`net::ERR_CONNECTION_TIMED_OUT`)),`browser timeout classification`);
-check(isNetworkFailure(new Error(`Connection error`)),`SDK connection classification`);
-check(!isNetworkFailure(new Error(`Invalid translation JSON`)),`content error classification`);
-check(providerLabel(`https://api.deepseek.com/v1`)===`DeepSeek`,`DeepSeek label`);
-check(providerLabel(`https://api.openai.com/v1`)===`OpenAI`,`OpenAI label`);
-check(providerLabel(`https://example.invalid/v1`)===`自定义接口`,`custom label`);
+async function main(){
+  const sdkError=new Error(`Connection error`);
+  sdkError.name=`APIConnectionError`;
+  sdkError.cause={code:`ETIMEDOUT`};
+  check(isNetworkFailure(new Error(`net::ERR_CONNECTION_TIMED_OUT`)),`browser timeout classification`);
+  check(isNetworkFailure(sdkError),`SDK connection classification`);
+  check(isNetworkFailure({cause:{code:`EAI_AGAIN`}}),`nested cause classification`);
+  check(isNetworkFailure(new Error(`Failed-to-fetch`)),`failed-to-fetch classification`);
+  check(!isNetworkFailure(new Error(`ERR_INVALID_JSON`)),`ERR_INVALID_JSON content classification`);
+  check(!isNetworkFailure(new Error(`translation connection count mismatch`)),`arbitrary connection classification`);
+  check(!isNetworkFailure(new Error(`network glossary entry is invalid`)),`arbitrary network classification`);
+  check(providerLabel(`https://api.deepseek.com/v1`)===`DeepSeek`,`DeepSeek label`);
+  check(providerLabel(`https://api.openai.com/v1`)===`OpenAI`,`OpenAI label`);
+  check(providerLabel(`https://example.invalid/v1`)===`自定义接口`,`custom label`);
+
+  for(const message of [
+    `API returned empty content`,
+    `Invalid translation JSON`,
+    `Translation count mismatch`,
+    `ERR_INVALID_JSON`,
+  ]){
+    const calls=[];
+    globalThis.Vo=async(_client,_model,batch)=>{
+      calls.push(batch.length);
+      if(batch.length>1)throw new Error(message);
+      return new Map([[0,`ok`]]);
+    };
+    const result=await Bo({},`model`,[{},{},{},{}],`en`,`zh`,void 0,!0);
+    check(result.translations.size===4,`${message} remains splittable`);
+    check(calls.join(`,`)===`4,2,1,1,2,1,1`,`${message} recursive split shape`);
+  }
+
+  let networkCalls=0;
+  globalThis.Vo=async()=>{networkCalls+=1;throw sdkError};
+  let rejected=false;
+  try{await Bo({},`model`,[{},{},{},{}],`en`,`zh`,void 0,!0)}catch(error){rejected=error===sdkError}
+  check(rejected,`network error escapes recursive split`);
+  check(networkCalls===1,`network request is not recursively retried`);
+
+  globalThis.Co=async()=>{};
+  globalThis.No=texts=>texts;
+  globalThis.xo=()=>`scope`;
+  globalThis.Se=()=>null;
+  globalThis.To=(_scope,text)=>text===`cached`?`cached translation`:null;
+  globalThis.Wo=(map,item,value)=>map.set(item.id,value);
+  globalThis.Eo=()=>{};
+  globalThis.wo=async()=>{};
+  globalThis.H=class{};
+  globalThis.zo=items=>items.map(item=>[item]);
+  globalThis.Ro=item=>item;
+  globalThis.Ao=2;
+  globalThis.jo=1;
+  globalThis.Ko=()=>0;
+  let resolveInflight;
+  const inflight=new Promise(resolve=>{resolveInflight=resolve});
+  const started=[];
+  globalThis.Vo=async(_client,_model,batch)=>{
+    const id=batch[0].id;
+    started.push(id);
+    if(id===`network`)throw sdkError;
+    if(id===`inflight`)return inflight;
+    throw new Error(`unexpected batch ${id}`);
+  };
+  const texts=[
+    {id:`cached`,text:`cached`,duplicateKeys:[]},
+    {id:`network`,text:`network request`,duplicateKeys:[]},
+    {id:`inflight`,text:`inflight request`,duplicateKeys:[]},
+    {id:`never`,text:`must not start`,duplicateKeys:[]},
+  ];
+  let settled=false;
+  const task=Lo({texts,sourceLang:`en`,targetLang:`zh`,baseURL:`https://api.deepseek.com/v1`,apiKey:`test-key`,model:`test-model`,batchSize:1}).then(result=>{settled=true;return result});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  check(started.join(`,`)===`network,inflight`,`workers stop acquiring after fatal network error`);
+  check(!settled,`coordinator waits for current in-flight work`);
+  resolveInflight(new Map([[0,`translated inflight`]]));
+  const result=await task;
+  check(started.join(`,`)===`network,inflight`,`no later batch starts after in-flight settles`);
+  check(result.successCount===2,`cache and in-flight partial results survive`);
+  check(result.error===`无法连接 DeepSeek。请检查网络，或前往“我的”切换供应商。`,`actionable fatal error survives partial results`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
 '''
         result = subprocess.run(
-            ["node", "-e", helpers + behavior_contract],
+            ["node", "-e", coordinator + recursive_split + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_fatal_network_stops_outer_file_controller(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn('async function runFileTasksUntilFatal(e,t)', js)
+        self.assertIn('N=await runFileTasksUntilFatal(ae,async(o,c)=>{', js)
+        self.assertIn('...r?{error:N||`部分文件处理失败，请查看日志`}:{}', js)
+
+        start = js.index('async function runFileTasksUntilFatal(e,t)')
+        end = js.index('async function Lo(e){', start)
+        scheduler = js[start:end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+async function main(){
+  const fatal=`无法连接 OpenAI。请检查网络，或前往“我的”切换供应商。`;
+  const started=[];
+  const result=await runFileTasksUntilFatal([`file-1`,`file-2`],async file=>{
+    started.push(file);
+    return file===`file-1`?fatal:``;
+  });
+  check(started.join(`,`)===`file-1`,`second file does not start`);
+  check(result===fatal,`task-wide fatal result survives`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", scheduler + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_network_failure_preempts_stale_translating_ui(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn('reason:"network"', js)
+        self.assertIn('if(payload.reason==="network")', js)
+        self.assertIn('actionButton("前往“我的”切换供应商",openSettings)', js)
+        self.assertIn('actionButton("重试翻译",()=>retryTask(', js)
+
+        snapshot_start = js.index('function readTaskSnapshot(){')
+        snapshot_end = js.index('function detailToggle(', snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        render_start = js.index('function renderStateBody(')
+        render_end = js.index('function setWorkshopState(', render_start)
+        render_runtime = js[render_start:render_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const fatal=`无法连接 DeepSeek。请检查网络，或前往“我的”切换供应商。`;
+function sourceText(){return `正在处理脚本 1 / 2\n翻译中\n翻译失败: ${fatal}`}
+function readProgressLog(){return{raw:`stale translating log`,latest:`stale translating log`}}
+const document={querySelectorAll(){return[]}};
+const snapshot=readTaskSnapshot();
+check(snapshot.state===`failed`,`network failure beats stale translating state`);
+check(snapshot.reason===`network`,`network failure reason`);
+check(snapshot.raw===fatal,`actionable failure message preserved`);
+
+function textNode(tag,cls,text){return{tag,cls,text,children:[],append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+let opened=0,retried=0;
+function openSettings(){opened+=1}
+function retryTask(){retried+=1}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary}}
+const body=renderStateBody(`failed`,{reason:`network`,raw:fatal,fileName:`game.apk`});
+const buttons=[];
+function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
+visit(body);
+const settings=buttons.find(button=>button.label===`前往“我的”切换供应商`);
+const retry=buttons.find(button=>button.label===`重试翻译`);
+check(settings&&retry,`network failure renders recovery actions`);
+settings.handler();retry.handler();
+check(opened===1&&retried===1,`recovery actions are wired`);
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + render_runtime + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
