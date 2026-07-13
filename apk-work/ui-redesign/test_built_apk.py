@@ -38,6 +38,14 @@ class BuiltApkTest(unittest.TestCase):
                 'if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}',
             ):
                 self.assertIn(token, js)
+            self.assertIn(
+                'isInstall?findButton("安装补丁版"):button',
+                js,
+            )
+            self.assertNotIn(
+                'isInstall?(findButton("安装补丁版")||button):button',
+                js,
+            )
 
 
 if __name__ == "__main__":
