@@ -9,7 +9,9 @@
   debounced `MutationObserver`. The coverage also pins the picker/start
   callbacks, explicit idle/active display declarations, the failed-state
   mapping, retry callback, append/appendChild movement variants, and optional
-  chaining direct-click variants.
+  chaining direct-click variants. Movement guards now cover append,
+  appendChild, prepend, insertBefore, and replaceChildren, while the direct
+  click guard accepts arbitrary receiver names and whitespace.
 - Assertions consume only the generated `patch_assets(js, css)` strings and use
   exact UTF-8 copies for the user-visible Chinese strings.
 

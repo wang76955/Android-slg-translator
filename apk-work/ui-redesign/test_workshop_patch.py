@@ -67,6 +67,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('sourceButton.classList.add("workshop-source-button")', js)
         self.assertIn('triggerReactButton(button)', js)
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
+        self.assertIn('runtimeRoot?.setAttribute("data-workshop-task",task)', js)
+        self.assertIn('runtimeRoot=app', js)
         self.assertIn('retryTask({fileName:payload.fileName,raw:""})', js)
         self.assertIn('startButton.classList.add("workshop-start-button")', js)
         self.assertNotIn("hero.append(sourceButton)", js)
@@ -119,7 +121,10 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('shell.dataset.workshopState=state', js)
         self.assertIn('shell.dataset.workshopTask=state==="idle"?"idle":"active"', js)
         self.assertIn('shell.setAttribute("data-workshop-state",state)', js)
-        self.assertIn('shell.setAttribute("data-workshop-task",shell.dataset.workshopTask)', js)
+        self.assertRegex(
+            js,
+            r'shell\.setAttribute\("data-workshop-task",(?:shell\.dataset\.workshopTask|task)\)',
+        )
         for state in ("idle", "scanning", "ready", "failed"):
             self.assertIn(f'workshop-state-{state}', js)
             self.assertIn(f'workshop-task-shell[data-workshop-state="{state}"]', css)
@@ -146,12 +151,12 @@ class WorkshopPatchContractTest(unittest.TestCase):
         # Keep React-managed controls mounted and avoid direct click shortcuts;
         # the shell may only dispatch events to those existing nodes.
         for moved_node in ("sourceButton", "startButton"):
-            self.assertNotIn(f'.append({moved_node})', js)
-            self.assertNotIn(f'.appendChild({moved_node})', js)
-        self.assertNotRegex(
-            js,
-            r'(?:button|sourceButton|startButton)(?:\?\.)?click\(\)',
-        )
+            for method in ("append", "appendChild", "prepend", "insertBefore", "replaceChildren"):
+                self.assertNotRegex(
+                    js,
+                    rf'\.\s*{method}\s*\(\s*{moved_node}\b',
+                )
+        self.assertNotRegex(js, r'\.\s*click\s*\(')
 
         # A single debounced observer prevents React's intermediate renders
         # from causing duplicate shell mounts or state flicker.
