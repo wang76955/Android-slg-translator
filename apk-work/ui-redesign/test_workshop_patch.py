@@ -111,7 +111,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('function triggerReactButton(button)', js)
         self.assertIn('actionButton("选择 APK 文件",()=>triggerReactButton(sourceButton))', js)
         self.assertIn('actionButton("开始翻译",()=>triggerReactButton(startButton))', js)
-        self.assertIn('startButton?.disabled', js)
+        # The guard must inspect the freshly queried React node, not a stale
+        # reference captured before React rerenders the form.
+        self.assertIn('target?.disabled', js)
         self.assertIn('请先配置 API Key', js)
         self.assertIn('const snap=readTaskSnapshot()', js)
         self.assertIn('setWorkshopState("ready",{...snap,apiRequired:true})', js)
@@ -127,6 +129,11 @@ class WorkshopPatchContractTest(unittest.TestCase):
             "我的",
             'input.id="settingsApiKey"',
             'label.htmlFor="settingsApiKey"',
+            'input.focus()',
+            'input.blur()',
+            'const target=button===startButton?(findButton("开始翻译")||button):button',
+            'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
+            'if(isStart&&target?.disabled)',
         ):
             self.assertIn(token, js)
         self.assertIn("workshop-settings-card", css)
