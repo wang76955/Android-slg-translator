@@ -22,7 +22,6 @@ WORKSHOP_CSS = r"""
 .workshop-hero small{display:block;font-size:13px;opacity:.8}.workshop-hero h1{margin:7px 0 18px;font-size:26px;line-height:1.18;font-weight:750;letter-spacing:-.02em}
 .workshop-runtime main{padding:16px 16px 104px!important;background:var(--workshop-bg)!important}.workshop-runtime main>div,.workshop-runtime main>section,.workshop-runtime main details{border-color:color-mix(in oklch,var(--workshop-ink) 12%,transparent)!important;background:var(--workshop-surface)!important;border-radius:18px!important;box-shadow:none!important}.workshop-runtime button[class*="bg-blue"]{min-height:48px;background:var(--workshop-primary)!important;color:var(--workshop-on-primary)!important;border-radius:16px!important}.workshop-runtime [class*="text-blue"]{color:var(--workshop-primary)!important}
 .workshop-picker-source>h2,.workshop-picker-source>button{display:none!important}
-/* Legacy hook marker: .workshop-start-button is intentionally unstyled; use .workshop-primary-action. */
 .workshop-task-shell{position:relative;display:flex;flex-direction:column;gap:16px;min-height:calc(100dvh - 24px);padding:20px 16px 112px;background:var(--workshop-bg);color:var(--workshop-ink)}
 .workshop-task-topbar{display:flex;align-items:center;justify-content:space-between;min-height:48px}
 .workshop-task-topbar h1{margin:0;font-size:20px;line-height:1.25;font-weight:700;letter-spacing:-.01em}
