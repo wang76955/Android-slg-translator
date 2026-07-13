@@ -35,6 +35,7 @@ class BuiltApkTest(unittest.TestCase):
                 "function cacheV2Key(e,t){return _o+`v2|`+cacheIdentity(e,t)}",
                 "function isNetworkFailure(e)",
                 "maxRetries:1",
+                'if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}',
             ):
                 self.assertIn(token, js)
 

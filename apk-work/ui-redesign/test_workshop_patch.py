@@ -147,7 +147,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
             'state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
             'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
             'const isInstall=button===installButton||button?.textContent?.includes("安装补丁版")',
-            'isInstall?(findButton("安装补丁版")||button):button',
+            'isInstall?findButton("安装补丁版"):button',
+            'if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}',
             'if(isStart&&target?.disabled)',
         ):
             self.assertIn(token, js)
@@ -253,25 +254,51 @@ class WorkshopPatchContractTest(unittest.TestCase):
         start = js.index("function triggerReactButton(button)")
         end = js.index("function sourceText()", start)
         trigger_runtime = js[start:end]
+        render_start = js.index("function renderStateBody(state,payload)")
+        render_end = js.index("function setWorkshopState(state,payload={})", render_start)
+        render_runtime = js[render_start:render_end]
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 let dispatched=[];
 globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
 globalThis.window=globalThis;
 let manualIdle=true;
+let lastSnapshot=`completed`;
+let refreshes=0;
+function refresh(){refreshes+=1}
 const startButton={textContent:`start`,disabled:false,dispatchEvent(){dispatched.push(`start`)}};
 const staleInstall={textContent:`安装补丁版`,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
 const freshInstall={textContent:`安装补丁版`,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
 let installButton=staleInstall;
-function findButton(label){return label===`安装补丁版`?freshInstall:null}
+let currentInstall=freshInstall;
+function findButton(label){return label===`安装补丁版`?currentInstall:null}
 function readTaskSnapshot(){return{state:`completed`}}
 function setWorkshopState(){throw new Error(`unexpected state change`)}
+function textNode(tag,cls,text){return{tag,cls,text,children:[],append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
 triggerReactButton(staleInstall);
 check(manualIdle===false,`manual idle reset`);
 check(dispatched.length===1&&dispatched[0]===`fresh`,`fresh install target`);
+
+installButton=freshInstall;
+const rendered=renderStateBody(`completed`,{fileName:`fixture.apk`,translated:`1`,raw:`done`,installAvailable:true});
+const buttons=[];
+function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
+visit(rendered);
+const visibleInstall=buttons.find(button=>button.label===`安装补丁版`);
+check(visibleInstall,`install action rendered`);
+dispatched=[];
+currentInstall=null;
+freshInstall.isConnected=false;
+visibleInstall.handler();
+check(dispatched.length===0,`detached install target is never dispatched`);
+check(lastSnapshot===``, `snapshot invalidated`);
+check(refreshes===1,`refresh requested`);
 '''
         result = subprocess.run(
-            ["node", "-e", trigger_runtime + behavior_contract],
+            ["node", "-e", trigger_runtime + render_runtime + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
