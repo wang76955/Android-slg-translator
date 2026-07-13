@@ -215,6 +215,34 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', compact_js)
         self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', compact_js)
 
+    def test_settings_support_provider_model_and_custom_endpoint(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        for token in (
+            'const SETTINGS_KEY="slg-workshop-settings-v1"',
+            'function readSettingsPrefs()',
+            'function saveSettingsPrefs(prefs)',
+            'function findReactConfigControls()',
+            'function setReactSelectValue(select,value)',
+            'function applySettingsToReact(prefs)',
+            'localStorage.setItem(SETTINGS_KEY,JSON.stringify(prefs))',
+            'provider.id="settingsProvider"',
+            'model.id="settingsModel"',
+            'customBaseURL.id="settingsCustomBaseURL"',
+            'customModel.id="settingsCustomModel"',
+            'input.id="settingsApiKey"',
+            'option.value="deepseek"',
+            'option.value="custom"',
+            'https://your-api.com/v1',
+            '已保存：',
+        ):
+            self.assertIn(token, js)
+        self.assertIn('min-height:48px', ''.join(css.split()))
+        self.assertIn('.workshop-settings-error', css)
+
     def test_long_running_phases_are_not_reported_as_directory_scanning(self):
         module = self.load_patch()
         js, css = module.patch_assets(

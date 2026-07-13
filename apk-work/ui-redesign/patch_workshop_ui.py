@@ -63,6 +63,13 @@ WORKSHOP_CSS = r"""
 .workshop-settings-input:focus{outline:3px solid color-mix(in oklch,var(--workshop-primary) 28%,transparent);outline-offset:2px;border-color:var(--workshop-primary)}
 .workshop-settings-save{width:100%;min-width:48px;min-height:52px;margin-top:16px;border:0;border-radius:16px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px}
 .workshop-settings-helper{margin:12px 0 0;color:var(--workshop-muted);font-size:13px;line-height:1.5}
+.workshop-settings-title{margin:0 0 16px;font-size:18px;line-height:1.3;font-weight:750}
+.workshop-settings-field{display:block;margin-top:14px}
+.workshop-settings-field:first-of-type{margin-top:0}
+.workshop-settings-field>span{display:block;margin-bottom:7px;font-size:14px;font-weight:700}
+.workshop-settings-conditional[hidden]{display:none!important}
+.workshop-settings-error{margin:6px 0 0;color:var(--workshop-error);font-size:13px;line-height:1.4}
+.workshop-settings-status{margin:10px 0 0;color:var(--workshop-muted);font-size:13px;line-height:1.45}
 .workshop-primary-action{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;margin-top:auto;border:0;border-radius:16px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px}
 .workshop-secondary-action{min-width:48px;min-height:48px;margin-top:8px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}
 .workshop-error-card{border-color:color-mix(in oklch,var(--workshop-error) 30%,transparent);background:color-mix(in oklch,var(--workshop-error) 7%,var(--workshop-surface))}
@@ -78,13 +85,98 @@ body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{di
 # Task shell runtime: source React controls stay mounted and are activated via
 # bubbling events. The runtime owns only the visible state-driven shell.
 WORKSHOP_RUNTIME = r"""
-;(()=>{const ID="workshop-runtime";let shell=null,runtimeRoot=null,settingsShell=null,settingsOpen=false,sourceButton=null,startButton=null,installButton=null,reactApiInput=null,pendingApiKey=null,observer=null,debounceTimer=0,lastSnapshot="",manualIdle=false,retrying=false,detailsOpen=false;
+;(()=>{const ID="workshop-runtime";let shell=null,runtimeRoot=null,settingsShell=null,settingsOpen=false,settingsRestored=false,sourceButton=null,startButton=null,installButton=null,reactApiInput=null,pendingApiKey=null,observer=null,debounceTimer=0,lastSnapshot="",manualIdle=false,retrying=false,detailsOpen=false;
 function textNode(tag,cls,text){const el=document.createElement(tag);el.className=cls;if(text!==undefined)el.textContent=text;return el}
 function setReactInputValue(input,value){if(!input)return;input.focus();const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;if(setter)setter.call(input,value);else input.value=value;input.dispatchEvent(new Event("input",{bubbles:true}));input.dispatchEvent(new Event("change",{bubbles:true}));input.blur()}
 function findReactApiInput(){return[...document.querySelectorAll("#root input")].find(el=>!el.closest(".workshop-settings-shell")&&(el.type==="password"||/api.?key/i.test(el.placeholder||el.getAttribute("aria-label")||"")))}
 function applyApiKeyToReact(){const input=findReactApiInput();if(!input)return false;reactApiInput=input;if(pendingApiKey!==null&&input.value!==pendingApiKey)setReactInputValue(input,pendingApiKey);return true}
+const SETTINGS_KEY="slg-workshop-settings-v1";
+const PROVIDERS={
+  openai:{label:"OpenAI",models:[
+    ["gpt-4o-mini","GPT-4o-mini（推荐）"],
+    ["gpt-4o","GPT-4o"],
+    ["gpt-4-turbo","GPT-4 Turbo"],
+    ["gpt-3.5-turbo","GPT-3.5 Turbo"]
+  ]},
+  deepseek:{label:"DeepSeek",models:[
+    ["deepseek-v4-flash","DeepSeek V4 Flash（推荐）"],
+    ["deepseek-v4-pro","DeepSeek V4 Pro"]
+  ]},
+  custom:{label:"自定义接口",models:[]}
+};
+function defaultSettingsPrefs(){
+  return{providerId:"openai",model:"gpt-4o-mini",customBaseURL:"",customModel:""};
+}
+function readSettingsPrefs(){
+  try{
+    const value=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"null");
+    if(!value||!PROVIDERS[value.providerId])return defaultSettingsPrefs();
+    return{...defaultSettingsPrefs(),...value};
+  }catch{return defaultSettingsPrefs()}
+}
+function saveSettingsPrefs(prefs){
+  localStorage.setItem(SETTINGS_KEY,JSON.stringify(prefs));
+}
+function findReactConfigControls(){
+  const root=document.querySelector("#root");
+  const selects=[...(root?.querySelectorAll("select")||[])].filter(el=>!el.closest(".workshop-settings-shell"));
+  const provider=selects.find(el=>["openai","deepseek","custom"].every(value=>[...el.options].some(option=>option.value===value)));
+  const model=selects.find(el=>el!==provider&&[...el.options].some(option=>/^(gpt-|deepseek-|custom$)/.test(option.value)));
+  const customBaseURL=[...(root?.querySelectorAll("input")||[])].find(el=>!el.closest(".workshop-settings-shell")&&el.placeholder==="https://your-api.com/v1");
+  return{provider,model,customBaseURL,apiKey:findReactApiInput()};
+}
+function setReactSelectValue(select,value){
+  if(!select)return false;
+  if(![...select.options].some(option=>option.value===value)){
+    const option=document.createElement("option");option.value=value;option.textContent=value;select.append(option);
+  }
+  const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")?.set;
+  setter?setter.call(select,value):select.value=value;
+  select.dispatchEvent(new Event("input",{bubbles:true}));
+  select.dispatchEvent(new Event("change",{bubbles:true}));
+  return true;
+}
+function applySettingsToReact(prefs){
+  const first=findReactConfigControls();
+  if(!setReactSelectValue(first.provider,prefs.providerId))return false;
+  window.setTimeout(()=>{
+    const controls=findReactConfigControls();
+    const model=prefs.providerId==="custom"?prefs.customModel:prefs.model;
+    setReactSelectValue(controls.model,model);
+    if(prefs.providerId==="custom")setReactInputValue(controls.customBaseURL,prefs.customBaseURL);
+    applyApiKeyToReact();
+  },0);
+  return true;
+}
+function fieldShell(id,label){
+  const field=textNode("label","workshop-settings-field");
+  field.htmlFor=id;field.append(textNode("span","",label));return field;
+}
+function inputControl(id,label,type,value,placeholder){
+  const field=fieldShell(id,label),input=document.createElement("input");
+  input.id=id;input.className="workshop-settings-input";input.type=type;
+  input.value=value||"";input.placeholder=placeholder||"";input.autocomplete="off";
+  field.append(input);return{field,input};
+}
+function selectControl(id,label,options,value){
+  const field=fieldShell(id,label),select=document.createElement("select");
+  select.id=id;select.className="workshop-settings-input";
+  for(const [optionValue,optionLabel] of options){
+    const option=document.createElement("option");option.value=optionValue;
+    option.textContent=optionLabel;select.append(option);
+  }
+  select.value=value;field.append(select);return{field,select};
+}
+function replaceSelectOptions(select,options,value){
+  select.replaceChildren();
+  for(const [optionValue,optionLabel] of options){
+    const option=document.createElement("option");option.value=optionValue;
+    option.textContent=optionLabel;select.append(option);
+  }
+  select.value=options.some(([id])=>id===value)?value:options[0]?.[0]||"";
+}
 function closeSettings(){settingsOpen=false;manualIdle=false;lastSnapshot="";if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;refresh()}
-function openSettings(){settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回任务");back.onclick=closeSettings;top.append(back,textNode("h1","","我的设置"));const card=textNode("section","workshop-settings-card");const label=textNode("label","","API Key");label.htmlFor="settingsApiKey";const input=document.createElement("input");input.id="settingsApiKey";input.className="workshop-settings-input";input.type="password";input.autocomplete="off";input.value=reactApiInput?.value??pendingApiKey??"";const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-helper","API Key 仅保存在本机。");save.onclick=()=>{pendingApiKey=input.value;applyApiKeyToReact();helper.textContent="已保存 API Key";};card.append(label,input,save,helper);settingsShell.append(top,card);runtimeRoot?.append(settingsShell)}settingsShell.hidden=false;if(shell)shell.hidden=true}
+function openSettings(){settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回任务");back.onclick=closeSettings;top.append(back,textNode("h1","","我的设置"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`;};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper);settingsShell.append(top,card);runtimeRoot?.append(settingsShell)}settingsShell.hidden=false;if(shell)shell.hidden=true}
 function findButton(label){return[...document.querySelectorAll("#root button")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent&&el.textContent.includes(label))}
 function triggerReactButton(button){manualIdle=false;const target=button===startButton?(findButton("开始翻译")||button):button;const isStart=button===startButton||button?.textContent?.includes("开始翻译");if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
 function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();return clone.textContent||""}
@@ -106,7 +198,7 @@ function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.current||"",
 function retryTask(payload){retrying=true;triggerReactButton(startButton||sourceButton);setWorkshopState("scanning",payload);window.setTimeout(()=>{retrying=false;refresh()},600)}
 function refresh(){if(!shell||manualIdle||retrying||settingsOpen)return;const snap=readTaskSnapshot(),key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
  function decorate(){const heading=[...document.querySelectorAll("#root h2")].find(el=>el.textContent&&el.textContent.includes("选择游戏 APK"));if(heading?.parentElement)heading.parentElement.classList.add("workshop-picker-source");startButton=findButton("开始翻译");if(startButton){startButton.classList.add("workshop-start-button");startButton.setAttribute("aria-hidden","true")}installButton=findButton("安装补丁版");if(installButton)installButton.setAttribute("aria-hidden","true");sourceButton=findButton("选择");if(sourceButton){sourceButton.classList.add("workshop-source-button");sourceButton.setAttribute("aria-label","选择 APK 文件");sourceButton.setAttribute("aria-hidden","true")}applyApiKeyToReact()}
-function mount(){decorate();const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["作品",()=>document.querySelector("#root")?.scrollIntoView({behavior:"smooth",block:"start"})],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
+function mount(){decorate();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["作品",()=>document.querySelector("#root")?.scrollIntoView({behavior:"smooth",block:"start"})],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
 function schedule(){clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)}
 document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-task-back"))manualIdle=true},{capture:true});observer=new MutationObserver(schedule);observer.observe(document.querySelector("#root")||document.documentElement,{childList:true,subtree:true,characterData:true});window.addEventListener("popstate",()=>{if(settingsOpen){closeSettings();return}if(shell?.dataset.workshopTask==="active"){manualIdle=true;setWorkshopState("idle",{fromBack:true})}});document.readyState==="loading"?document.addEventListener("DOMContentLoaded",mount):mount()})();
 """
