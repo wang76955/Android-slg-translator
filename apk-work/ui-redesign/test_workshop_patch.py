@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -248,18 +249,59 @@ class WorkshopPatchContractTest(unittest.TestCase):
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        for token in (
-            'function cacheIdentity(e,t)',
-            'function cacheV2Key(e,t)',
-            'function rebuildCacheIndex()',
-            'slg-translator-cache:v2|',
-            'updatedAt||0',
-            'rebuildCacheIndex(),yo=!0',
-            'vo[cacheV2Key(e,t)]',
-        ):
-            self.assertIn(token, js)
+        start = js.index('var _o=`slg-translator-cache:`')
+        end = js.index('function Do()', start)
+        cache_runtime = js[start:end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function legacyKey(scope,text){return _o+scope+`|`+U(text)}
+
+const text=`sample source`;
+vo={};cacheIndex={};bo=!1;
+vo[legacyKey(`en|zh|model-a|glossary-a`,text)]={sourceText:text,translatedText:`old`,updatedAt:10};
+vo[legacyKey(`en|zh|model-b|glossary-a`,text)]={sourceText:text,translatedText:`latest`,updatedAt:30};
+vo[legacyKey(`en|zh|model-c|glossary-a`,text)]={sourceText:text,updatedAt:40};
+rebuildCacheIndex();
+check(To(`en|zh|model-new|glossary-a`,text)===`latest`,`model-independent reuse`);
+check(To(`fr|zh|model-new|glossary-a`,text)===null,`source isolation`);
+check(To(`en|ja|model-new|glossary-a`,text)===null,`target isolation`);
+check(To(`en|zh|model-new|glossary-b`,text)===null,`glossary isolation`);
+
+const pipeText=`pipe model source`;
+vo={};cacheIndex={};bo=!1;
+vo[legacyKey(`en|zh|vendor|model|glossary-one`,pipeText)]={sourceText:pipeText,translatedText:`pipe-one`,updatedAt:10};
+vo[legacyKey(`en|zh|vendor|model|glossary-two`,pipeText)]={sourceText:pipeText,translatedText:`pipe-two`,updatedAt:20};
+rebuildCacheIndex();
+check(cacheIdentity(`en|zh|vendor|model|glossary-one`,pipeText)!==cacheIdentity(`en|zh|vendor|model|glossary-two`,pipeText),`pipe model glossary boundary`);
+check(To(`en|zh|replacement-model|glossary-one`,pipeText)===`pipe-one`,`pipe model first glossary`);
+check(To(`en|zh|replacement-model|glossary-two`,pipeText)===`pipe-two`,`pipe model second glossary`);
+
+const preserveText=`preserve source`;
+const preserveScope=`en|zh|vendor|model|glossary-keep`;
+vo={};cacheIndex={};bo=!1;
+const preserveKey=cacheV2Key(preserveScope,preserveText);
+const existing={sourceText:preserveText,translatedText:`preserved`,updatedAt:5};
+vo[preserveKey]=existing;
+rebuildCacheIndex();
+Eo(preserveScope,preserveText,`replacement`);
+check(preserveKey.startsWith(_o+`v2|`),`v2 key prefix`);
+check(vo[preserveKey]===existing,`existing v2 object preservation`);
+check(To(preserveScope,preserveText)===`preserved`,`existing v2 value preservation`);
+check(cacheIndex[cacheIdentity(preserveScope,preserveText)]===existing,`existing v2 index preservation`);
+check(To(`en|zh|other-model|glossary-keep`,preserveText)===`preserved`,`preserved v2 cross-model reuse`);
+check(bo===!1,`preserved v2 is not marked dirty`);
+'''
+        result = subprocess.run(
+            ["node", "-e", cache_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
         self.assertIn(
-            'function patch_translation_cache(js: str) -> str:',
+            'def patch_translation_cache(js: str) -> str:',
             Path(module.__file__).read_text("utf-8"),
         )
 
