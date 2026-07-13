@@ -107,6 +107,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
         self.assertIn('bubbles:true,cancelable:true,view:window', js)
         self.assertIn('function triggerReactButton(button)', js)
+        self.assertIn('actionButton("选择 APK 文件",()=>triggerReactButton(sourceButton))', js)
+        self.assertIn('actionButton("开始翻译",()=>triggerReactButton(startButton))', js)
         self.assertIn('function retryTask(payload)', js)
         self.assertIn('triggerReactButton(startButton||sourceButton)', js)
         self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)
@@ -129,27 +131,34 @@ class WorkshopPatchContractTest(unittest.TestCase):
             '.workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav',
             css,
         )
+        self.assertIn('.workshop-runtime[data-workshop-task="idle"] .workshop-bottom-nav{display:grid!important}', css)
+        self.assertIn('.workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav{display:none!important}', css)
 
         # ENOSPC is recoverable: the user sees a concise localized message,
         # while the raw diagnostic remains behind the details disclosure.
         self.assertIn('ENOSPC|No space left', js)
+        self.assertIn('return{state:"failed",reason:"space",raw:failed.textContent}', js)
         self.assertIn('手机空间不足', js)
         self.assertIn('释放空间后重试', js)
         self.assertIn('detailToggle(payload.raw||"ENOSPC|No space left")', js)
+        self.assertIn('actionButton("释放空间后重试",()=>retryTask({fileName:payload.fileName,raw:""}))', js)
 
         # Keep React-managed controls mounted and avoid direct click shortcuts;
         # the shell may only dispatch events to those existing nodes.
-        self.assertNotIn('hero.append(sourceButton)', js)
-        self.assertNotIn('hero.append(startButton)', js)
-        self.assertNotIn('shell.append(sourceButton)', js)
-        self.assertNotIn('shell.append(startButton)', js)
-        self.assertNotIn('button&&button.click()', js)
+        for moved_node in ("sourceButton", "startButton"):
+            self.assertNotIn(f'.append({moved_node})', js)
+            self.assertNotIn(f'.appendChild({moved_node})', js)
+        self.assertNotRegex(
+            js,
+            r'(?:button|sourceButton|startButton)(?:\?\.)?click\(\)',
+        )
 
         # A single debounced observer prevents React's intermediate renders
         # from causing duplicate shell mounts or state flicker.
-        self.assertIn('new MutationObserver(schedule)', js)
-        self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', js)
-        self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', js)
+        compact_js = ''.join(js.split())
+        self.assertIn('newMutationObserver(schedule)', compact_js)
+        self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', compact_js)
+        self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', compact_js)
 
 
 if __name__ == "__main__":

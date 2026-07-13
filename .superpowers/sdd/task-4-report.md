@@ -6,7 +6,10 @@
   contract test covering bubbling `MouseEvent` bridges for picker/start/retry,
   state and task data attributes, state classes, idle/active navigation CSS,
   ENOSPC recovery copy and raw-detail disclosure, React-node ownership, and the
-  debounced `MutationObserver`.
+  debounced `MutationObserver`. The coverage also pins the picker/start
+  callbacks, explicit idle/active display declarations, the failed-state
+  mapping, retry callback, append/appendChild movement variants, and optional
+  chaining direct-click variants.
 - Assertions consume only the generated `patch_assets(js, css)` strings and use
   exact UTF-8 copies for the user-visible Chinese strings.
 
