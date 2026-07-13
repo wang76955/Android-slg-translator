@@ -148,6 +148,16 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('function retryTask(payload)', js)
         self.assertIn('triggerReactButton(startButton||sourceButton)', js)
         self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)
+        for token in (
+            "t.packageName",
+            "scanDurationMs",
+            "cacheHit",
+            "workshop-scan-elapsed",
+            'reason:"scan"',
+            'function startScanClock()',
+            'function stopScanClock()',
+        ):
+            self.assertIn(token, js)
 
         # State changes are reflected on both data attributes and state
         # classes, which lets the CSS keep idle navigation and active task

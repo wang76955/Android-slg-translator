@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).parent
@@ -36,6 +37,7 @@ WORKSHOP_CSS = r"""
 .workshop-file-name{min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workshop-file-meta{margin-top:3px;color:var(--workshop-muted);font-size:13px}
 .workshop-state-copy{margin:12px 0 0;color:var(--workshop-muted);line-height:1.45}
+.workshop-scan-elapsed{display:block;margin-top:6px;color:var(--workshop-muted);font-size:13px;font-variant-numeric:tabular-nums}
 .workshop-progress{height:4px;margin-top:14px;border-radius:999px;background:color-mix(in oklch,var(--workshop-primary) 14%,transparent);overflow:hidden}
 .workshop-progress>i{display:block;width:38%;height:100%;border-radius:inherit;background:var(--workshop-primary);transition:width 220ms ease-out}
 .workshop-summary-list{display:grid;gap:10px;margin:16px 0 0;padding:0;list-style:none}
@@ -102,9 +104,57 @@ document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-t
 """
 
 
+def patch_scan_flow(js: str) -> str:
+    old = """let t=await E.listApkEntries({uri:e.uri});s(t.entries);try{let t=await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);t.packageName&&(p(t.packageName),O(`识别到包名: `+t.packageName,`info`))}catch{}"""
+    new = """let t=await E.listApkEntries({uri:e.uri});s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}"""
+    if old not in js:
+        raise ValueError("APK scan flow signature not found")
+    return js.replace(old, new, 1)
+
+
+def enhance_runtime(runtime: str) -> str:
+    runtime = runtime.replace(
+        "manualIdle=false,retrying=false;\nfunction textNode",
+        "manualIdle=false,retrying=false,scanStartedAt=0,scanTimer=0;\nfunction textNode",
+        1,
+    )
+    runtime = runtime.replace(
+        "function setReactInputValue(input,value)",
+        """function updateScanClock(){const elapsed=shell?.querySelector(\".workshop-scan-elapsed\");if(elapsed&&scanStartedAt)elapsed.textContent=`已用时 ${Math.floor((Date.now()-scanStartedAt)/1000)} 秒`}
+function startScanClock(){if(!scanStartedAt)scanStartedAt=Date.now();if(!scanTimer)scanTimer=window.setInterval(updateScanClock,1000);window.setTimeout(updateScanClock,0)}
+function stopScanClock(){if(scanTimer)window.clearInterval(scanTimer);scanTimer=0;scanStartedAt=0}
+function setReactInputValue(input,value)""",
+        1,
+    )
+    runtime = runtime.replace(
+        'if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))',
+        'const scanFailed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("选择文件失败:")&&(el.textContent?.length||0)<500);if(scanFailed)return{state:"failed",reason:"scan",raw:scanFailed.textContent};if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))',
+        1,
+    )
+    runtime, count = re.subn(
+        r'if\(state==="scanning"\)\{card\.append\(textNode\("p","workshop-state-copy","[^"]*"\)\);const progress=',
+        'if(state==="scanning"){const copy=textNode("p","workshop-state-copy","正在读取 APK 目录");copy.append(textNode("span","workshop-scan-elapsed","已用时 0 秒"));card.append(copy);const progress=',
+        runtime,
+        count=1,
+    )
+    if count != 1:
+        raise ValueError("Scanning state signature not found")
+    runtime = runtime.replace(
+        'const title=textNode("h2","workshop-error-title"',
+        'if(payload.reason==="scan"){const title=textNode("h2","workshop-error-title","检查失败");const copy=textNode("p","workshop-state-copy","无法读取这个 APK。请将文件移动到手机本地存储后重新选择。");card.append(title,copy,detailToggle(payload.raw||"APK scan failed"));body.append(card,actionButton("重新选择 APK",()=>triggerReactButton(sourceButton)));return body}const title=textNode("h2","workshop-error-title"',
+        1,
+    )
+    runtime = runtime.replace(
+        "function setWorkshopState(state,payload={}){if(!shell)return;",
+        'function setWorkshopState(state,payload={}){if(!shell)return;state==="scanning"?startScanClock():stopScanClock();',
+        1,
+    )
+    return runtime
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
-    return js + copy_contract + WORKSHOP_RUNTIME, css + "\n" + WORKSHOP_CSS
+    return patch_scan_flow(js) + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:
