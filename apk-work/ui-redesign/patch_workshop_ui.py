@@ -295,7 +295,7 @@ async function wo()'''
 
 def patch_translation_network(js: str) -> str:
     helpers_anchor = 'async function Lo(e){'
-    helpers = r'''function isNetworkFailure(e){return networkFailureParts(e).some(e=>/^(?:APIConnectionError|Connection error\.?)$/i.test(e)||/\b(?:ERR_NETWORK|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT)\b/i.test(e)||/net::ERR_CONNECTION_TIMED_OUT/i.test(e)||/^(?:failed(?: to |-to-)fetch|fetch failed)(?:\b|:)/i.test(e)||/\b(?:offline|dns(?: error| lookup failed)?|timed out|timeout)\b/i.test(e))}
+    helpers = r'''function isNetworkFailure(e){return networkFailureParts(e).some(e=>/^(?:APIConnectionError|Connection error\.?)$/i.test(e)||/\b(?:ERR_NETWORK|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT)\b/i.test(e)||/\bnet::ERR_(?:CONNECTION_TIMED_OUT|CONNECTION_REFUSED|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CONNECTION_RESET|TIMED_OUT)\b/i.test(e)||/\bDNS_PROBE_FINISHED_NXDOMAIN\b/i.test(e)||/^(?:failed(?: to |-to-)fetch|fetch failed)(?:\b|:)/i.test(e)||/\b(?:offline|dns(?: error| lookup failed)?|timed out|timeout)\b/i.test(e))}
 function networkFailureParts(e){let t=[],n=e;for(let r=0;r<4&&n!=null;r++){if(typeof n===`object`){for(const e of[`name`,`code`,`message`])n[e]!=null&&t.push(String(n[e]));n=n.cause}else{t.push(String(n));break}}return t}
 function providerLabel(e){return/deepseek/i.test(e)?`DeepSeek`:/openai/i.test(e)?`OpenAI`:`自定义接口`}
 function isProviderNetworkFailure(e){return/^无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。$/.test(String(e||``))}

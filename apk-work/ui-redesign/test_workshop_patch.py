@@ -337,6 +337,12 @@ async function main(){
   sdkError.name=`APIConnectionError`;
   sdkError.cause={code:`ETIMEDOUT`};
   check(isNetworkFailure(new Error(`net::ERR_CONNECTION_TIMED_OUT`)),`browser timeout classification`);
+  check(isNetworkFailure(new Error(`net::ERR_CONNECTION_REFUSED`)),`browser refused classification`);
+  check(isNetworkFailure(new Error(`net::ERR_INTERNET_DISCONNECTED`)),`browser offline classification`);
+  check(isNetworkFailure(new Error(`net::ERR_NAME_NOT_RESOLVED`)),`browser name resolution classification`);
+  check(isNetworkFailure(new Error(`DNS_PROBE_FINISHED_NXDOMAIN`)),`browser DNS probe classification`);
+  check(isNetworkFailure(new Error(`net::ERR_CONNECTION_RESET`)),`browser reset classification`);
+  check(isNetworkFailure(new Error(`net::ERR_TIMED_OUT`)),`browser timed-out classification`);
   check(isNetworkFailure(sdkError),`SDK connection classification`);
   check(isNetworkFailure({cause:{code:`EAI_AGAIN`}}),`nested cause classification`);
   check(isNetworkFailure(new Error(`Failed-to-fetch`)),`failed-to-fetch classification`);
