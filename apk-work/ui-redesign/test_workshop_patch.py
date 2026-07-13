@@ -46,10 +46,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
         )
         for token in (
             "workshop-runtime",
-            "workshop-hero",
+            "workshop-task-shell",
             "workshop-bottom-nav",
             "workshop-picker-source",
-            "workshop-task-shell",
             "data-workshop-state",
             "workshop-state-idle",
             "workshop-state-scanning",
@@ -66,20 +65,20 @@ class WorkshopPatchContractTest(unittest.TestCase):
         ):
             self.assertIn(token, js)
         self.assertIn('sourceButton.classList.add("workshop-source-button")', js)
-        self.assertIn('start.onclick=()=>sourceButton.dispatchEvent', js)
+        self.assertIn('triggerReactButton(button)', js)
+        self.assertIn('dispatchEvent(new MouseEvent("click"', js)
+        self.assertIn('retryTask({fileName:payload.fileName,raw:""})', js)
         self.assertIn('startButton.classList.add("workshop-start-button")', js)
         self.assertNotIn("hero.append(sourceButton)", js)
         self.assertNotIn("button&&button.click()", js)
         for token in (
             "env(safe-area-inset-top)",
             "env(safe-area-inset-bottom)",
-            ".workshop-hero",
             ".workshop-bottom-nav",
         ):
             self.assertIn(token, css)
         picker_rule = css.split(".workshop-picker-source", 1)[1].split("}", 1)[0]
         self.assertIn(".workshop-picker-source>h2", css)
-        self.assertIn(".workshop-start-button", css)
         self.assertIn("workshop-task-shell", css)
         self.assertIn('workshop-task-shell[data-workshop-state="scanning"]', css)
         self.assertIn('workshop-task-shell[data-workshop-state="ready"]', css)
@@ -88,9 +87,10 @@ class WorkshopPatchContractTest(unittest.TestCase):
             '.workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav',
             css,
         )
-        self.assertIn("left:50%", css)
-        self.assertIn("transform:translateX(-50%)", css)
-        self.assertIn("width:min(220px,calc(100vw - 48px))", css)
+        self.assertIn(
+            '.workshop-runtime[data-workshop-task="idle"] .workshop-bottom-nav',
+            css,
+        )
         self.assertIn("min-height:48px", css)
         self.assertNotIn(".workshop-picker-source{display:none!important}", css)
         self.assertNotIn("clip-path", picker_rule)
