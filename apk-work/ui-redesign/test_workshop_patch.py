@@ -111,6 +111,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('function triggerReactButton(button)', js)
         self.assertIn('actionButton("选择 APK 文件",()=>triggerReactButton(sourceButton))', js)
         self.assertIn('actionButton("开始翻译",()=>triggerReactButton(startButton))', js)
+        self.assertIn('startButton?.disabled', js)
+        self.assertIn('请先配置 API Key', js)
         self.assertIn('function retryTask(payload)', js)
         self.assertIn('triggerReactButton(startButton||sourceButton)', js)
         self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)

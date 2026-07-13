@@ -9,6 +9,7 @@ Implementation:
 - Kept React picker/start nodes mounted, marked them `aria-hidden`, and bridged visible actions with bubbling `MouseEvent` dispatches.
 - Added a debounced `MutationObserver`, snapshot parsing for selection/count/ENOSPC, idempotent rendering, visible Back affordance, and active-task navigation hiding.
 - Kept the idle bottom navigation visible while hiding the legacy React main surface, and bridged the failed-state retry action to the existing React start/picker control with a short honest scanning window.
+- Guarded the ready action when React's start button is disabled for a missing API key; the shell now surfaces `请先配置 API Key` instead of silently dispatching a no-op click.
 - Removed the obsolete legacy runtime block and updated the contract test for the new shell.
 
 Verification:

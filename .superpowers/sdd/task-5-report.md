@@ -21,4 +21,6 @@
 
 ## Limitation
 
+The `main-flow-ready-final.*` filenames are retained historical captures of the scanning state, not ready-state evidence. The picker image is an earlier picker view; the selected fixture evidence is `main-flow-selected-final.*`.
+
 The selected fixture remained in the scanning state for at least 100 seconds; no ready or recoverable-failure transition was observed on this device. The hierarchy confirms the same scanning state and no bottom navigation. This is recorded as a fixture/runtime processing limitation, not claimed as ready-state evidence. Earlier selection of the device's existing `base.apk` also remained scanning and reports a 4.22 GB picker size. Device storage had approximately 12 GB available (`df -h`), so no new ENOSPC failure was reproduced during this run.
