@@ -356,7 +356,7 @@ async function Lo(e){'''
     outer_start = 'for(let i=0;i<ae.length;i+=fs){let o=ae.slice(i,i+fs);await Promise.allSettled(o.map((o,s)=>(async()=>{let c=i+s,l='
     outer_start_sequential = 'N=await runFileTasksUntilFatal(ae,async(o,c)=>{let l='
     outer_end = '})()))}if(a.length>0||oe){'
-    outer_end_sequential = 'return N});if(a.length>0||oe){'
+    outer_end_sequential = 'return N});if(!N&&(a.length>0||oe)){'
     if (
         js.count(outer_state) != 1
         or js.count(outer_start) != 1
@@ -368,7 +368,7 @@ async function Lo(e){'''
     js = js.replace(outer_end, outer_end_sequential, 1)
 
     result_anchor = '}});if(p===0){'
-    result_with_fatal = '}});m&&isProviderNetworkFailure(m)&&(N=m,r=!0,p>0&&O(`  翻译失败: ${m}`,`error`));if(p===0){'
+    result_with_fatal = '}});if(m&&isProviderNetworkFailure(m)){N=m,r=!0,O(`  翻译失败: ${m}`,`error`),ue({current:c+1,total:ae.length});return N}if(p===0){'
     empty_return = 'r=!0,ue({current:c+1,total:ae.length});return}'
     empty_return_with_fatal = 'r=!0,ue({current:c+1,total:ae.length});return N}'
     if js.count(result_anchor) != 1 or js.count(empty_return) != 1:

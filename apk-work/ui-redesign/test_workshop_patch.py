@@ -539,6 +539,68 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_partial_network_failure_never_writes_or_packages(self):
+        """A fatal provider outage must discard partial file output and packaging."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        controller_start = js.index("N=await runFileTasksUntilFatal")
+        network_check = js.index("m&&isProviderNetworkFailure(m)", controller_start)
+        result_start = network_check - 3 if js[network_check - 3 : network_check] == "if(" else network_check
+        result_end = js.index("t+=p,O(", result_start)
+        file_result = js[result_start:result_end]
+
+        build_call = js.index("await E.buildPatchedApk", result_end)
+        package_guard_start = js.rfind("if(", controller_start, build_call)
+        package_guard_end = js.index("){", package_guard_start) + 1
+        package_guard = js[package_guard_start:package_guard_end]
+
+        behavior_contract = rf'''
+function check(condition,label){{if(!condition)throw new Error(label)}}
+const fatal=`fatal provider network`;
+let writes=0,builds=0;
+function isProviderNetworkFailure(error){{return error===fatal}}
+function O(){{}}
+function ue(){{}}
+function ns(){{return true}}
+function rs(_file,_items,_translations,language){{return{{outputPath:`tl/${{language}}.rpy`,content:`translated`}}}}
+async function Ne(){{writes+=1}}
+async function wo(){{}}
+function qe(){{return `translated`}}
+const E={{buildPatchedApk:async()=>{{builds+=1}}}};
+
+async function simulatePartialFile(){{
+  let N=``,r=false,p=2,m=fatal,a=[],o={{name:`script.rpy`}},l=[{{}},{{}}],f=new Map(),g=`zh`,y=`en`,oe=false,i=``,s=`rpy`,t=0,c=0,ae=[o],_fk=`cache-key`,vo={{}},bo=false;
+  {file_result}
+  return N;
+}}
+
+async function simulatePackaging(){{
+  let N=fatal,a=[{{path:`cached/partial.rpy`,content:`cached`}}],oe=false;
+  {package_guard}{{await E.buildPatchedApk()}}
+}}
+
+async function main(){{
+  const result=await simulatePartialFile();
+  check(result===fatal,`fatal network result survives partial success`);
+  check(writes===0,`fatal network does not write partial translations`);
+  await simulatePackaging();
+  check(builds===0,`fatal network does not package cached or partial files`);
+}}
+main().catch(error=>{{console.error(error);process.exitCode=1}});
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_network_failure_preempts_stale_translating_ui(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
