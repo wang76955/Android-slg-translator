@@ -271,6 +271,18 @@ class BuiltApkTest(unittest.TestCase):
             "Landroidx/activity/OnBackPressedCallback;)V",
             helper_code,
         )
+        self.assertIn(
+            "Lcom/getcapacitor/PluginCall;.resolve:(Lcom/getcapacitor/JSObject;)V",
+            helper_code,
+        )
+        self.assertIn(
+            "Lcom/getcapacitor/PluginCall;.reject:(Ljava/lang/String;)V",
+            helper_code,
+        )
+        self.assertNotIn(
+            "Landroid/os/Handler;.post:(Ljava/lang/Runnable;)Z",
+            helper_code,
+        )
 
         contracts = (
             (

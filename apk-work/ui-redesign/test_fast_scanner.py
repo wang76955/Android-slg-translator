@@ -174,8 +174,17 @@ class FastApkScannerContractTest(unittest.TestCase):
             self.assertIn(token, source)
         self.assertNotIn("ZipInputStream", source)
         self.assertIn("catch (Throwable error)", source)
-        self.assertIn("new Handler(Looper.getMainLooper())", source)
-        self.assertIn("mainHandler.post", source)
+
+    def test_scanner_settles_plugin_call_without_lossy_handler_handoff(self):
+        source = SCANNER.read_text("utf-8")
+        scan_async = source[
+            source.index("public static void scanAsync(") :
+            source.index("private static JSObject scan(")
+        ]
+        self.assertIn("call.resolve(response)", scan_async)
+        self.assertIn("call.reject(rejection)", scan_async)
+        self.assertNotIn("mainHandler.post", scan_async)
+        self.assertNotIn("new Handler(Looper.getMainLooper())", source)
 
     def test_native_back_handler_is_injected_once_and_delegates_default_back(self):
         handler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "WorkshopBackHandler.java"
@@ -674,6 +683,19 @@ public final class CacheOwnershipHarness {
                 r"(Landroidx/(?:activity|lifecycle)/[^;]+;)"
                 r"\.([^:]+):(.+?)//method@",
                 helper_code,
+            )
+        )
+        scanner_method = re.search(
+            r"com\.slgtranslator\.app\.FastApkScanner\.scanAsync:.*?(?=catches:)",
+            helper_code,
+        )
+        self.assertIsNotNone(scanner_method)
+        external_invokes.update(
+            re.findall(
+                r"invoke-(?:virtual|interface|static|direct)(?:/range)?"
+                r"\{[^}]*\},(Lcom/getcapacitor/[^;]+;)"
+                r"\.([^:]+):(.+?)//method@",
+                scanner_method.group(0),
             )
         )
         self.assertTrue(external_invokes)

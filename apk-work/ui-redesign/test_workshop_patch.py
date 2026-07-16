@@ -70,7 +70,7 @@ class WorkshopPatchContractTest(unittest.TestCase):
         )
 
         for token in (
-            "loadSelectedApk=window.__slgLoadSelectedApk=async e=>",
+            "loadSelectedApk=window.__slgLoadSelectedApk=e=>",
             "window.__slgSelectionMeta=e",
             "window.__slgSelectionError=null",
             "window.__slgSelectionError={message:",
@@ -446,14 +446,16 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         )
         self.assertIn("withTimeout=(", js)
         self.assertIn("clearTimeout(timer)", js)
-        self.assertIn("window.__slgScanTimeoutMs||65000", js)
+        self.assertIn("window.__slgScanTimeoutMs??=65000", js)
+        self.assertIn("withTimeout(scanSelectedApk(", js)
+        self.assertNotIn("withTimeout(E.listApkEntries", js)
         helper_start = js.index("withTimeout=(")
         loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=", helper_start)
         loader_end = js.index(",xe=async()=>", loader_start)
         helper = js[helper_start:loader_start].removesuffix(",") + ";"
         loader = js[loader_start + len("loadSelectedApk="):loader_end]
         contract = rf'''
-globalThis.window=globalThis;window.__slgScanTimeoutMs=10;
+globalThis.window=globalThis;
 const scanning=[];let uri=``,name=``,entries=[],pkg=``,failure=null;const logs=[];
 function r(v){{uri=v}} function a(v){{name=v}} function s(v){{entries=v}} function p(v){{pkg=v}}
 function fe(v){{failure=v}} const he={{current:[]}};function w(){{}} function d(v){{scanning.push(v)}} function O(v){{logs.push(v)}}
@@ -463,6 +465,8 @@ const E={{listApkEntries(){{if(mode===`pending`)return new Promise(resolve=>late
 {helper}
 const loadSelectedApk={loader};
 async function main(){{
+ if(window.__slgScanTimeoutMs!==65000)throw new Error(`production deadline is not observable`);
+ window.__slgScanTimeoutMs=10;
  let timeout=``;try{{await loadSelectedApk({{uri:`pending`,name:`Pending.apk`}})}}catch(e){{timeout=e.message}}
  if(!/timed out|超时/i.test(timeout)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
  mode=`reject`;let rejected=``;try{{await loadSelectedApk({{uri:`reject`,name:`Reject.apk`}})}}catch(e){{rejected=e.message}}

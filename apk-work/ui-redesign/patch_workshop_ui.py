@@ -254,6 +254,34 @@ def patch_scan_flow(js: str) -> str:
         ")},loadSelectedApk=window.__slgLoadSelectedApk=",
         1,
     )
+    loader_marker = "loadSelectedApk=window.__slgLoadSelectedApk=async e=>"
+    loader_start = new.index(loader_marker)
+    loader_end = new.index(",xe=async()=>", loader_start)
+    loader = new[loader_start + len(loader_marker) : loader_end]
+    body_start = loader.index("try{") + len("try{")
+    body_end = loader.index("}catch(t){", body_start)
+    scan_body = loader[body_start:body_end]
+    nested_deadline_start = scan_body.index("await withTimeout(E.listApkEntries")
+    nested_deadline_end = scan_body.index(";if(selectionEpoch", nested_deadline_start)
+    scan_body = (
+        scan_body[:nested_deadline_start]
+        + "await E.listApkEntries({uri:e.uri})"
+        + scan_body[nested_deadline_end:]
+    )
+    timeout_message = "APK 检查超时，请重新选择应用或文件。"
+    deadline_loader = (
+        "scanTimeoutMs=window.__slgScanTimeoutMs??=65000,"
+        "scanSelectedApk=async(e,selectionEpoch)=>{" + scan_body + "},"
+        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
+        "let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;"
+        "return withTimeout(scanSelectedApk(e,selectionEpoch),window.__slgScanTimeoutMs,`"
+        + timeout_message
+        + "`).catch(t=>{if(selectionEpoch!==window.__slgSelectionEpoch)return;"
+        "window.__slgSelectionEpoch=selectionEpoch+1;"
+        "t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},"
+        "O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t})}"
+    )
+    new = new[:loader_start] + deadline_loader + new[loader_end:]
     if js.count(old) != 1:
         raise ValueError("APK picker flow signature not found")
     return js.replace(old, new, 1)
