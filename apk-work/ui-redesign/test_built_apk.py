@@ -242,7 +242,7 @@ class BuiltApkTest(unittest.TestCase):
                         [str(DEXDUMP), str(dex_path.relative_to(ROOT))]
                     )
                     dumps[dex_name] = self.assert_tool_success(completed)
-                    if dex_name == "classes6.dex":
+                    if dex_name in ("classes6.dex", "classes7.dex"):
                         completed = self.run_tool(
                             [str(DEXDUMP), "-d", str(dex_path.relative_to(ROOT))]
                         )
@@ -257,6 +257,19 @@ class BuiltApkTest(unittest.TestCase):
         self.assertNotIn(
             "Lcom/getcapacitor/Plugin;.getActivity:()Landroid/app/Activity;",
             plugin_code,
+        )
+        helper_code = re.sub(r"\s+", "", code_dumps["classes7.dex"])
+        self.assertIn(
+            "Landroidx/activity/OnBackPressedDispatcher;.addCallback:"
+            "(Landroidx/lifecycle/LifecycleOwner;"
+            "Landroidx/activity/OnBackPressedCallback;)V",
+            helper_code,
+        )
+        self.assertNotIn(
+            "Landroidx/activity/OnBackPressedDispatcher;.addCallback:"
+            "(Landroidx/activity/ComponentActivity;"
+            "Landroidx/activity/OnBackPressedCallback;)V",
+            helper_code,
         )
 
         contracts = (

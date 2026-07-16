@@ -254,6 +254,7 @@ import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.OnBackPressedDispatcher;
 import androidx.lifecycle.Lifecycle;
+import androidx.lifecycle.LifecycleOwner;
 import com.slgtranslator.app.WorkshopBackHandler;
 
 public final class WorkshopBackHandlerHarness {
@@ -327,7 +328,7 @@ public final class WorkshopBackHandlerHarness {
         int addCount;
         int defaultBackCount;
 
-        @Override public void addCallback(ComponentActivity owner, OnBackPressedCallback callback) {
+        @Override public void addCallback(LifecycleOwner owner, OnBackPressedCallback callback) {
             this.callback = callback;
             addCount++;
         }
@@ -609,6 +610,7 @@ public final class CacheOwnershipHarness {
         plugin_dump = dump(classes6)
         plugin_code = re.sub(r"\s+", "", dump(classes6, disassemble=True))
         helper_dump = dump(classes7)
+        helper_code = re.sub(r"\s+", "", dump(classes7, disassemble=True))
         self.assertEqual(plugin_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'selectInstalledApp'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'enableWorkshopBackHandling'"), 1)
@@ -633,6 +635,60 @@ public final class CacheOwnershipHarness {
         )
         self.assertEqual(helper_dump.count("name          : 'enable'"), 1)
         self.assertEqual(helper_dump.count("name          : 'delegateDefaultBack'"), 1)
+
+        actual_methods = set()
+        for base_dex in sorted((ROOT / "apk-work" / "extracted").glob("classes*.dex")):
+            base_dump = dump(base_dex)
+            for block in re.split(r"(?=Class #\d+\s+-)", base_dump):
+                owner_match = re.search(r"Class descriptor\s+: '([^']+)'", block)
+                if not owner_match:
+                    continue
+                owner = owner_match.group(1)
+                for name, descriptor in re.findall(
+                    r"name\s+: '([^']+)'\s+type\s+: '(\([^']+)'",
+                    block,
+                ):
+                    actual_methods.add((owner, name, descriptor))
+
+        # Only inspect code introduced by the back-handler feature.  classes7.dex
+        # also contains the older scanner implementation, whose JSArray calls may
+        # legally resolve through its org.json superclass and are unrelated here.
+        plugin_method = re.search(
+            r"com\.slgtranslator\.app\.FileManagerPlugin\."
+            r"enableWorkshopBackHandling:.*?(?=catches:)",
+            plugin_code,
+        )
+        self.assertIsNotNone(plugin_method)
+        external_invokes = set(
+            re.findall(
+                r"invoke-(?:virtual|interface|static|direct)(?:/range)?"
+                r"\{[^}]*\},"
+                r"(Lcom/getcapacitor/[^;]+;)\.([^:]+):(.+?)//method@",
+                plugin_method.group(0),
+            )
+        )
+        external_invokes.update(
+            re.findall(
+                r"invoke-(?:virtual|interface|static|direct)(?:/range)?"
+                r"\{[^}]*\},"
+                r"(Landroidx/(?:activity|lifecycle)/[^;]+;)"
+                r"\.([^:]+):(.+?)//method@",
+                helper_code,
+            )
+        )
+        self.assertTrue(external_invokes)
+        platform_inherited = {
+            ("Landroidx/activity/ComponentActivity;", "isDestroyed", "()Z"),
+            ("Landroidx/activity/ComponentActivity;", "isFinishing", "()Z"),
+        }
+        for target in sorted(external_invokes):
+            if target in platform_inherited:
+                continue
+            self.assertIn(
+                target,
+                actual_methods,
+                f"generated external invoke is absent from real base ABI: {target}",
+            )
 
 
 if __name__ == "__main__":
