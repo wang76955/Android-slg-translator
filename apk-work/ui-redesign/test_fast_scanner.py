@@ -1,5 +1,7 @@
 import re
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,8 +11,12 @@ FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 SCANNER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
 BUILDER = FAST_SCAN / "build_fast_scanner.py"
+WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
 GENERATED = FAST_SCAN / "generated"
 DEXDUMP = ROOT / ".tools" / "android-15" / "dexdump.exe"
+JAVA_HOME = ROOT / ".tools" / "jdk-17" / "jdk-17.0.19+10"
+JAVA = JAVA_HOME / "bin" / "java.exe"
+JAVAC = JAVA_HOME / "bin" / "javac.exe"
 
 
 def java_block_after(source, marker):
@@ -37,7 +43,10 @@ class FastApkScannerContractTest(unittest.TestCase):
             r"\{\s*output\.write\(buffer,\s*0,\s*count\);\s*\}",
         )
 
-        partial_creation = 'partial = new File(directory, output.getName() + ".partial");'
+        partial_creation = (
+            'partial = new File(directory, output.getName() + "." '
+            '+ UUID.randomUUID().toString() + ".partial");'
+        )
         self.assertIn(partial_creation, source)
         self.assertRegex(
             source,
@@ -69,12 +78,9 @@ class FastApkScannerContractTest(unittest.TestCase):
         self.assertIn('new File(directory, fingerprint(packageName, source) + ".apk")', source)
 
         self.assertLess(source.index("partial = null;"), source.index("cleanOldApks(directory, output);"))
-        self.assertRegex(
-            source,
-            r"if\s*\(!file\.equals\(keep\)\s*&&\s*"
-            r'\(file\.getName\(\)\.endsWith\("\.apk"\)\s*\|\|\s*'
-            r'file\.getName\(\)\.endsWith\("\.partial"\)\)\)\s*\{\s*file\.delete\(\);',
-        )
+        cleanup = java_block_after(source, "private static void cleanOldApks(")
+        self.assertIn('endsWith(".apk")', cleanup)
+        self.assertNotIn('endsWith(".partial")', cleanup)
 
         selection_start = source.index("int splitCount =")
         result_chain = re.search(
@@ -105,7 +111,7 @@ class FastApkScannerContractTest(unittest.TestCase):
         )
 
     def assert_installed_app_privacy_contract(self, source):
-        listing = java_block_after(source, "public static void listInstalledApps(")
+        listing = java_block_after(source, "private static void listInstalledAppsOnWorker(")
         launcher_iteration = java_block_after(
             listing,
             "for (ResolveInfo resolveInfo : launchers)",
@@ -255,10 +261,122 @@ class FastApkScannerContractTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 self.assert_installed_app_privacy_contract(broken)
 
+    def test_installed_app_requests_are_serialized_and_cache_retains_two_finals(self):
+        source = INSTALLED_APPS.read_text("utf-8")
+        self.assertIn("Executors.newSingleThreadExecutor", source)
+        self.assertIn('return new Thread(runnable, "installed-app-worker")', source)
+        listing = java_block_after(source, "public static void listInstalledApps(")
+        selection = java_block_after(source, "public static void selectInstalledApp(")
+        self.assertIn("WORKER.execute(new Runnable()", listing)
+        self.assertIn("WORKER.execute(new Runnable()", selection)
+        self.assertNotIn("new Thread", listing)
+        self.assertNotIn("new Thread", selection)
+        self.assertIn("UUID.randomUUID().toString()", source)
+
+        cleanup = java_block_after(source, "private static void cleanOldApks(")
+        self.assertNotIn('endsWith(".partial")', cleanup)
+        self.assertIn("finals.size()", cleanup)
+        self.assertIn("index >= 2", cleanup)
+        self.assertRegex(
+            cleanup,
+            r"if\s*\(index\s*>=\s*2\s*&&\s*!file\.equals\(keep\)\)\s*"
+            r"\{\s*file\.delete\(\);",
+        )
+        self.assertIn("markNewest(directory, output);", source)
+        recency = java_block_after(source, "private static void markNewest(")
+        self.assertIn("Math.max(System.currentTimeMillis(), newest + 1)", recency)
+        self.assertIn("if (!output.setLastModified(timestamp))", recency)
+        self.assertLess(source.index("partial = null;"), source.index("cleanOldApks(directory, output);"))
+
+    def test_cache_cleanup_does_not_delete_active_partial_or_previous_result(self):
+        if not JAVA.exists() or not JAVAC.exists():
+            self.skipTest("JDK is not present for executable cache ownership test")
+        harness = r"""
+import com.slgtranslator.app.InstalledAppSource;
+import java.io.File;
+import java.lang.reflect.Method;
+
+public final class CacheOwnershipHarness {
+    public static void main(String[] args) throws Exception {
+        File directory = new File(args[0]);
+        File first = touch(directory, "first.apk", 1000L);
+        File activePartial = touch(directory, "second.request.partial", 1500L);
+        Method cleanup = InstalledAppSource.class.getDeclaredMethod("cleanOldApks", File.class, File.class);
+        cleanup.setAccessible(true);
+
+        File second = touch(directory, "second.apk", 2000L);
+        cleanup.invoke(null, directory, second);
+        require(first.isFile(), "the previous returned URI must survive the second selection");
+        require(second.isFile(), "the current returned URI must survive cleanup");
+        require(activePartial.isFile(), "cleanup must not delete another request's partial");
+
+        File third = touch(directory, "third.apk", 3000L);
+        cleanup.invoke(null, directory, third);
+        require(!first.exists(), "only finals older than current+previous should be pruned");
+        require(second.isFile() && third.isFile(), "current and previous finals must remain");
+        require(activePartial.isFile(), "final pruning must never own partial files");
+    }
+
+    private static File touch(File directory, String name, long modified) throws Exception {
+        File file = new File(directory, name);
+        require(file.createNewFile(), "fixture already exists: " + name);
+        require(file.setLastModified(modified), "cannot set fixture timestamp: " + name);
+        return file;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="installed-cache-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CacheOwnershipHarness.java"
+            classes = temporary_path / "classes"
+            cache = temporary_path / "cache"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            cache.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    str(INSTALLED_APPS),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "CacheOwnershipHarness", str(cache)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_manifest_pipeline_adds_launcher_queries_without_broad_permission(self):
+        builder = BUILDER.read_text("utf-8")
+        workshop = WORKSHOP_BUILDER.read_text("utf-8")
+        for token in (
+            "patch_launcher_queries",
+            'android.intent.action.MAIN',
+            'android.intent.category.LAUNCHER',
+            'GENERATED / "AndroidManifest.xml"',
+        ):
+            self.assertIn(token, builder)
+        self.assertNotIn("QUERY_ALL_PACKAGES", builder)
+        self.assertIn('"AndroidManifest.xml": FAST_SCAN_GENERATED / "AndroidManifest.xml"', workshop)
+
     def test_generated_dex_has_unique_installed_app_bridge(self):
         classes6 = GENERATED / "classes6.dex"
         classes7 = GENERATED / "classes7.dex"
         if not classes6.exists() or not classes7.exists():
+            if os.environ.get("REQUIRE_FAST_SCAN_ARTIFACTS") == "1":
+                self.fail("required generated DEX files are missing; run build_fast_scanner.py")
             self.skipTest("generated DEX files are not present; run build_fast_scanner.py first")
         self.assertTrue(DEXDUMP.exists(), "generated DEX verification requires dexdump.exe")
 

@@ -25,13 +25,32 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public final class InstalledAppSource {
     private static final int COPY_BUFFER_SIZE = 1024 * 1024;
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable runnable) {
+            return new Thread(runnable, "installed-app-worker");
+        }
+    });
 
     private InstalledAppSource() {}
 
-    public static void listInstalledApps(Context context, PluginCall call) {
+    public static void listInstalledApps(final Context context, final PluginCall call) {
+        WORKER.execute(new Runnable() {
+            @Override
+            public void run() {
+                listInstalledAppsOnWorker(context, call);
+            }
+        });
+    }
+
+    private static void listInstalledAppsOnWorker(Context context, PluginCall call) {
         try {
             PackageManager packageManager = context.getPackageManager();
             List<ResolveInfo> launchers = queryLauncherApps(packageManager);
@@ -72,12 +91,12 @@ public final class InstalledAppSource {
             call.reject("Choose an installed app first.");
             return;
         }
-        new Thread(new Runnable() {
+        WORKER.execute(new Runnable() {
             @Override
             public void run() {
                 copySelectedApp(context, call, packageName);
             }
-        }, "installed-app-copy").start();
+        });
     }
 
     private static void copySelectedApp(Context context, PluginCall call, String packageName) {
@@ -106,18 +125,18 @@ public final class InstalledAppSource {
                 return;
             }
             File output = new File(directory, fingerprint(packageName, source) + ".apk");
-            partial = new File(directory, output.getName() + ".partial");
-            if (partial.exists() && !partial.delete()) {
-                throw new IOException("stale partial");
-            }
-            copyAndSync(source, partial);
-            if (output.exists() && !output.delete()) {
-                throw new IOException("stale output");
-            }
-            if (!partial.renameTo(output)) {
-                throw new IOException("atomic rename");
+            partial = new File(directory, output.getName() + "." + UUID.randomUUID().toString() + ".partial");
+            if (!output.isFile()) {
+                if (partial.exists() && !partial.delete()) {
+                    throw new IOException("stale partial");
+                }
+                copyAndSync(source, partial);
+                if (!partial.renameTo(output)) {
+                    throw new IOException("atomic rename");
+                }
             }
             partial = null;
+            markNewest(directory, output);
             cleanOldApks(directory, output);
 
             int splitCount = applicationInfo.splitSourceDirs == null ? 0 : applicationInfo.splitSourceDirs.length;
@@ -199,13 +218,42 @@ public final class InstalledAppSource {
         }
     }
 
+    private static void markNewest(File directory, File output) throws IOException {
+        long newest = 0L;
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (!file.equals(output) && file.getName().endsWith(".apk")) {
+                    newest = Math.max(newest, file.lastModified());
+                }
+            }
+        }
+        long timestamp = Math.max(System.currentTimeMillis(), newest + 1);
+        if (!output.setLastModified(timestamp)) {
+            throw new IOException("cache recency");
+        }
+    }
+
     private static void cleanOldApks(File directory, File keep) {
         File[] files = directory.listFiles();
         if (files == null) {
             return;
         }
+        List<File> finals = new ArrayList<>();
         for (File file : files) {
-            if (!file.equals(keep) && (file.getName().endsWith(".apk") || file.getName().endsWith(".partial"))) {
+            if (file.getName().endsWith(".apk")) {
+                finals.add(file);
+            }
+        }
+        Collections.sort(finals, new Comparator<File>() {
+            @Override
+            public int compare(File left, File right) {
+                return Long.compare(right.lastModified(), left.lastModified());
+            }
+        });
+        for (int index = 0; index < finals.size(); index++) {
+            File file = finals.get(index);
+            if (index >= 2 && !file.equals(keep)) {
                 file.delete();
             }
         }

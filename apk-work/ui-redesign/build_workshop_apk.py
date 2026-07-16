@@ -32,6 +32,7 @@ REPLACEMENTS = {
     "assets/public/assets/index-C044IUg3.css": GENERATED / "index-C044IUg3.css",
     "classes6.dex": FAST_SCAN_GENERATED / "classes6.dex",
     "classes7.dex": FAST_SCAN_GENERATED / "classes7.dex",
+    "AndroidManifest.xml": FAST_SCAN_GENERATED / "AndroidManifest.xml",
 }
 
 
