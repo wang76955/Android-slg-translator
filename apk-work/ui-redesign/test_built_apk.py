@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,11 @@ def generated_text_bytes(text: str) -> bytes:
 
 
 class BuiltApkTest(unittest.TestCase):
+    CLASS_BLOCK = re.compile(
+        r"^Class #\d+\s+-\r?\n.*?(?=^Class #\d+\s+-\r?\n|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+
     def run_tool(self, command: list[str]) -> str:
         completed = subprocess.run(
             command,
@@ -42,6 +48,80 @@ class BuiltApkTest(unittest.TestCase):
                 f"{' '.join(command)}\n{completed.stderr}"
             )
         return completed.stdout
+
+    def assert_dex_ownership(
+        self,
+        dex_dump: str,
+        class_descriptor: str,
+        method_names: tuple[str, ...],
+        forbidden_descriptor: str,
+    ) -> None:
+        descriptor_marker = f"Class descriptor  : '{class_descriptor}'"
+        forbidden_marker = f"Class descriptor  : '{forbidden_descriptor}'"
+        self.assertEqual(
+            dex_dump.count(descriptor_marker),
+            1,
+            f"{class_descriptor} must occur exactly once in its assigned DEX",
+        )
+        self.assertNotIn(
+            forbidden_marker,
+            dex_dump,
+            f"{forbidden_descriptor} must not occur in this DEX",
+        )
+
+        matching_blocks = [
+            match.group(0)
+            for match in self.CLASS_BLOCK.finditer(dex_dump)
+            if descriptor_marker in match.group(0)
+        ]
+        self.assertEqual(
+            len(matching_blocks),
+            1,
+            f"could not isolate the unique class block for {class_descriptor}",
+        )
+        class_block = matching_blocks[0]
+        for method_name in method_names:
+            method_marker = f"name          : '{method_name}'"
+            self.assertEqual(
+                class_block.count(method_marker),
+                1,
+                f"{method_name} must belong exactly once to {class_descriptor}",
+            )
+            self.assertEqual(
+                dex_dump.count(method_marker),
+                1,
+                f"no other class in the DEX may define {method_name}",
+            )
+
+    def move_method_to_wrong_class(
+        self,
+        dex_dump: str,
+        class_descriptor: str,
+        method_name: str,
+    ) -> str:
+        descriptor_marker = f"Class descriptor  : '{class_descriptor}'"
+        method_marker = f"name          : '{method_name}'"
+        blocks = [match.group(0) for match in self.CLASS_BLOCK.finditer(dex_dump)]
+        target_indexes = [
+            index for index, block in enumerate(blocks) if descriptor_marker in block
+        ]
+        self.assertEqual(len(target_indexes), 1, "mutation requires one target class")
+        target_index = target_indexes[0]
+        self.assertEqual(
+            blocks[target_index].count(method_marker),
+            1,
+            "mutation requires one target method marker",
+        )
+        wrong_index = next(
+            (index for index in range(len(blocks)) if index != target_index),
+            None,
+        )
+        self.assertIsNotNone(wrong_index, "mutation requires a second class block")
+
+        blocks[target_index] = blocks[target_index].replace(method_marker, "", 1)
+        blocks[wrong_index] += f"\n    {method_marker}\n"
+        first_block = next(self.CLASS_BLOCK.finditer(dex_dump))
+        return dex_dump[: first_block.start()] + "".join(blocks)
 
     def test_signed_apk_contains_workshop_assets(self):
         self.assertTrue(APK.exists(), "signed workshop APK must exist")
@@ -115,16 +195,45 @@ class BuiltApkTest(unittest.TestCase):
 
         plugin_dump = dex_dumps["classes6.dex"]
         helper_dump = dex_dumps["classes7.dex"]
-        self.assertEqual(plugin_dump.count("name          : 'listInstalledApps'"), 1)
-        self.assertEqual(plugin_dump.count("name          : 'selectInstalledApp'"), 1)
-        self.assertEqual(
-            helper_dump.count(
-                "Class descriptor  : 'Lcom/slgtranslator/app/InstalledAppSource;'"
-            ),
-            1,
+        self.assert_dex_ownership(
+            plugin_dump,
+            "Lcom/slgtranslator/app/FileManagerPlugin;",
+            ("listInstalledApps", "selectInstalledApp"),
+            "Lcom/slgtranslator/app/InstalledAppSource;",
         )
-        self.assertEqual(helper_dump.count("name          : 'listInstalledApps'"), 1)
-        self.assertEqual(helper_dump.count("name          : 'selectInstalledApp'"), 1)
+        self.assert_dex_ownership(
+            helper_dump,
+            "Lcom/slgtranslator/app/InstalledAppSource;",
+            ("listInstalledApps", "selectInstalledApp"),
+            "Lcom/slgtranslator/app/FileManagerPlugin;",
+        )
+
+        mutation_cases = (
+            (
+                plugin_dump,
+                "Lcom/slgtranslator/app/FileManagerPlugin;",
+                "Lcom/slgtranslator/app/InstalledAppSource;",
+            ),
+            (
+                helper_dump,
+                "Lcom/slgtranslator/app/InstalledAppSource;",
+                "Lcom/slgtranslator/app/FileManagerPlugin;",
+            ),
+        )
+        for dex_dump, owner_descriptor, forbidden_descriptor in mutation_cases:
+            with self.subTest(mutated_owner=owner_descriptor):
+                mutated_dump = self.move_method_to_wrong_class(
+                    dex_dump,
+                    owner_descriptor,
+                    "listInstalledApps",
+                )
+                with self.assertRaises(AssertionError):
+                    self.assert_dex_ownership(
+                        mutated_dump,
+                        owner_descriptor,
+                        ("listInstalledApps", "selectInstalledApp"),
+                        forbidden_descriptor,
+                    )
 
         manifest_dump = self.run_tool(
             [str(AAPT2), "dump", "xmltree", str(APK), "--file", "AndroidManifest.xml"]
