@@ -21,7 +21,7 @@ BASE_APK = ROOT / "apk-work" / "com.slgtranslator.app-base.apk"
 SOURCE_DEX = ROOT / "apk-work" / "extracted" / "classes6.dex"
 HERE = Path(__file__).resolve().parent
 GENERATED = HERE / "generated"
-SCANNER_SOURCE = HERE / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
+SOURCE_SOURCES = sorted((HERE / "src").rglob("*.java"))
 STUB_SOURCES = sorted((HERE / "stubs").rglob("*.java"))
 
 METHOD_PATTERN = re.compile(
@@ -49,6 +49,41 @@ DELEGATING_METHOD = """.method public final listApkEntries(Lcom/getcapacitor/Plu
     invoke-static {v1, v0, p0, p1}, Lcom/slgtranslator/app/FastApkScanner;->scanAsync(Landroid/content/Context;Ljava/lang/String;Ljava/lang/Object;Lcom/getcapacitor/PluginCall;)V
     return-void
 .end method"""
+
+INSTALLED_APP_METHODS = (
+    (
+        ".method public final listInstalledApps(Lcom/getcapacitor/PluginCall;)V",
+        "Lcom/slgtranslator/app/InstalledAppSource;->listInstalledApps",
+        """.method public final listInstalledApps(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/InstalledAppSource;->listInstalledApps(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method""",
+    ),
+    (
+        ".method public final selectInstalledApp(Lcom/getcapacitor/PluginCall;)V",
+        "Lcom/slgtranslator/app/InstalledAppSource;->selectInstalledApp",
+        """.method public final selectInstalledApp(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/InstalledAppSource;->selectInstalledApp(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method""",
+    ),
+)
 
 
 def run(command: list[str], env: dict[str, str]) -> None:
@@ -81,7 +116,7 @@ def build_helper_dex(build: Path, env: dict[str, str]) -> Path:
             str(stubs),
             "-d",
             str(helper),
-            str(SCANNER_SOURCE),
+            *map(str, SOURCE_SOURCES),
         ],
         env,
     )
@@ -135,9 +170,22 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> Path:
         raise RuntimeError(f"Expected one FileManagerPlugin smali file, found {len(candidates)}")
     smali = candidates[0]
     original = smali.read_text("utf-8")
+    existing_entrypoints = METHOD_PATTERN.findall(original)
+    if len(existing_entrypoints) != 1:
+        raise RuntimeError(f"Expected exactly one listApkEntries method, found {len(existing_entrypoints)}")
     patched, replacements = METHOD_PATTERN.subn(DELEGATING_METHOD, original, count=1)
     if replacements != 1:
         raise RuntimeError(f"Expected to patch one listApkEntries method, patched {replacements}")
+    bridge_counts = [patched.count(signature) for signature, _, _ in INSTALLED_APP_METHODS]
+    if bridge_counts == [0] * len(INSTALLED_APP_METHODS):
+        patched = patched.rstrip() + "\n\n" + "\n\n".join(
+            method for _, _, method in INSTALLED_APP_METHODS
+        ) + "\n"
+    elif bridge_counts != [1] * len(INSTALLED_APP_METHODS):
+        raise RuntimeError(f"Installed app bridge methods are partially or repeatedly injected: {bridge_counts}")
+    for signature, delegate, _ in INSTALLED_APP_METHODS:
+        if patched.count(signature) != 1 or patched.count(delegate) != 1:
+            raise RuntimeError(f"Expected exactly one valid installed app bridge for {signature}")
     smali.write_text(patched, "utf-8", newline="\n")
     run(
         [
