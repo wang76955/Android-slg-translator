@@ -18,6 +18,149 @@ class WorkshopPatchContractTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_installed_app_source_chooser_contract(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+
+        for token in (
+            "loadSelectedApk=window.__slgLoadSelectedApk=async e=>",
+            "window.__slgSelectionMeta=e",
+            "await loadSelectedApk(await E.pickApkFile())",
+            "E.listApkEntries({uri:e.uri})",
+            "e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`",
+            "e.packageName||``",
+            "e.splitApk&&t.entries.length===0",
+            "该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。",
+            "该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。",
+            "function openSourceChooser()",
+            "function openInstalledApps()",
+            "function filterInstalledApps(apps,query)",
+            "function renderInstalledApps()",
+            "async function chooseInstalledApp(app)",
+            "FileManager.listInstalledApps()",
+            "FileManager.selectInstalledApp({packageName:app.packageName})",
+            "await window.__slgLoadSelectedApk(selection)",
+            "选择应用或 APK",
+            "从已安装应用选择",
+            "从文件选择 APK",
+            "正在读取应用列表",
+            "没有找到可选择的应用",
+            "重新加载",
+            "搜索应用名称或包名",
+        ):
+            self.assertIn(token, js)
+        self.assertEqual(js.count("loadSelectedApk=window.__slgLoadSelectedApk"), 1)
+        self.assertEqual(js.count("E.listApkEntries({uri:e.uri})"), 1)
+        self.assertIn("toLocaleLowerCase()", js)
+        self.assertIn("app.label", js)
+        self.assertIn("app.packageName", js)
+        compact_css = "".join(css.split())
+        for token in (
+            ".workshop-source-dialog{position:fixed",
+            ".workshop-installed-dialog{position:fixed",
+            "min-height:52px",
+            "prefers-color-scheme:dark",
+            "prefers-reduced-motion:reduce",
+        ):
+            self.assertIn(token, compact_css)
+        self.assertIn('event.key==="Escape"', js)
+        self.assertIn('event.target===sourceDialog', js)
+        self.assertIn('event.target===installedDialog', js)
+        self.assertIn("previousSourceFocus?.focus()", js)
+
+    def test_shared_apk_loader_and_installed_selection_behavior(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=")
+        loader_end = js.index(",xe=async()=>", loader_start)
+        loader_initializer = js[
+            loader_start + len("loadSelectedApk=") : loader_end
+        ]
+        filter_start = js.index("function filterInstalledApps(apps,query)")
+        filter_end = js.index("function renderInstalledApps()", filter_start)
+        filter_runtime = js[filter_start:filter_end]
+        list_start = js.index("async function loadInstalledApps()")
+        list_end = js.index("async function openInstalledApps()", list_start)
+        list_runtime = js[list_start:list_end]
+        choose_start = js.index("async function chooseInstalledApp(app)")
+        choose_end = js.index("function closeInstalledApps", choose_start)
+        choose_runtime = js[choose_start:choose_end]
+        behavior_contract = rf'''
+function check(condition,label){{if(!condition)throw new Error(label)}}
+globalThis.window=globalThis;
+const calls=[],logs=[],scanning=[];
+let uri=`old`,name=`old.apk`,entries=[`old`],failure=`old`,progress=[`old`],packageName=`old.pkg`;
+function r(value){{uri=value}} function a(value){{name=value}} function s(value){{entries=value}}
+function fe(value){{failure=value}} function w(value){{progress=value}} function p(value){{packageName=value}}
+function d(value){{scanning.push(value)}} function O(message,type){{logs.push([message,type])}}
+function Jo(value){{return value}} function Oe(){{return{{rpy:1}}}} const ds={{rpy:`Ren'Py`}};
+const c=`all`,g=`zh`;
+const E={{
+  listApkEntries:async input=>{{calls.push([`list`,input.uri]);return{{entries:[{{fileType:`rpy`}}],scanDurationMs:1200,packageName:``}}}},
+  getApkPackageName:async input=>{{calls.push([`package`,input.uri]);return{{packageName:`fallback.pkg`}}}},
+  pickApkFile:async()=>{{calls.push([`pick`]);return{{uri:`file://picked.apk`,name:`Picked.apk`}}}},
+}};
+const loadSelectedApk={loader_initializer};
+let installedDialog=null,installedError=``,installedLoading=false,installedApps=[];
+const renderedStates=[];
+function renderInstalledApps(){{renderedStates.push({{loading:installedLoading,error:installedError,count:installedApps.length}})}}
+let closed=0;
+function closeInstalledApps(){{closed+=1}}
+
+async function main(){{
+  const installed={{uri:`file://installed.apk`,name:`Friendly Game.apk`,label:`Friendly Game`,packageName:`game.pkg`,source:`installed`,splitApk:true,splitCount:3}};
+  await loadSelectedApk(installed);
+  check(calls[0][0]===`list`&&calls[0][1]===installed.uri,`installed uses shared URI scanner`);
+  check(uri===installed.uri&&name===installed.name,`selection name wins`);
+  check(packageName===installed.packageName,`installed package metadata wins`);
+  check(window.__slgSelectionMeta===installed,`selection metadata preserved by identity`);
+  check(logs.some(([message])=>message===`该应用使用拆分安装包（3 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`),`split warning`);
+  check(entries.length===1&&failure===null&&progress.length===0,`old task reset`);
+
+  E.listApkEntries=async input=>{{calls.push([`list`,input.uri]);return{{entries:[],scanDurationMs:5}}}};
+  let splitError=``;
+  try{{await loadSelectedApk({{uri:`file://split.apk`,label:`Split`,splitApk:true,splitCount:2}})}}catch(error){{splitError=error.message}}
+  check(splitError===`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`,`dedicated split error`);
+  check(scanning.at(-1)===false,`error clears scanning`);
+  E.listApkEntries=async()=>({{entries:[{{fileType:`rpy`}}]}});
+  await loadSelectedApk({{uri:`file://retry.apk`,name:`Retry.apk`}});
+  check(scanning.at(-1)===false&&uri===`file://retry.apk`,`selection recovers after error`);
+
+  const apps=[{{label:`Alpha Story`,packageName:`com.game.one`}},{{label:`Beta`,packageName:`ORG.EXAMPLE.TWO`}}];
+  check(filterInstalledApps(apps,`alpha`)[0]===apps[0],`case-insensitive label search`);
+  check(filterInstalledApps(apps,`example`)[0]===apps[1],`case-insensitive package search`);
+
+  window.Capacitor={{Plugins:{{FileManager:{{listInstalledApps:async()=>{{throw new Error(`native list failed`)}}}}}}}};
+  await loadInstalledApps();
+  check(renderedStates.some(state=>state.loading),`list exposes loading state`);
+  check(installedLoading===false&&installedError===`native list failed`,`list exposes recoverable error state`);
+  window.Capacitor.Plugins.FileManager.listInstalledApps=async()=>({{apps:[]}});
+  await loadInstalledApps();
+  check(installedLoading===false&&installedError===``&&installedApps.length===0,`retry reaches empty state`);
+
+  let selectedArgs=null,loadedSelection=null;
+  window.Capacitor={{Plugins:{{FileManager:{{selectInstalledApp:async args=>{{selectedArgs=args;return installed}}}}}}}};
+  window.__slgLoadSelectedApk=async selection=>{{loadedSelection=selection}};
+  await chooseInstalledApp(apps[0]);
+  check(selectedArgs.packageName===apps[0].packageName,`native installed selection`);
+  check(closed===1,`installed selection closes`);
+  check(loadedSelection===installed,`installed selection enters shared loader`);
+}}
+main().catch(error=>{{console.error(error);process.exitCode=1}});
+'''
+        result = subprocess.run(
+            ["node", "-e", filter_runtime + list_runtime + choose_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_patch_contains_player_workshop_contract(self):
         module = self.load_patch()
         js, css = module.patch_assets(
@@ -116,7 +259,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
         self.assertIn('bubbles:true,cancelable:true,view:window', js)
         self.assertIn('function triggerReactButton(button)', js)
-        self.assertIn('actionButton("选择 APK 文件",()=>triggerReactButton(sourceButton))', js)
+        self.assertIn('actionButton("选择应用或 APK",openSourceChooser)', js)
+        self.assertIn('await loadSelectedApk(await E.pickApkFile())', js)
         self.assertIn('actionButton("开始翻译",()=>triggerReactButton(startButton))', js)
         # The guard must inspect the freshly queried React node, not a stale
         # reference captured before React rerenders the form.
