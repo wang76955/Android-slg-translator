@@ -355,23 +355,68 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
         )
         self.assertIn("window.__slgHandleAndroidBack=", js)
         self.assertIn("enableWorkshopBackHandling", js)
+        self.assertIn("function openSettings(){armModalHistory()", js)
+        self.assertIn("if(settingsOpen){modalHistoryArmed=false;closeSettings(true);return}", js)
+        helper_start = js.index("function armModalHistory()")
+        helper_end = js.index("function filterInstalledApps(", helper_start)
+        helpers = js[helper_start:helper_end]
+        settings_start = js.index("function closeSettings(")
+        settings_end = js.index("function openSettings()", settings_start)
+        settings_close = js[settings_start:settings_end]
+        installed_start = js.index("function closeInstalledApps(")
+        installed_end = js.index("function findButton(", installed_start)
+        installed_close = js[installed_start:installed_end]
+        pop_start = js.index("function handleWorkshopPopState()")
+        pop_end = js.index("function schedule()", pop_start)
+        pop_handler = js[pop_start:pop_end]
         start = js.index("window.__slgHandleAndroidBack=")
         end = js.index('document.addEventListener("click"', start)
         handler = js[start:end]
         contract = r'''
 function check(value,label){if(!value)throw new Error(label)}
 globalThis.window=globalThis;
-let sourceDialog={hidden:false},installedDialog=null,settingsOpen=false,closedSource=0,closedInstalled=0,closedSettings=0;
-function closeSourceChooser(){sourceDialog.hidden=true;closedSource+=1}
-function closeInstalledApps(){installedDialog.hidden=true;closedInstalled+=1}
-function closeSettings(){settingsOpen=false;closedSettings+=1}
-check(window.__slgHandleAndroidBack()===true&&closedSource===1,`source modal consumed`);
-installedDialog={hidden:false};check(window.__slgHandleAndroidBack()===true&&closedInstalled===1,`installed modal consumed`);
-settingsOpen=true;check(window.__slgHandleAndroidBack()===true&&closedSettings===1,`settings consumed`);
-check(window.__slgHandleAndroidBack()===false,`ordinary back delegated`);
+const ID=`workshop-runtime`;
+let pushes=0,backs=0,marker=false;
+globalThis.history={state:{base:true},pushState(state){pushes+=1;marker=true;this.state=state},back(){backs+=1;marker=false;this.state={base:true}}};
+let modalHistoryArmed=false,modalHistoryClosing=false,modalHistoryRearm=false;
+let returnedFocus=0,previousSourceFocus={focus(){returnedFocus+=1}};
+let sourceDialog=null,installedDialog=null,settingsShell={hidden:false},settingsOpen=false;
+let installedListEpoch=0,sourceRequestEpoch=0,installedLoading=false,installedBusy=false;
+let manualIdle=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
+function refresh(){refreshes+=1} function setWorkshopState(){}
+
+function resetHistory(){pushes=0;backs=0;marker=false;returnedFocus=0;refreshes=0;modalHistoryArmed=false;modalHistoryClosing=false;modalHistoryRearm=false;history.state={base:true}}
+function assertNativeClose(label,isClosed,closeEffects){
+  check(window.__slgHandleAndroidBack()===true,`${label} consumed`);
+  check(isClosed(),`${label} closed`);
+  check(backs===1&&!modalHistoryArmed&&!marker,`${label} releases exactly one marker`);
+  check(closeEffects()===1,`${label} closes exactly once`);
+  handleWorkshopPopState();
+  check(backs===1&&isClosed()&&closeEffects()===1,`${label} release popstate does not close twice`);
+  check(window.__slgHandleAndroidBack()===false,`${label} leaves ordinary back delegated`);
+}
+
+resetHistory();sourceDialog={hidden:false};armModalHistory();
+assertNativeClose(`source modal`,()=>sourceDialog.hidden,()=>returnedFocus);
+
+resetHistory();sourceDialog=null;installedDialog={hidden:false,setAttribute(){}};armModalHistory();
+assertNativeClose(`installed modal`,()=>installedDialog.hidden,()=>returnedFocus);
+
+resetHistory();installedDialog=null;settingsOpen=true;settingsShell.hidden=false;armModalHistory();
+assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=>refreshes);
 '''
         result = subprocess.run(
-            ["node", "-e", "globalThis.window=globalThis;" + handler + contract],
+            [
+                "node",
+                "-e",
+                "globalThis.window=globalThis;"
+                + helpers
+                + settings_close
+                + installed_close
+                + pop_handler
+                + handler
+                + contract,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -619,7 +664,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             'pendingApiKey=input.value',
             'applyApiKeyToReact()',
             '!el.closest(".workshop-settings-shell")',
-            'function closeSettings(){settingsOpen=false;manualIdle=false',
+            'function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false',
             'state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
             'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
             'const isInstall=button===installButton||button?.textContent?.includes("安装补丁版")',
