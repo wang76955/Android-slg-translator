@@ -5,6 +5,8 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 
 import com.getcapacitor.JSArray;
@@ -33,6 +35,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public final class FastApkScanner {
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     static final long SCAN_TIMEOUT_MS = 60_000L;
     static final int MAX_CACHE_ENTRIES = 4;
     private static final int COPY_BUFFER_SIZE = 1024 * 1024;
@@ -62,10 +65,14 @@ public final class FastApkScanner {
     ) {
         new Thread(() -> {
             try {
-                call.resolve(scan(context, Uri.parse(uriText), plugin));
-            } catch (Exception error) {
+                JSObject response = scan(context, Uri.parse(uriText), plugin);
+                mainHandler.post(() -> call.resolve(response));
+            } catch (Throwable error) {
                 String message = error.getMessage();
-                call.reject("Failed to read APK: " + (message == null ? error.getClass().getSimpleName() : message));
+                String rejection = "Failed to read APK: " + (
+                    message == null ? error.getClass().getSimpleName() : message
+                );
+                mainHandler.post(() -> call.reject(rejection));
             }
         }, "slg-apk-scan").start();
     }

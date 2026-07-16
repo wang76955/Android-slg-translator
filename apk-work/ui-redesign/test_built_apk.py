@@ -233,27 +233,40 @@ class BuiltApkTest(unittest.TestCase):
                     dumps[dex_name] = self.assert_tool_success(completed)
 
         contracts = (
-            ("classes6.dex", "Lcom/slgtranslator/app/FileManagerPlugin;"),
-            ("classes7.dex", "Lcom/slgtranslator/app/InstalledAppSource;"),
+            (
+                "classes6.dex",
+                "Lcom/slgtranslator/app/FileManagerPlugin;",
+                ("listInstalledApps", "selectInstalledApp", "enableWorkshopBackHandling"),
+            ),
+            (
+                "classes7.dex",
+                "Lcom/slgtranslator/app/InstalledAppSource;",
+                ("listInstalledApps", "selectInstalledApp"),
+            ),
+            (
+                "classes7.dex",
+                "Lcom/slgtranslator/app/WorkshopBackHandler;",
+                ("enable", "delegateDefaultBack"),
+            ),
         )
-        for assigned_dex, descriptor in contracts:
+        for assigned_dex, descriptor, methods in contracts:
             self.assertIn(assigned_dex, dumps)
             self.assert_class_contract(
                 dumps,
                 assigned_dex,
                 descriptor,
-                ("listInstalledApps", "selectInstalledApp"),
+                methods,
             )
             mutated = dict(dumps)
             mutated[assigned_dex] = self.move_method_to_wrong_class(
-                mutated[assigned_dex], descriptor, "listInstalledApps"
+                mutated[assigned_dex], descriptor, methods[0]
             )
             with self.assertRaises(AssertionError):
                 self.assert_class_contract(
                     mutated,
                     assigned_dex,
                     descriptor,
-                    ("listInstalledApps", "selectInstalledApp"),
+                    methods,
                 )
 
     def test_manifest_queries_are_minimal_and_same_intent(self):

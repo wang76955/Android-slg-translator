@@ -172,6 +172,29 @@ class FastApkScannerContractTest(unittest.TestCase):
         ):
             self.assertIn(token, source)
         self.assertNotIn("ZipInputStream", source)
+        self.assertIn("catch (Throwable error)", source)
+        self.assertIn("new Handler(Looper.getMainLooper())", source)
+        self.assertIn("mainHandler.post", source)
+
+    def test_native_back_handler_is_injected_once_and_delegates_default_back(self):
+        handler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "WorkshopBackHandler.java"
+        self.assertTrue(handler.exists(), "WorkshopBackHandler.java must exist")
+        source = handler.read_text("utf-8")
+        for token in (
+            "OnBackPressedCallback",
+            "getOnBackPressedDispatcher().addCallback",
+            "evaluateJavascript",
+            "window.__slgHandleAndroidBack",
+            "setEnabled(false)",
+            "getOnBackPressedDispatcher().onBackPressed()",
+            "setEnabled(true)",
+            "activity.runOnUiThread",
+        ):
+            self.assertIn(token, source)
+        builder = BUILDER.read_text("utf-8")
+        self.assertIn("BACK_HANDLER_METHOD", builder)
+        self.assertIn("enableWorkshopBackHandling", builder)
+        self.assertIn("WorkshopBackHandler;->enable", builder)
 
     def test_scanner_prefers_seekable_descriptor_for_multi_gigabyte_apks(self):
         self.assertTrue(SCANNER.exists(), "FastApkScanner.java must exist")
@@ -401,12 +424,19 @@ public final class CacheOwnershipHarness {
         helper_dump = dump(classes7)
         self.assertEqual(plugin_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'selectInstalledApp'"), 1)
+        self.assertEqual(plugin_dump.count("name          : 'enableWorkshopBackHandling'"), 1)
         self.assertEqual(
             helper_dump.count("Class descriptor  : 'Lcom/slgtranslator/app/InstalledAppSource;'"),
             1,
         )
         self.assertEqual(helper_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(helper_dump.count("name          : 'selectInstalledApp'"), 1)
+        self.assertEqual(
+            helper_dump.count("Class descriptor  : 'Lcom/slgtranslator/app/WorkshopBackHandler;'"),
+            1,
+        )
+        self.assertEqual(helper_dump.count("name          : 'enable'"), 1)
+        self.assertEqual(helper_dump.count("name          : 'delegateDefaultBack'"), 1)
 
 
 if __name__ == "__main__":

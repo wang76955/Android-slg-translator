@@ -123,6 +123,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         loader_initializer = js[
             loader_start + len("loadSelectedApk=") : loader_end
         ]
+        timeout_start = js.index("function withTimeout(")
+        timeout_runtime = js[timeout_start:loader_start]
         xe_start = js.index("xe=async()=>", loader_end)
         xe_end = js.index(",Se=async()=>", xe_start)
         xe_initializer = js[xe_start + len("xe=") : xe_end]
@@ -160,6 +162,7 @@ const E={{
   getApkPackageName:async input=>{{calls.push([`package`,input.uri]);return{{packageName:`fallback.pkg`}}}},
   pickApkFile:async()=>{{calls.push([`pick`]);return{{uri:`file://picked.apk`,name:`Picked.apk`}}}},
 }};
+{timeout_runtime}
 const loadSelectedApk={loader_initializer};
 const xe={xe_initializer};
 let installedDialog=null,installedError=``,installedLoading=false,installedApps=[],installedListEpoch=0,sourceRequestEpoch=0,installedBusy=false;
@@ -343,6 +346,73 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
             encoding="utf-8",
             check=False,
         )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_android_back_handler_consumes_only_visible_overlays(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("window.__slgHandleAndroidBack=", js)
+        self.assertIn("enableWorkshopBackHandling", js)
+        start = js.index("window.__slgHandleAndroidBack=")
+        end = js.index('document.addEventListener("click"', start)
+        handler = js[start:end]
+        contract = r'''
+function check(value,label){if(!value)throw new Error(label)}
+globalThis.window=globalThis;
+let sourceDialog={hidden:false},installedDialog=null,settingsOpen=false,closedSource=0,closedInstalled=0,closedSettings=0;
+function closeSourceChooser(){sourceDialog.hidden=true;closedSource+=1}
+function closeInstalledApps(){installedDialog.hidden=true;closedInstalled+=1}
+function closeSettings(){settingsOpen=false;closedSettings+=1}
+check(window.__slgHandleAndroidBack()===true&&closedSource===1,`source modal consumed`);
+installedDialog={hidden:false};check(window.__slgHandleAndroidBack()===true&&closedInstalled===1,`installed modal consumed`);
+settingsOpen=true;check(window.__slgHandleAndroidBack()===true&&closedSettings===1,`settings consumed`);
+check(window.__slgHandleAndroidBack()===false,`ordinary back delegated`);
+'''
+        result = subprocess.run(
+            ["node", "-e", "globalThis.window=globalThis;" + handler + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_shared_loader_has_deadline_and_stale_safe_settlement(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("function withTimeout(", js)
+        self.assertIn("clearTimeout(timer)", js)
+        self.assertIn("window.__slgScanTimeoutMs||65000", js)
+        helper_start = js.index("function withTimeout(")
+        loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=", helper_start)
+        loader_end = js.index(",xe=async()=>", loader_start)
+        helper = js[helper_start:loader_start]
+        loader = js[loader_start + len("loadSelectedApk="):loader_end]
+        contract = rf'''
+globalThis.window=globalThis;window.__slgScanTimeoutMs=10;
+const scanning=[];let uri=``,name=``,entries=[],pkg=``,failure=null;const logs=[];
+function r(v){{uri=v}} function a(v){{name=v}} function s(v){{entries=v}} function p(v){{pkg=v}}
+function fe(v){{failure=v}} const he={{current:[]}};function w(){{}} function d(v){{scanning.push(v)}} function O(v){{logs.push(v)}}
+function Jo(v){{return v}} function Oe(){{return {{rpy:1}}}} const ds={{rpy:`rpy`}},c=`all`,g=`zh`;
+let mode=`pending`,lateResolve;
+const E={{listApkEntries(){{if(mode===`pending`)return new Promise(resolve=>lateResolve=resolve);if(mode===`reject`)return Promise.reject(new Error(`native reject`));return Promise.resolve({{entries:[{{name:`fresh`,fileType:`rpy`}}]}})}},getApkPackageName:async()=>({{packageName:``}})}};
+{helper}
+const loadSelectedApk={loader};
+async function main(){{
+ let timeout=``;try{{await loadSelectedApk({{uri:`pending`,name:`Pending.apk`}})}}catch(e){{timeout=e.message}}
+ if(!/timed out|超时/i.test(timeout)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
+ mode=`reject`;let rejected=``;try{{await loadSelectedApk({{uri:`reject`,name:`Reject.apk`}})}}catch(e){{rejected=e.message}}
+ if(rejected!==`native reject`||scanning.at(-1)!==false)throw new Error(`reject contract`);
+ mode=`resolve`;await loadSelectedApk({{uri:`fresh`,name:`Fresh.apk`}});lateResolve({{entries:[{{name:`late`,fileType:`rpy`}}]}});await new Promise(resolve=>setTimeout(resolve,0));
+ if(uri!==`fresh`||entries[0].name!==`fresh`||window.__slgSelectionError!==null)throw new Error(`late resolve overwrote fresh selection`);
+}}
+main().catch(e=>{{console.error(e);process.exitCode=1}})
+'''
+        result = subprocess.run(["node", "-e", contract], capture_output=True, text=True, encoding="utf-8", check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_installed_list_and_selection_epochs_ignore_stale_requests(self):

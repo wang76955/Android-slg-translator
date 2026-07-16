@@ -86,6 +86,29 @@ INSTALLED_APP_METHODS = (
     ),
 )
 
+BACK_HANDLER_SIGNATURE = ".method public final enableWorkshopBackHandling(Lcom/getcapacitor/PluginCall;)V"
+BACK_HANDLER_DELEGATE = "Lcom/slgtranslator/app/WorkshopBackHandler;->enable"
+BACK_HANDLER_METHOD = """.method public final enableWorkshopBackHandling(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 3
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/getcapacitor/Plugin;->getActivity()Landroid/app/Activity;
+    move-result-object v0
+    invoke-virtual {p0}, Lcom/getcapacitor/Plugin;->getBridge()Lcom/getcapacitor/Bridge;
+    move-result-object v1
+    invoke-virtual {v1}, Lcom/getcapacitor/Bridge;->getWebView()Landroid/webkit/WebView;
+    move-result-object v1
+    invoke-static {v0, v1}, Lcom/slgtranslator/app/WorkshopBackHandler;->enable(Landroid/app/Activity;Landroid/webkit/WebView;)V
+
+    new-instance v2, Lcom/getcapacitor/JSObject;
+    invoke-direct {v2}, Lcom/getcapacitor/JSObject;-><init>()V
+    invoke-virtual {p1, v2}, Lcom/getcapacitor/PluginCall;->resolve(Lcom/getcapacitor/JSObject;)V
+    return-void
+.end method"""
+
 ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
 ANDROID_NAME = f"{{{ANDROID_NAMESPACE}}}name"
 
@@ -215,6 +238,13 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path]:
     for signature, delegate, _ in INSTALLED_APP_METHODS:
         if patched.count(signature) != 1 or patched.count(delegate) != 1:
             raise RuntimeError(f"Expected exactly one valid installed app bridge for {signature}")
+    back_count = patched.count(BACK_HANDLER_SIGNATURE)
+    if back_count == 0:
+        patched = patched.rstrip() + "\n\n" + BACK_HANDLER_METHOD + "\n"
+    elif back_count != 1:
+        raise RuntimeError(f"Workshop back bridge is repeatedly injected: {back_count}")
+    if patched.count(BACK_HANDLER_SIGNATURE) != 1 or patched.count(BACK_HANDLER_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid workshop back bridge")
     smali.write_text(patched, "utf-8", newline="\n")
     run(
         [
