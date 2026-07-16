@@ -234,6 +234,7 @@ class BuiltApkTest(unittest.TestCase):
             with tempfile.TemporaryDirectory(dir=APK_WORK) as directory:
                 temporary = Path(directory)
                 dumps: dict[str, str] = {}
+                code_dumps: dict[str, str] = {}
                 for dex_name in dex_names:
                     dex_path = temporary / dex_name
                     dex_path.write_bytes(archive.read(dex_name))
@@ -241,6 +242,22 @@ class BuiltApkTest(unittest.TestCase):
                         [str(DEXDUMP), str(dex_path.relative_to(ROOT))]
                     )
                     dumps[dex_name] = self.assert_tool_success(completed)
+                    if dex_name == "classes6.dex":
+                        completed = self.run_tool(
+                            [str(DEXDUMP), "-d", str(dex_path.relative_to(ROOT))]
+                        )
+                        code_dumps[dex_name] = self.assert_tool_success(completed)
+
+        plugin_code = re.sub(r"\s+", "", code_dumps["classes6.dex"])
+        self.assertIn(
+            "Lcom/getcapacitor/Plugin;.getActivity:()"
+            "Landroidx/appcompat/app/AppCompatActivity;",
+            plugin_code,
+        )
+        self.assertNotIn(
+            "Lcom/getcapacitor/Plugin;.getActivity:()Landroid/app/Activity;",
+            plugin_code,
+        )
 
         contracts = (
             (

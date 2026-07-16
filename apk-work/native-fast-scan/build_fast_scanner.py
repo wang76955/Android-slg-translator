@@ -95,7 +95,7 @@ BACK_HANDLER_METHOD = """.method public final enableWorkshopBackHandling(Lcom/ge
     .locals 3
     .param p1, "call"    # Lcom/getcapacitor/PluginCall;
 
-    invoke-virtual {p0}, Lcom/getcapacitor/Plugin;->getActivity()Landroid/app/Activity;
+    invoke-virtual {p0}, Lcom/getcapacitor/Plugin;->getActivity()Landroidx/appcompat/app/AppCompatActivity;
     move-result-object v0
     invoke-virtual {p0}, Lcom/getcapacitor/Plugin;->getBridge()Lcom/getcapacitor/Bridge;
     move-result-object v1

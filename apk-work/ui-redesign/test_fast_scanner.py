@@ -14,6 +14,7 @@ BUILDER = FAST_SCAN / "build_fast_scanner.py"
 WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
 GENERATED = FAST_SCAN / "generated"
 DEXDUMP = ROOT / ".tools" / "android-15" / "dexdump.exe"
+CAPACITOR_DEX = ROOT / "apk-work" / "extracted" / "classes3.dex"
 JAVA_HOME = ROOT / ".tools" / "jdk-17" / "jdk-17.0.19+10"
 JAVA = JAVA_HOME / "bin" / "java.exe"
 JAVAC = JAVA_HOME / "bin" / "javac.exe"
@@ -195,6 +196,48 @@ class FastApkScannerContractTest(unittest.TestCase):
         self.assertIn("BACK_HANDLER_METHOD", builder)
         self.assertIn("enableWorkshopBackHandling", builder)
         self.assertIn("WorkshopBackHandler;->enable", builder)
+
+    def test_back_handler_capacitor_invokes_match_real_base_dex_abi(self):
+        self.assertTrue(CAPACITOR_DEX.exists(), "real Capacitor classes3.dex is required")
+        self.assertTrue(DEXDUMP.exists(), "Capacitor ABI verification requires dexdump.exe")
+        builder = BUILDER.read_text("utf-8")
+        method_start = builder.index('BACK_HANDLER_METHOD = """')
+        method_end = builder.index('"""', method_start + len('BACK_HANDLER_METHOD = """'))
+        method = builder[method_start:method_end]
+        invokes = re.findall(
+            r"invoke-virtual\s+\{[^}]+\},\s+"
+            r"(Lcom/getcapacitor/[^;]+;)->([^\s(]+)(\([^\s]+)",
+            method,
+        )
+        self.assertGreaterEqual(len(invokes), 3)
+
+        completed = subprocess.run(
+            [str(DEXDUMP.relative_to(ROOT)), str(CAPACITOR_DEX.relative_to(ROOT))],
+            check=True,
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+        )
+        dump = completed.stdout
+        for owner, name, descriptor in invokes:
+            marker = f"Class descriptor  : '{owner}'"
+            start = dump.index(marker)
+            end = dump.find("\nClass #", start)
+            class_block = dump[start:end if end >= 0 else len(dump)]
+            methods = {
+                (method_name, method_type)
+                for method_name, method_type in re.findall(
+                    r"name\s+: '([^']+)'\s+type\s+: '(\([^']+)'",
+                    class_block,
+                )
+            }
+            self.assertIn(
+                (name, descriptor),
+                methods,
+                f"{owner}->{name}{descriptor} is absent from real Capacitor ABI",
+            )
 
     def test_native_back_handler_releases_callbacks_and_guards_async_lifecycle(self):
         handler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "WorkshopBackHandler.java"
@@ -547,9 +590,13 @@ public final class CacheOwnershipHarness {
             self.skipTest("generated DEX files are not present; run build_fast_scanner.py first")
         self.assertTrue(DEXDUMP.exists(), "generated DEX verification requires dexdump.exe")
 
-        def dump(path):
+        def dump(path, disassemble=False):
             completed = subprocess.run(
-                [str(DEXDUMP.relative_to(ROOT)), str(path.relative_to(ROOT))],
+                [
+                    str(DEXDUMP.relative_to(ROOT)),
+                    *(["-d"] if disassemble else []),
+                    str(path.relative_to(ROOT)),
+                ],
                 check=True,
                 cwd=ROOT,
                 stdout=subprocess.PIPE,
@@ -560,10 +607,20 @@ public final class CacheOwnershipHarness {
             return completed.stdout
 
         plugin_dump = dump(classes6)
+        plugin_code = re.sub(r"\s+", "", dump(classes6, disassemble=True))
         helper_dump = dump(classes7)
         self.assertEqual(plugin_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'selectInstalledApp'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'enableWorkshopBackHandling'"), 1)
+        self.assertIn(
+            "Lcom/getcapacitor/Plugin;.getActivity:()"
+            "Landroidx/appcompat/app/AppCompatActivity;",
+            plugin_code,
+        )
+        self.assertNotIn(
+            "Lcom/getcapacitor/Plugin;.getActivity:()Landroid/app/Activity;",
+            plugin_code,
+        )
         self.assertEqual(
             helper_dump.count("Class descriptor  : 'Lcom/slgtranslator/app/InstalledAppSource;'"),
             1,
