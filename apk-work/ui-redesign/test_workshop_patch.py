@@ -44,6 +44,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
             "function armModalHistory()",
             "function handleWorkshopPopState()",
             "function focusInstalledTarget()",
+            "installedListEpoch",
+            "sourceRequestEpoch",
+            "installedBusy",
             "FileManager.listInstalledApps()",
             "FileManager.selectInstalledApp({packageName:app.packageName})",
             "await window.__slgLoadSelectedApk(selection)",
@@ -51,7 +54,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
             "从已安装应用选择",
             "从文件选择 APK",
             "正在读取应用列表",
-            "没有找到可选择的应用",
+            "没有找到可选择的已安装应用。你仍可从文件选择 APK。",
+            "正在读取应用安装包…",
+            "正在读取已安装应用的 APK...",
             "重新加载",
             "搜索应用名称或包名",
         ):
@@ -113,6 +118,7 @@ class WorkshopPatchContractTest(unittest.TestCase):
 function check(condition,label){{if(!condition)throw new Error(label)}}
 globalThis.window=globalThis;
 const calls=[],logs=[],scanning=[];
+const he={{current:[]}};
 let uri=`old`,name=`old.apk`,entries=[`old`],failure=`old`,progress=[`old`],packageName=`old.pkg`;
 function r(value){{uri=value}} function a(value){{name=value}} function s(value){{entries=value}}
 function fe(value){{failure=value}} function w(value){{progress=value}} function p(value){{packageName=value}}
@@ -126,7 +132,7 @@ const E={{
 }};
 const loadSelectedApk={loader_initializer};
 const xe={xe_initializer};
-let installedDialog=null,installedError=``,installedLoading=false,installedApps=[];
+let installedDialog=null,installedError=``,installedLoading=false,installedApps=[],installedListEpoch=0,sourceRequestEpoch=0,installedBusy=false;
 const renderedStates=[];
 function renderInstalledApps(){{renderedStates.push({{loading:installedLoading,error:installedError,count:installedApps.length}})}}
 let closed=0;
@@ -179,6 +185,7 @@ async function main(){{
   check(filterInstalledApps(apps,`alpha`)[0]===apps[0],`case-insensitive label search`);
   check(filterInstalledApps(apps,`example`)[0]===apps[1],`case-insensitive package search`);
 
+  installedDialog={{hidden:false,setAttribute(){{}},querySelector(){{return null}}}};
   window.Capacitor={{Plugins:{{FileManager:{{listInstalledApps:async()=>{{throw new Error(`native list failed`)}}}}}}}};
   await loadInstalledApps();
   check(renderedStates.some(state=>state.loading),`list exposes loading state`);
@@ -196,7 +203,20 @@ async function main(){{
   check(calls.at(-1)[0]===`list`&&calls.at(-1)[1]===installed.uri,`installed selection enters real shared scanner`);
   check(uri===installed.uri&&name===installed.name&&packageName===installed.packageName,`installed metadata survives real loader`);
   check(window.__slgSelectionMeta===installed,`installed split metadata preserved by identity`);
+  check(logs.some(([message])=>message===`正在读取已安装应用的 APK...`),`installed selection uses dedicated loading log`);
   check(logs.some(([message])=>message===`该应用使用拆分安装包（3 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`),`split warning`);
+
+  let resolveOldScan,resolveNewScan;
+  E.listApkEntries=input=>new Promise(resolve=>{{if(input.uri===`file://old.apk`)resolveOldScan=resolve;else resolveNewScan=resolve}});
+  const oldScan=loadSelectedApk({{uri:`file://old.apk`,name:`Old.apk`}});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  const newScan=loadSelectedApk({{uri:`file://new.apk`,name:`New.apk`,packageName:`new.pkg`}});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  resolveNewScan({{entries:[{{fileType:`rpy`,name:`new-entry`}}]}});await newScan;
+  resolveOldScan({{entries:[{{fileType:`rpy`,name:`old-entry`}}],packageName:`old.pkg`}});await oldScan;
+  check(uri===`file://new.apk`&&name===`New.apk`,`new scan identity survives reverse completion`);
+  check(entries[0].name===`new-entry`&&packageName===`new.pkg`,`stale scan cannot overwrite entries or package`);
+  check(window.__slgSelectionError===null&&scanning.at(-1)===false,`stale completion cannot overwrite error or scanning state`);
 }}
 main().catch(error=>{{console.error(error);process.exitCode=1}});
 '''
@@ -254,8 +274,8 @@ check(backs===1,`programmatic close consumes its one history entry`);
 
 const search={focusCalls:0,focus(){this.focusCalls+=1}};
 const content={children:[],replaceChildren(){this.children=[]},append(...nodes){this.children.push(...nodes)}};
-installedDialog={hidden:false,querySelector(selector){if(selector===`.workshop-installed-search`)return search;if(selector===`.workshop-installed-content`)return content;if(selector===`.workshop-installed-content button`)return content.children.find(node=>node.tag===`button`)||null;return null}};
-let installedLoading=true,installedError=``,installedApps=[];
+installedDialog={hidden:false,setAttribute(){},querySelector(selector){if(selector===`.workshop-installed-search`)return search;if(selector===`.workshop-installed-content`)return content;if(selector===`.workshop-installed-content button`)return content.children.find(node=>node.tag===`button`)||null;return null}};
+let installedLoading=true,installedError=``,installedApps=[],installedListEpoch=0,sourceRequestEpoch=0,installedBusy=false;
 function textNode(tag,cls,text){return{tag,cls,textContent:text,children:[],append(...nodes){this.children.push(...nodes)}}}
 function actionButton(label,handler){return{tag:`button`,textContent:label,onclick:handler,children:[]}}
 let retries=0,fileFallbacks=0,closed=0;
@@ -288,6 +308,84 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
                 + pop_handler
                 + behavior_contract,
             ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_installed_list_and_selection_epochs_ignore_stale_requests(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        helper_start = js.index("function armModalHistory()")
+        helper_end = js.index("function filterInstalledApps(", helper_start)
+        helpers = js[helper_start:helper_end]
+        installed_start = helper_end
+        installed_end = js.index("function findButton(", installed_start)
+        installed_runtime = js[installed_start:installed_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;const ID=`workshop-runtime`;
+window.requestAnimationFrame=callback=>{callback();return 1};window.setTimeout=()=>0;
+globalThis.history={state:{},pushState(){},back(){}};
+let modalHistoryArmed=false,modalHistoryClosing=false,modalHistoryRearm=false,previousSourceFocus={focus(){}};
+const content={children:[],replaceChildren(){this.children=[]},append(...nodes){this.children.push(...nodes)}};
+const search={value:``,focus(){}};
+const cancelAction={disabled:false};
+const attrs={};
+let installedDialog={hidden:false,setAttribute(name,value){attrs[name]=String(value)},querySelector(selector){if(selector===`.workshop-installed-content`)return content;if(selector===`.workshop-installed-search`)return search;if(selector===`.workshop-installed-content button`)return findNode(content.children,node=>node.tag===`button`);if(selector===`.workshop-modal-panel > .workshop-modal-action`)return cancelAction;return null}};
+function findNode(nodes,predicate){for(const node of nodes||[]){if(predicate(node))return node;const nested=findNode(node.children,predicate);if(nested)return nested}return null}
+function findNodes(nodes,predicate,result=[]){for(const node of nodes||[]){if(predicate(node))result.push(node);findNodes(node.children,predicate,result)}return result}
+function textNode(tag,cls,text){return{tag,cls,textContent:text,children:[],dataset:{},style:{},disabled:false,setAttribute(name,value){this[name]=value},append(...nodes){this.children.push(...nodes)}}}
+function actionButton(label,handler,secondary){const button=textNode(`button`,secondary?`secondary`:`primary`,label);button.onclick=handler;return button}
+let installedApps=[],installedLoading=false,installedError=``,installedListEpoch=0,sourceRequestEpoch=0,installedBusy=false;
+let fallbackClicks=0;const sourceButton={};function triggerReactButton(){fallbackClicks+=1}
+
+const listResolvers=[];
+window.Capacitor={Plugins:{FileManager:{listInstalledApps:()=>new Promise((resolve,reject)=>listResolvers.push({resolve,reject}))}}};
+
+async function main(){
+  const first=loadInstalledApps(),second=loadInstalledApps();
+  listResolvers[1].resolve({apps:[{label:`New`,packageName:`new.pkg`}]});await second;
+  listResolvers[0].resolve({apps:[{label:`Old`,packageName:`old.pkg`}]});await first;
+  check(installedApps.length===1&&installedApps[0].packageName===`new.pkg`,`slow old list cannot overwrite fast new list`);
+
+  const beforeClose=installedApps;
+  const closing=loadInstalledApps();closeInstalledApps(true);listResolvers[2].resolve({apps:[{label:`Closed stale`,packageName:`closed.pkg`}]});await closing;
+  check(installedDialog.hidden&&installedApps===beforeClose,`closed dialog invalidates pending list response`);
+
+  installedDialog.hidden=false;installedApps=[{label:`One`,packageName:`one.pkg`},{label:`Two`,packageName:`two.pkg`}];installedError=``;
+  const chooseResolvers={};
+  window.Capacitor.Plugins.FileManager.selectInstalledApp=({packageName})=>new Promise((resolve,reject)=>{chooseResolvers[packageName]={resolve,reject}});
+  const loaded=[];window.__slgLoadSelectedApk=async selection=>{loaded.push(selection.packageName)};
+  const chooseOne=chooseInstalledApp(installedApps[0]);
+  const chooseTwo=chooseInstalledApp(installedApps[1]);
+  renderInstalledApps();
+  check(attrs[`aria-busy`]===`true`,`choose marks dialog aria busy`);
+  check(findNodes(content.children,node=>node.tag===`button`).every(button=>button.disabled),`busy disables rows and source operations`);
+  check(cancelAction.disabled,`busy disables modal source cancellation action`);
+  check(findNode(content.children,node=>node.textContent===`正在读取应用安装包…`),`busy copy is visible`);
+  chooseResolvers[`two.pkg`].resolve({uri:`file://two.apk`,name:`Two.apk`,packageName:`two.pkg`,source:`installed`});await chooseTwo;
+  chooseResolvers[`one.pkg`].resolve({uri:`file://one.apk`,name:`One.apk`,packageName:`one.pkg`,source:`installed`});await chooseOne;
+  check(loaded.join(`,`)===`two.pkg`,`stale choose success cannot close or load`);
+
+  installedDialog.hidden=false;modalHistoryArmed=true;
+  const staleFailure=chooseInstalledApp({label:`Three`,packageName:`three.pkg`});
+  closeInstalledApps();chooseResolvers[`three.pkg`].reject(new Error(`stale select failed`));await staleFailure;
+  check(installedDialog.hidden&&!modalHistoryArmed,`stale choose failure cannot rearm or reopen after close`);
+
+  installedDialog.hidden=false;installedApps=[];installedLoading=false;installedError=``;installedBusy=false;renderInstalledApps();
+  check(findNode(content.children,node=>node.textContent===`没有找到可选择的已安装应用。你仍可从文件选择 APK。`),`complete empty guidance`);
+  const fallback=findNode(content.children,node=>node.textContent===`从文件选择 APK`);check(fallback,`empty state file fallback exists`);fallback.onclick();
+  check(fallbackClicks===1&&installedDialog.hidden,`empty fallback executes React file picker bridge`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", helpers + installed_runtime + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
