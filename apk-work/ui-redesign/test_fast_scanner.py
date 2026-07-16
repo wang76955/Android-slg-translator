@@ -196,6 +196,145 @@ class FastApkScannerContractTest(unittest.TestCase):
         self.assertIn("enableWorkshopBackHandling", builder)
         self.assertIn("WorkshopBackHandler;->enable", builder)
 
+    def test_native_back_handler_releases_callbacks_and_guards_async_lifecycle(self):
+        handler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "WorkshopBackHandler.java"
+        source = handler.read_text("utf-8")
+        self.assertRegex(
+            source,
+            r"Map<ComponentActivity,\s*WeakReference<OnBackPressedCallback>>",
+        )
+
+        harness = r"""
+import android.webkit.ValueCallback;
+import android.webkit.WebView;
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+import androidx.activity.OnBackPressedDispatcher;
+import androidx.lifecycle.Lifecycle;
+import com.slgtranslator.app.WorkshopBackHandler;
+
+public final class WorkshopBackHandlerHarness {
+    public static void main(String[] args) {
+        liveFalseDelegatesOnce();
+        liveTrueIsConsumed();
+        destroyedBeforeJavascriptResultDoesNothing();
+        stoppedBeforeJavascriptResultDoesNothing();
+        enableIsIdempotent();
+    }
+
+    private static void liveFalseDelegatesOnce() {
+        Fixture fixture = new Fixture();
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        fixture.dispatcher.callback.handleOnBackPressed();
+        fixture.webView.reply("false");
+        require(fixture.dispatcher.defaultBackCount == 1, "live false must delegate once");
+    }
+
+    private static void liveTrueIsConsumed() {
+        Fixture fixture = new Fixture();
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        fixture.dispatcher.callback.handleOnBackPressed();
+        fixture.webView.reply("true");
+        require(fixture.dispatcher.defaultBackCount == 0, "true must consume back");
+    }
+
+    private static void destroyedBeforeJavascriptResultDoesNothing() {
+        Fixture fixture = new Fixture();
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        fixture.dispatcher.callback.handleOnBackPressed();
+        fixture.activity.destroyed = true;
+        fixture.webView.reply("false");
+        require(fixture.dispatcher.defaultBackCount == 0, "destroyed activity must not delegate");
+    }
+
+    private static void stoppedBeforeJavascriptResultDoesNothing() {
+        Fixture fixture = new Fixture();
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        fixture.dispatcher.callback.handleOnBackPressed();
+        fixture.activity.getLifecycle().setCurrentState(Lifecycle.State.CREATED);
+        fixture.webView.reply("false");
+        require(fixture.dispatcher.defaultBackCount == 0, "stopped activity must not delegate");
+    }
+
+    private static void enableIsIdempotent() {
+        Fixture fixture = new Fixture();
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        WorkshopBackHandler.enable(fixture.activity, fixture.webView);
+        require(fixture.dispatcher.addCount == 1, "enable must install exactly once");
+    }
+
+    private static final class Fixture {
+        final RecordingDispatcher dispatcher = new RecordingDispatcher();
+        final TestActivity activity = new TestActivity(dispatcher);
+        final DeferredWebView webView = new DeferredWebView();
+    }
+
+    private static final class TestActivity extends ComponentActivity {
+        final RecordingDispatcher dispatcher;
+        boolean destroyed;
+
+        TestActivity(RecordingDispatcher dispatcher) { this.dispatcher = dispatcher; }
+        @Override public void runOnUiThread(Runnable action) { action.run(); }
+        @Override public boolean isDestroyed() { return destroyed; }
+        @Override public OnBackPressedDispatcher getOnBackPressedDispatcher() { return dispatcher; }
+    }
+
+    private static final class RecordingDispatcher extends OnBackPressedDispatcher {
+        OnBackPressedCallback callback;
+        int addCount;
+        int defaultBackCount;
+
+        @Override public void addCallback(ComponentActivity owner, OnBackPressedCallback callback) {
+            this.callback = callback;
+            addCount++;
+        }
+        @Override public void onBackPressed() { defaultBackCount++; }
+    }
+
+    private static final class DeferredWebView extends WebView {
+        ValueCallback<String> callback;
+        @Override public void evaluateJavascript(String script, ValueCallback<String> callback) {
+            this.callback = callback;
+        }
+        void reply(String value) {
+            ValueCallback<String> pending = callback;
+            callback = null;
+            pending.onReceiveValue(value);
+        }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="back-handler-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "WorkshopBackHandlerHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    str(handler),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "WorkshopBackHandlerHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
     def test_scanner_prefers_seekable_descriptor_for_multi_gigabyte_apks(self):
         self.assertTrue(SCANNER.exists(), "FastApkScanner.java must exist")
         source = SCANNER.read_text("utf-8")
