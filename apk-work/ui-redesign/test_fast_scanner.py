@@ -13,6 +13,20 @@ GENERATED = FAST_SCAN / "generated"
 DEXDUMP = ROOT / ".tools" / "android-15" / "dexdump.exe"
 
 
+def java_block_after(source, marker):
+    start = source.index(marker)
+    opening = source.index("{", start + len(marker))
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    raise AssertionError(f"unterminated Java block after {marker!r}")
+
+
 class FastApkScannerContractTest(unittest.TestCase):
     def assert_installed_app_copy_contract(self, source):
         self.assertRegex(source, r"COPY_BUFFER_SIZE\s*=\s*1024\s*\*\s*1024\s*;")
@@ -90,6 +104,53 @@ class FastApkScannerContractTest(unittest.TestCase):
             r"(?:sourceDir|getAbsolutePath\(\)|getPath\(\))",
         )
 
+    def assert_installed_app_privacy_contract(self, source):
+        listing = java_block_after(source, "public static void listInstalledApps(")
+        launcher_iteration = java_block_after(
+            listing,
+            "for (ResolveInfo resolveInfo : launchers)",
+        )
+        self.assertRegex(
+            launcher_iteration,
+            r"packageName\.equals\(context\.getPackageName\(\)\)\s*\|\|\s*"
+            r"unique\.containsKey\(packageName\)",
+        )
+        self.assertIn("unique.put(packageName,", launcher_iteration)
+        self.assertLess(
+            launcher_iteration.index("unique.containsKey(packageName)"),
+            launcher_iteration.index("unique.put(packageName,"),
+        )
+
+        comparator = java_block_after(listing, "public int compare(AppEntry left, AppEntry right)")
+        self.assertIn("left.label.compareToIgnoreCase(right.label)", comparator)
+        self.assertNotIn("left.label.compareTo(right.label)", comparator)
+
+        serialization = java_block_after(listing, "for (AppEntry app : apps)")
+        list_fields = re.findall(r'\.put\("([^"]+)"\s*,', serialization)
+        self.assertEqual(list_fields, ["label", "packageName"])
+        self.assertNotRegex(serialization, r'"(?:uri|path|sourceDir|sourcePath)"')
+
+        selection = java_block_after(source, "private static void copySelectedApp(")
+        self.assertLess(
+            selection.index("isLauncherPackage(packageManager, packageName)"),
+            selection.index("packageManager.getApplicationInfo(packageName, 0)"),
+        )
+        validator = java_block_after(source, "private static boolean isLauncherPackage(")
+        self.assertIn("queryLauncherApps(packageManager)", validator)
+        query = java_block_after(source, "private static List<ResolveInfo> queryLauncherApps(")
+        self.assertRegex(query, r"new Intent\(Intent\.ACTION_MAIN\)")
+        self.assertRegex(query, r"intent\.addCategory\(Intent\.CATEGORY_LAUNCHER\)")
+        self.assertRegex(query, r"packageManager\.queryIntentActivities\(intent,\s*0\)")
+
+        success = selection[selection.index("call.resolve(new JSObject()") :]
+        success = success[:success.index("));") + 3]
+        success_fields = re.findall(r'\.put\("([^"]+)"\s*,', success)
+        self.assertEqual(
+            success_fields,
+            ["uri", "name", "packageName", "source", "splitApk", "splitCount"],
+        )
+        self.assertNotRegex(success, r'"(?:path|sourceDir|sourcePath)"')
+
     def test_scanner_uses_central_directory_and_bounded_async_copy(self):
         self.assertTrue(SCANNER.exists(), "FastApkScanner.java must exist")
         source = SCANNER.read_text("utf-8")
@@ -148,6 +209,7 @@ class FastApkScannerContractTest(unittest.TestCase):
             self.assertIn(token, source)
         self.assertNotIn("QUERY_ALL_PACKAGES", source)
         self.assert_installed_app_copy_contract(source)
+        self.assert_installed_app_privacy_contract(source)
 
         builder = BUILDER.read_text("utf-8")
         for token in (
@@ -172,6 +234,26 @@ class FastApkScannerContractTest(unittest.TestCase):
         self.assertNotEqual(source, broken, "controlled mutation must alter the buffer constant")
         with self.assertRaises(AssertionError):
             self.assert_installed_app_copy_contract(broken)
+
+    def test_installed_app_privacy_contract_detects_controlled_regressions(self):
+        source = INSTALLED_APPS.read_text("utf-8")
+        mutations = (
+            source.replace(
+                "packageName.equals(context.getPackageName()) || ",
+                "",
+                1,
+            ),
+            source.replace("compareToIgnoreCase", "compareTo", 1),
+            source.replace(
+                '.put("packageName", app.packageName)',
+                '.put("packageName", app.packageName).put("path", app.packageName)',
+                1,
+            ),
+        )
+        for broken in mutations:
+            self.assertNotEqual(source, broken, "controlled mutation must alter production source")
+            with self.assertRaises(AssertionError):
+                self.assert_installed_app_privacy_contract(broken)
 
     def test_generated_dex_has_unique_installed_app_bridge(self):
         classes6 = GENERATED / "classes6.dex"
