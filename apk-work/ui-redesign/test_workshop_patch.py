@@ -48,6 +48,21 @@ class WorkshopPatchContractTest(unittest.TestCase):
             module.write_generated_text(output, "alpha\nbeta\n")
             self.assertEqual(output.read_bytes(), b"alpha\nbeta\n")
 
+    def test_patched_javascript_is_syntactically_valid(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        result = subprocess.run(
+            ["node", "--input-type=module", "--check"],
+            input=js,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_installed_app_source_chooser_contract(self):
         module = self.load_patch()
         js, css = module.patch_assets(
@@ -123,8 +138,8 @@ class WorkshopPatchContractTest(unittest.TestCase):
         loader_initializer = js[
             loader_start + len("loadSelectedApk=") : loader_end
         ]
-        timeout_start = js.index("function withTimeout(")
-        timeout_runtime = js[timeout_start:loader_start]
+        timeout_start = js.index("withTimeout=(")
+        timeout_runtime = js[timeout_start:loader_start].removesuffix(",") + ";"
         xe_start = js.index("xe=async()=>", loader_end)
         xe_end = js.index(",Se=async()=>", xe_start)
         xe_initializer = js[xe_start + len("xe=") : xe_end]
@@ -429,13 +444,13 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        self.assertIn("function withTimeout(", js)
+        self.assertIn("withTimeout=(", js)
         self.assertIn("clearTimeout(timer)", js)
         self.assertIn("window.__slgScanTimeoutMs||65000", js)
-        helper_start = js.index("function withTimeout(")
+        helper_start = js.index("withTimeout=(")
         loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=", helper_start)
         loader_end = js.index(",xe=async()=>", loader_start)
-        helper = js[helper_start:loader_start]
+        helper = js[helper_start:loader_start].removesuffix(",") + ";"
         loader = js[loader_start + len("loadSelectedApk="):loader_end]
         contract = rf'''
 globalThis.window=globalThis;window.__slgScanTimeoutMs=10;

@@ -184,6 +184,16 @@ class BuiltApkTest(unittest.TestCase):
             self.assertEqual(css_bytes, expected_css.encode("utf-8"))
             self.assertEqual(archive.getinfo("resources.arsc").compress_type, zipfile.ZIP_STORED)
 
+        result = subprocess.run(
+            ["node", "--input-type=module", "--check"],
+            input=js_bytes.decode("utf-8"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
         js = js_bytes.decode("utf-8")
         for token in (
             "选择应用或 APK",
