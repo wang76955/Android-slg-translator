@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import re
 
 
 ROOT = Path(__file__).parent
+# These hashes pin the RPYC-revised canonical extraction used as the patching
+# baseline. A different extraction must be reviewed and deliberately re-pinned.
+CANONICAL_BASE_JS_SHA256 = (
+    "d3b0f42a6656e347e5933e17835b8b687f1dc2f5546c1aa15b8fb2048ebe1f85"
+)
+CANONICAL_BASE_CSS_SHA256 = (
+    "fad58dc778c5b4fa0ac263f5aebcba268c6fb32e9d8b39ae980805b49d5fb18f"
+)
 WORKSHOP_COPY = (
     "让喜欢的故事，用中文继续。",
     "选择 APK 文件",
@@ -404,7 +413,40 @@ async function Lo(e){'''
     return js.replace(final_error, final_error_with_fatal, 1)
 
 
+def _verify_digest(data: bytes, expected: str, label: str) -> None:
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"canonical base {label} SHA-256 mismatch: expected {expected}, got {actual}"
+        )
+
+
+def verify_canonical_base_assets(js_path: Path, css_path: Path) -> None:
+    for path, digest, label in (
+        (js_path, CANONICAL_BASE_JS_SHA256, "JavaScript"),
+        (css_path, CANONICAL_BASE_CSS_SHA256, "CSS"),
+    ):
+        if not path.is_file():
+            raise FileNotFoundError(f"canonical base {label} is missing: {path}")
+        _verify_digest(path.read_bytes(), digest, label)
+
+
+def verify_canonical_base_text(js: str, css: str) -> None:
+    # read_text() applies universal-newline decoding. Reconstruct the canonical
+    # extraction's known line endings so patch_assets still enforces the same pins.
+    canonical_js = js.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    canonical_css = css.replace("\r\n", "\n").replace("\r", "\n")
+    _verify_digest(canonical_js.encode("utf-8"), CANONICAL_BASE_JS_SHA256, "JavaScript")
+    _verify_digest(canonical_css.encode("utf-8"), CANONICAL_BASE_CSS_SHA256, "CSS")
+
+
+def write_generated_text(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(text)
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
+    verify_canonical_base_text(js, css)
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
     patched = patch_scan_flow(js)
     patched = patch_translation_cache(patched)
@@ -416,12 +458,15 @@ def main() -> None:
     source = ROOT.parent / "extracted" / "assets" / "public" / "assets"
     output = ROOT / "generated"
     output.mkdir(exist_ok=True)
+    js_path = source / "index-CJtfdHOF.js"
+    css_path = source / "index-C044IUg3.css"
+    verify_canonical_base_assets(js_path, css_path)
     js, css = patch_assets(
-        (source / "index-CJtfdHOF.js").read_text("utf-8"),
-        (source / "index-C044IUg3.css").read_text("utf-8"),
+        js_path.read_text("utf-8"),
+        css_path.read_text("utf-8"),
     )
-    (output / "index-CJtfdHOF.js").write_text(js, "utf-8")
-    (output / "index-C044IUg3.css").write_text(css, "utf-8")
+    write_generated_text(output / "index-CJtfdHOF.js", js)
+    write_generated_text(output / "index-C044IUg3.css", css)
 
 
 if __name__ == "__main__":

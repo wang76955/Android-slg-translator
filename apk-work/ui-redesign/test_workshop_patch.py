@@ -1,5 +1,6 @@
 import importlib.util
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,35 @@ class WorkshopPatchContractTest(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def test_canonical_extracted_assets_are_cryptographically_pinned(self):
+        module = self.load_patch()
+        self.assertEqual(
+            module.CANONICAL_BASE_JS_SHA256,
+            "d3b0f42a6656e347e5933e17835b8b687f1dc2f5546c1aa15b8fb2048ebe1f85",
+        )
+        self.assertEqual(
+            module.CANONICAL_BASE_CSS_SHA256,
+            "fad58dc778c5b4fa0ac263f5aebcba268c6fb32e9d8b39ae980805b49d5fb18f",
+        )
+        module.verify_canonical_base_assets(BASE_JS, BASE_CSS)
+
+        with tempfile.TemporaryDirectory() as directory:
+            mutated_js = Path(directory) / BASE_JS.name
+            mutated_js.write_bytes(BASE_JS.read_bytes() + b"\nmutation")
+            with self.assertRaisesRegex(ValueError, "canonical base JavaScript SHA-256 mismatch"):
+                module.verify_canonical_base_assets(mutated_js, BASE_CSS)
+
+            missing_css = Path(directory) / BASE_CSS.name
+            with self.assertRaisesRegex(FileNotFoundError, "canonical base CSS is missing"):
+                module.verify_canonical_base_assets(BASE_JS, missing_css)
+
+    def test_generated_assets_always_use_lf_newlines(self):
+        module = self.load_patch()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "asset.txt"
+            module.write_generated_text(output, "alpha\nbeta\n")
+            self.assertEqual(output.read_bytes(), b"alpha\nbeta\n")
 
     def test_installed_app_source_chooser_contract(self):
         module = self.load_patch()
