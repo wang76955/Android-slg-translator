@@ -124,6 +124,7 @@ public final class InstalledAppSource {
                 call.reject("Cannot prepare private storage for the app APK. Free space and try again.");
                 return;
             }
+            cleanStalePartials(directory);
             File output = new File(directory, fingerprint(packageName, source) + ".apk");
             partial = new File(directory, output.getName() + "." + UUID.randomUUID().toString() + ".partial");
             if (!output.isFile()) {
@@ -231,6 +232,18 @@ public final class InstalledAppSource {
         long timestamp = Math.max(System.currentTimeMillis(), newest + 1);
         if (!output.setLastModified(timestamp)) {
             throw new IOException("cache recency");
+        }
+    }
+
+    private static void cleanStalePartials(File directory) throws IOException {
+        File[] files = directory.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            if (file.getName().endsWith(".partial") && !file.delete()) {
+                throw new IOException("stale partial cleanup");
+            }
         }
     }
 

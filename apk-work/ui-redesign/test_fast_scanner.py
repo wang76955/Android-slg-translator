@@ -286,9 +286,12 @@ class FastApkScannerContractTest(unittest.TestCase):
         recency = java_block_after(source, "private static void markNewest(")
         self.assertIn("Math.max(System.currentTimeMillis(), newest + 1)", recency)
         self.assertIn("if (!output.setLastModified(timestamp))", recency)
+        stale_cleanup = source.index("cleanStalePartials(directory);")
+        request_partial = source.index("UUID.randomUUID().toString()")
+        self.assertLess(stale_cleanup, request_partial)
         self.assertLess(source.index("partial = null;"), source.index("cleanOldApks(directory, output);"))
 
-    def test_cache_cleanup_does_not_delete_active_partial_or_previous_result(self):
+    def test_cache_cleanup_removes_interrupted_partial_and_keeps_recent_results(self):
         if not JAVA.exists() or not JAVAC.exists():
             self.skipTest("JDK is not present for executable cache ownership test")
         harness = r"""
@@ -300,21 +303,23 @@ public final class CacheOwnershipHarness {
     public static void main(String[] args) throws Exception {
         File directory = new File(args[0]);
         File first = touch(directory, "first.apk", 1000L);
-        File activePartial = touch(directory, "second.request.partial", 1500L);
+        File stalePartial = touch(directory, "interrupted.partial", 1500L);
+        Method staleCleanup = InstalledAppSource.class.getDeclaredMethod("cleanStalePartials", File.class);
+        staleCleanup.setAccessible(true);
         Method cleanup = InstalledAppSource.class.getDeclaredMethod("cleanOldApks", File.class, File.class);
         cleanup.setAccessible(true);
 
         File second = touch(directory, "second.apk", 2000L);
+        staleCleanup.invoke(null, directory);
+        require(!stalePartial.exists(), "a new serialized copy must remove interrupted partials");
         cleanup.invoke(null, directory, second);
         require(first.isFile(), "the previous returned URI must survive the second selection");
         require(second.isFile(), "the current returned URI must survive cleanup");
-        require(activePartial.isFile(), "cleanup must not delete another request's partial");
 
         File third = touch(directory, "third.apk", 3000L);
         cleanup.invoke(null, directory, third);
         require(!first.exists(), "only finals older than current+previous should be pruned");
         require(second.isFile() && third.isFile(), "current and previous finals must remain");
-        require(activePartial.isFile(), "final pruning must never own partial files");
     }
 
     private static File touch(File directory, String name, long modified) throws Exception {
