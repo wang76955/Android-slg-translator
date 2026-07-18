@@ -445,9 +445,9 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
         self.assertIn("withTimeout=(", js)
-        self.assertIn("clearTimeout(timer)", js)
+        self.assertIn("window.clearTimeout(timer)", js)
         self.assertIn("window.__slgScanTimeoutMs??=65000", js)
-        self.assertIn("withTimeout(scanSelectedApk(", js)
+        self.assertIn("withTimeout(()=>selectionEpoch===window.__slgSelectionEpoch?", js)
         self.assertNotIn("withTimeout(E.listApkEntries", js)
         helper_start = js.index("withTimeout=(")
         loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=", helper_start)
@@ -477,6 +477,56 @@ async function main(){{
 main().catch(e=>{{console.error(e);process.exitCode=1}})
 '''
         result = subprocess.run(["node", "-e", contract], capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_loader_watchdog_registers_first_and_updates_state_directly(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        declaration_start = js.index("withTimeout=(")
+        declaration_end = js.index(",xe=async()=>", declaration_start)
+        declarations = js[declaration_start:declaration_end]
+        contract = rf'''
+function check(value,label){{if(!value)throw new Error(label)}}
+globalThis.window=globalThis;window.__slgScanTimeoutMs=25;
+const timers=[];window.setTimeout=(callback,delay)=>{{timers.push({{callback,delay,cleared:false}});return timers.length}};
+window.clearTimeout=id=>{{timers[id-1].cleared=true}};
+const scanning=[],logs=[];let nativeResolve,nativeStarted=false,entries=[];
+function r(){{}} function a(){{}} function p(){{}} function s(value){{entries=value}} function fe(){{}}
+const he={{current:[]}};function w(){{}} function d(value){{scanning.push(value)}} function O(message){{logs.push(message)}}
+function Jo(value){{return value}} function Oe(){{return{{rpy:1}}}} const ds={{rpy:`rpy`}},c=`all`,g=`zh`;
+const E={{listApkEntries(){{nativeStarted=true;return new Promise(resolve=>nativeResolve=resolve)}},getApkPackageName:async()=>({{packageName:``}})}};
+function productionHost(){{let {declarations};return loadSelectedApk}}
+async function main(){{
+ const loadSelectedApk=productionHost();
+ const pending=loadSelectedApk({{uri:`pending`,name:`Pending.apk`}});
+ check(timers.length===1&&timers[0].delay===25,`watchdog timer was not registered synchronously`);
+ check(!nativeStarted,`native scan started before watchdog registration`);
+ await Promise.resolve();check(nativeStarted&&scanning.at(-1)===true,`deferred native scan did not start`);
+ timers[0].callback();
+ const watchdog=window.__slgScanWatchdog;
+ check(watchdog.deadlineAt>0&&watchdog.timerFired&&watchdog.applied,`watchdog observability missing`);
+ check(window.__slgSelectionEpoch===2&&window.__slgSelectionError?.message&&scanning.at(-1)===false,`watchdog did not directly fail active scan`);
+ let rejection=``;try{{await pending}}catch(error){{rejection=error.message}}
+ check(rejection===window.__slgSelectionError.message&&watchdog.settled&&timers[0].cleared,`timeout promise did not reject and settle`);
+ nativeResolve({{entries:[{{name:`late`,fileType:`rpy`}}]}});await Promise.resolve();await Promise.resolve();
+ check(entries.length===0&&window.__slgSelectionError,`late native result overwrote watchdog failure`);
+
+ window.__slgSelectionError=null;nativeStarted=false;
+ const stale=loadSelectedApk({{uri:`stale`,name:`Stale.apk`}});await Promise.resolve();
+ window.__slgSelectionEpoch+=1;timers[1].callback();await stale;
+ check(window.__slgSelectionError===null&&!window.__slgScanWatchdog.applied,`stale watchdog mutated newer epoch`);
+}}
+main().catch(error=>{{console.error(error);process.exitCode=1}})
+'''
+        result = subprocess.run(
+            ["node", "-e", contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_installed_list_and_selection_epochs_ignore_stale_requests(self):
@@ -684,7 +734,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             'applyApiKeyToReact()',
             '!el.closest(".workshop-settings-shell")',
             'function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false',
-            'state==="scanning"?"读取中":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
+            'state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
             'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
             'const isInstall=button===installButton||button?.textContent?.includes("安装补丁版")',
             'isInstall?findButton("安装补丁版"):button',
@@ -1233,6 +1283,39 @@ check(opened===1&&retried===1,`recovery actions are wired`);
             self.assertIn(
                 f'workshop-task-shell[data-workshop-state="{state}"]', css
             )
+
+    def test_completed_zero_entry_scan_is_an_empty_result_not_scanning(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_start = js.index("function readTaskSnapshot()")
+        snapshot_end = js.index("function detailToggle(", snapshot_start)
+        snapshot = js[snapshot_start:snapshot_end]
+        contract = r'''
+globalThis.window=globalThis;
+window.__slgSelectionError=null;
+window.__slgSelectionEpoch=7;
+window.__slgSelectionMeta={splitApk:true,splitCount:4};
+window.__slgScanWatchdog={epoch:7,timerFired:false,settled:true,applied:false};
+function sourceText(){return `SLG 文本翻译 计算器.apk · 0 个脚本 已选择：计算器.apk`}
+function readProgressLog(){return {raw:``,latest:``}}
+globalThis.document={querySelectorAll(){return []}};
+const result=readTaskSnapshot();
+if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`||!result.splitApk||result.splitCount!==4){
+  throw new Error(`settled zero-entry scan misclassified: ${JSON.stringify(result)}`)
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('split?"该应用使用拆分安装包"', js)
+        self.assertIn('共 ${payload.splitCount||0} 个拆分包', js)
 
     def test_translation_logs_are_mirrored_into_the_visible_shell(self):
         module = self.load_patch()
