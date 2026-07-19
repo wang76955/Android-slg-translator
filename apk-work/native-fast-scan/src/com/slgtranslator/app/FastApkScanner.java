@@ -36,11 +36,14 @@ public final class FastApkScanner {
     static final long SCAN_TIMEOUT_MS = 60_000L;
     static final int MAX_CACHE_ENTRIES = 4;
     private static final int COPY_BUFFER_SIZE = 1024 * 1024;
+    private static final Set<String> RENPY_SCRIPT_EXTENSIONS = Collections.unmodifiableSet(
+        new HashSet<>(Arrays.asList("rpym", "rpymc", "rpy", "rpyc"))
+    );
     private static final Set<String> TEXT_EXTENSIONS = Collections.unmodifiableSet(
         new HashSet<>(Arrays.asList(
             "json", "xml", "txt", "csv", "lua", "yaml", "yml",
-            "properties", "cfg", "html", "htm", "md", "ini", "rpyc",
-            "rpymc", "rpy", "strings"
+            "properties", "cfg", "html", "htm", "md", "ini",
+            "rpym", "rpymc", "rpy", "rpyc", "strings"
         ))
     );
     private static final Map<String, ScanResult> CACHE = Collections.synchronizedMap(
@@ -174,10 +177,11 @@ public final class FastApkScanner {
                 if (!TEXT_EXTENSIONS.contains(extension)) {
                     continue;
                 }
-                if (!Boolean.TRUE.equals(likelyText.invoke(plugin, name))) {
+                if (!isRenPyScriptExtension(extension) && !Boolean.TRUE.equals(likelyText.invoke(plugin, name))) {
                     continue;
                 }
-                String fileType = (String) detectType.invoke(plugin, name, extension);
+                String detectedType = (String) detectType.invoke(plugin, name, extension);
+                String fileType = normalizeRenPyFileType(extension, detectedType);
                 entries.add(new ApkEntry(
                     name,
                     entry.getSize(),
@@ -268,6 +272,20 @@ public final class FastApkScanner {
             return "";
         }
         return name.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean isRenPyScriptExtension(String extension) {
+        return RENPY_SCRIPT_EXTENSIONS.contains(extension);
+    }
+
+    private static String normalizeRenPyFileType(String extension, String detectedType) {
+        if ("rpym".equals(extension) || "rpy".equals(extension)) {
+            return "rpy";
+        }
+        if ("rpymc".equals(extension) || "rpyc".equals(extension)) {
+            return "rpyc";
+        }
+        return detectedType;
     }
 
     private static String sha256(String value) throws Exception {

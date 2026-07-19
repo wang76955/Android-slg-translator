@@ -175,6 +175,75 @@ class FastApkScannerContractTest(unittest.TestCase):
         self.assertNotIn("ZipInputStream", source)
         self.assertIn("catch (Throwable error)", source)
 
+    def test_renpy_scripts_bypass_filename_heuristics_and_keep_supported_types(self):
+        source = SCANNER.read_text("utf-8")
+        self.assertIn('"rpym", "rpymc", "rpy", "rpyc"', source)
+        self.assertIn(
+            "if (!isRenPyScriptExtension(extension) && "
+            "!Boolean.TRUE.equals(likelyText.invoke(plugin, name)))",
+            source,
+        )
+        self.assertIn(
+            "String fileType = normalizeRenPyFileType(extension, detectedType);",
+            source,
+        )
+
+        harness = r"""
+import com.slgtranslator.app.FastApkScanner;
+import java.lang.reflect.Method;
+
+public final class RenPyExtensionHarness {
+    public static void main(String[] args) throws Exception {
+        Method isRenPy = FastApkScanner.class.getDeclaredMethod(
+            "isRenPyScriptExtension", String.class
+        );
+        isRenPy.setAccessible(true);
+        Method normalize = FastApkScanner.class.getDeclaredMethod(
+            "normalizeRenPyFileType", String.class, String.class
+        );
+        normalize.setAccessible(true);
+        for (String extension : new String[] {"rpy", "rpyc", "rpym", "rpymc"}) {
+            require((Boolean) isRenPy.invoke(null, extension), extension + " must bypass filename filtering");
+        }
+        require(!(Boolean) isRenPy.invoke(null, "json"), "json must retain the existing filename heuristic");
+        require("rpy".equals(normalize.invoke(null, "rpym", "text")), "rpym must enter the rpy pipeline");
+        require("rpyc".equals(normalize.invoke(null, "rpymc", "text")), "rpymc must enter the rpyc pipeline");
+        require("rpyc".equals(normalize.invoke(null, "rpyc", "rpyc")), "rpyc must remain rpyc");
+        require("text".equals(normalize.invoke(null, "txt", "text")), "non-RenPy types must be unchanged");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="renpy-extension-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "RenPyExtensionHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    str(SCANNER),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "RenPyExtensionHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
     def test_scanner_settles_plugin_call_without_lossy_handler_handoff(self):
         source = SCANNER.read_text("utf-8")
         scan_async = source[

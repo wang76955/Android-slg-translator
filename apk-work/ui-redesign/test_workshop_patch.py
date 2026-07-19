@@ -63,6 +63,26 @@ class WorkshopPatchContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_renpy_candidate_filter_keeps_story_scripts_but_rejects_generated_content(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        filter_start = js.index("function Jo(e,t,n){return e.filter(e=>Yo(e,t,n))}")
+        filter_end = js.index("var ts=", filter_start)
+        candidate_filter = js[filter_start:filter_end]
+
+        self.assertIn("/x-renpy/x-common/", candidate_filter)
+        self.assertIn("_rpycSkip", candidate_filter)
+        self.assertIn("screens?|options|common|style", candidate_filter)
+        self.assertIn("Zo(r,n)", candidate_filter)
+        self.assertIn("e===`tl`||e===`x-tl`", candidate_filter)
+        renpy_start = candidate_filter.index("if(e.fileType===`rpyc`||e.fileType===`rpy`)")
+        renpy_end = candidate_filter.index("}return!!", renpy_start)
+        renpy_branch = candidate_filter[renpy_start:renpy_end]
+        for obsolete_keyword in ("text", "string", "dialogue", "script"):
+            self.assertNotIn(obsolete_keyword, renpy_branch)
+
     def test_installed_app_source_chooser_contract(self):
         module = self.load_patch()
         js, css = module.patch_assets(
