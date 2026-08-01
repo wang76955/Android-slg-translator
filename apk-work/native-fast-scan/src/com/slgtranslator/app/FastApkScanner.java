@@ -58,6 +58,92 @@ public final class FastApkScanner {
 
     private FastApkScanner() {}
 
+    /**
+     * Reads one APK entry and, for Ren'Py compiled scripts, returns the
+     * structurally extracted user-visible texts as RPYC_STRING lines so the
+     * UI can translate dialogue, menu choices and screen text reliably.
+     */
+    public static void readRenpyTexts(Context context, PluginCall call) {
+        String apkUri = call.getString("apkUri");
+        if (apkUri == null || apkUri.isEmpty()) {
+            apkUri = call.getString("uri");
+        }
+        String entryName = call.getString("entryName");
+        if (apkUri == null || entryName == null || apkUri.isEmpty() || entryName.isEmpty()) {
+            call.reject("apkUri and entryName required");
+            return;
+        }
+        try {
+            File apk = fileFrom(apkUri);
+            if (apk == null || !apk.isFile()) {
+                call.reject("APK \u4e0d\u5b58\u5728: " + apkUri);
+                return;
+            }
+            String content = "";
+            String fileType = "unknown";
+            try (ZipFile zip = new ZipFile(apk)) {
+                ZipEntry entry = zip.getEntry(entryName);
+                if (entry == null) {
+                    call.reject("Entry not found: " + entryName);
+                    return;
+                }
+                byte[] bytes = readEntryBytes(zip, entry);
+                String lower = entryName.toLowerCase(Locale.ROOT);
+                if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
+                    StringBuilder out = new StringBuilder();
+                    for (String text : RpycTextExtractor.extractTexts(bytes)) {
+                        // The line protocol splits on newlines, so embedded
+                        // control characters are escaped and unescaped in JS.
+                        String escaped = text.replace("\n", "\\n")
+                                .replace("\r", "\\r")
+                                .replace("\t", "\\t");
+                        out.append("RPYC_STRING\t").append(escaped).append('\n');
+                    }
+                    content = out.toString();
+                    fileType = "rpyc";
+                } else {
+                    content = new String(bytes, StandardCharsets.UTF_8);
+                    int dot = entryName.lastIndexOf('.');
+                    fileType = dot >= 0 ? entryName.substring(dot + 1).toLowerCase(Locale.ROOT) : "unknown";
+                }
+            }
+            JSObject result = new JSObject();
+            result.put("content", content);
+            result.put("fileType", fileType);
+            call.resolve(result);
+        } catch (Exception e) {
+            String message = e.getMessage();
+            call.reject("Failed to read entry: " + (message == null ? e.toString() : message));
+        }
+    }
+
+    private static File fileFrom(String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.startsWith("file://")) {
+            try {
+                return new File(Uri.parse(normalized).getPath());
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+        return new File(normalized);
+    }
+
+    private static byte[] readEntryBytes(ZipFile zip, ZipEntry entry) throws IOException {
+        try (InputStream in = zip.getInputStream(entry);
+             ByteArrayOutputStream out = new ByteArrayOutputStream((int) Math.min(entry.getSize(), 16_000_000L))) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        }
+    }
+
     public static void scanAsync(
         Context context,
         String uriText,

@@ -178,6 +178,90 @@ INJECT_MENU_METHOD = """.method public final injectTranslatorMenu(Lcom/getcapaci
     invoke-static {v0, p0, p1}, Lcom/slgtranslator/app/LanguageMenuSupport;->injectTranslatorMenu(Landroid/content/Context;Ljava/lang/Object;Lcom/getcapacitor/PluginCall;)V
     return-void
 .end method"""
+COMPILE_TL_SIGNATURE = ".method public final compileTranslationsIntoApk(Lcom/getcapacitor/PluginCall;)V"
+COMPILE_TL_DELEGATE = "Lcom/slgtranslator/app/TranslationCompiler;->compileTranslationsIntoApk"
+CLEANUP_SIGNATURE = ".method public final cleanupStorage(Lcom/getcapacitor/PluginCall;)V"
+CLEANUP_DELEGATE = "Lcom/slgtranslator/app/CleanupSupport;->cleanupStorage"
+CLEANUP_METHOD = """.method public final cleanupStorage(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/CleanupSupport;->cleanupStorage(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+SAVE_BACKUP_SIGNATURE = ".method public final backupSaves(Lcom/getcapacitor/PluginCall;)V"
+SAVE_BACKUP_DELEGATE = "Lcom/slgtranslator/app/SaveTransfer;->backupSaves"
+SAVE_BACKUP_METHOD = """.method public final backupSaves(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/SaveTransfer;->backupSaves(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+SAVE_RESTORE_SIGNATURE = ".method public final restoreSaves(Lcom/getcapacitor/PluginCall;)V"
+SAVE_RESTORE_DELEGATE = "Lcom/slgtranslator/app/SaveTransfer;->restoreSaves"
+SAVE_RESTORE_METHOD = """.method public final restoreSaves(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/SaveTransfer;->restoreSaves(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+SAVE_LIST_SIGNATURE = ".method public final listSaveBackups(Lcom/getcapacitor/PluginCall;)V"
+SAVE_LIST_DELEGATE = "Lcom/slgtranslator/app/SaveTransfer;->listSaveBackups"
+SAVE_LIST_METHOD = """.method public final listSaveBackups(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/SaveTransfer;->listSaveBackups(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+READ_TEXTS_SIGNATURE = ".method public final readRenpyTexts(Lcom/getcapacitor/PluginCall;)V"
+READ_TEXTS_DELEGATE = "Lcom/slgtranslator/app/FastApkScanner;->readRenpyTexts"
+READ_TEXTS_METHOD = """.method public final readRenpyTexts(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/FastApkScanner;->readRenpyTexts(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+COMPILE_TL_METHOD = """.method public final compileTranslationsIntoApk(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/TranslationCompiler;->compileTranslationsIntoApk(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
 
 ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
 ANDROID_NAME = f"{{{ANDROID_NAMESPACE}}}name"
@@ -353,6 +437,39 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path
         raise RuntimeError(f"Language menu bridge is repeatedly injected: {inject_count}")
     if patched.count(INJECT_MENU_SIGNATURE) != 1 or patched.count(INJECT_MENU_DELEGATE) != 1:
         raise RuntimeError("Expected exactly one valid language menu bridge")
+    compile_tl_count = patched.count(COMPILE_TL_SIGNATURE)
+    if compile_tl_count == 0:
+        patched = patched.rstrip() + "\n\n" + COMPILE_TL_METHOD + "\n"
+    elif compile_tl_count != 1:
+        raise RuntimeError(f"Translation compile bridge is repeatedly injected: {compile_tl_count}")
+    if patched.count(COMPILE_TL_SIGNATURE) != 1 or patched.count(COMPILE_TL_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid translation compile bridge")
+    read_texts_count = patched.count(READ_TEXTS_SIGNATURE)
+    if read_texts_count == 0:
+        patched = patched.rstrip() + "\n\n" + READ_TEXTS_METHOD + "\n"
+    elif read_texts_count != 1:
+        raise RuntimeError(f"Read Ren'Py texts bridge is repeatedly injected: {read_texts_count}")
+    if patched.count(READ_TEXTS_SIGNATURE) != 1 or patched.count(READ_TEXTS_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid read Ren'Py texts bridge")
+    cleanup_count = patched.count(CLEANUP_SIGNATURE)
+    if cleanup_count == 0:
+        patched = patched.rstrip() + "\n\n" + CLEANUP_METHOD + "\n"
+    elif cleanup_count != 1:
+        raise RuntimeError(f"Cleanup bridge is repeatedly injected: {cleanup_count}")
+    if patched.count(CLEANUP_SIGNATURE) != 1 or patched.count(CLEANUP_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid cleanup bridge")
+    for signature, delegate, method, label in (
+        (SAVE_BACKUP_SIGNATURE, SAVE_BACKUP_DELEGATE, SAVE_BACKUP_METHOD, "save backup"),
+        (SAVE_RESTORE_SIGNATURE, SAVE_RESTORE_DELEGATE, SAVE_RESTORE_METHOD, "save restore"),
+        (SAVE_LIST_SIGNATURE, SAVE_LIST_DELEGATE, SAVE_LIST_METHOD, "save list"),
+    ):
+        count = patched.count(signature)
+        if count == 0:
+            patched = patched.rstrip() + "\n\n" + method + "\n"
+        elif count != 1:
+            raise RuntimeError(f"{label} bridge is repeatedly injected: {count}")
+        if patched.count(signature) != 1 or patched.count(delegate) != 1:
+            raise RuntimeError(f"Expected exactly one valid {label} bridge")
     smali.write_text(patched, "utf-8", newline="\n")
     patch_bridge_webview_client(decoded)
     run(

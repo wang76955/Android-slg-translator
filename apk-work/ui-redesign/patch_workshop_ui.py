@@ -196,7 +196,7 @@ function replaceSelectOptions(select,options,value){
   select.value=options.some(([id])=>id===value)?value:options[0]?.[0]||"";
 }
 function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false;lastSnapshot="";if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;if(!preserveHistory)releaseModalHistory();refresh()}
-function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回任务");back.onclick=closeSettings;top.append(back,textNode("h1","","我的设置"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`;};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper);settingsShell.append(top,card);runtimeRoot?.append(settingsShell)}settingsShell.hidden=false;if(shell)shell.hidden=true}
+function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回任务");back.onclick=closeSettings;top.append(back,textNode("h1","","我的设置"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`;};const cleanup=textNode("button","workshop-settings-save workshop-settings-cleanup","清理安装包与旧缓存");cleanup.type="button";const cleanupStatus=textNode("p","workshop-settings-status","");cleanup.onclick=async()=>{cleanup.disabled=true;cleanupStatus.textContent="正在清理…";try{const r=await window.Capacitor.Plugins.FileManager.cleanupStorage({keepUri:(window.__slgSelectionMeta?.uri)||""});cleanupStatus.textContent=`已清理 ${formatBytes(r&&r.freedBytes)} ，删除 ${(r&&r.deletedCount)||0} 个文件`}catch(e){cleanupStatus.textContent="清理失败："+(e&&e.message||String(e))}finally{cleanup.disabled=false}};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper,cleanup,cleanupStatus);settingsShell.append(top,card);runtimeRoot?.append(settingsShell)}settingsShell.hidden=false;if(shell)shell.hidden=true}
 function armModalHistory(){if(modalHistoryClosing){modalHistoryRearm=true;return}if(modalHistoryArmed)return;history.pushState({...history.state,__slgSourceModal:ID},"");modalHistoryArmed=true}
 function releaseModalHistory(){if(!modalHistoryArmed)return;modalHistoryArmed=false;modalHistoryClosing=true;history.back()}
 function focusableIn(dialog){return[...dialog.querySelectorAll('button:not([disabled]),input:not([disabled])')].filter(el=>!el.hidden)}
@@ -222,7 +222,7 @@ function actionButton(label,handler,secondary){const button=textNode("button",se
 function renderStateBody(state,payload){const body=textNode("div","workshop-task-body");if(state==="idle"){const brand=textNode("section","workshop-brand-panel");brand.append(textNode("p","","今天翻译什么？"),textNode("h2","","让喜欢的故事，用中文继续。"));const card=textNode("section","workshop-task-card");card.append(fileRow(""),textNode("p","workshop-state-copy","选择一个应用或 APK，开始你的中文旅程。"),actionButton("选择应用或 APK",openSourceChooser));body.append(brand,card);return body}
 const card=textNode("section",state==="failed"?"workshop-task-card workshop-error-card":"workshop-task-card");card.append(fileRow(payload.fileName));if(state==="scanning"){card.append(textNode("p","workshop-state-copy","正在检查文件"));const progress=textNode("div","workshop-progress");progress.append(textNode("i","",""));card.append(progress,detailToggle(payload.raw||"正在检查 APK 文件，请稍候。"));body.append(card);return body}
 if(state==="empty"){const split=payload.splitApk;card.append(textNode("h2","workshop-empty-title",split?"该应用使用拆分安装包":"没有找到可翻译文本"),textNode("p","workshop-state-copy",split?`当前只检查了基础 APK（共 ${payload.splitCount||0} 个拆分包），部分文本资源无法直接读取。可以尝试单体 APK 文件或其他应用。`:"这个应用的基础 APK 中没有可直接翻译的文本资源，可以尝试其他应用或 APK 文件。"));body.append(card,actionButton("重新选择应用或 APK",openSourceChooser));return body}
-if(state==="ready"){card.append(textNode("p","workshop-state-copy","可以开始了"));if(payload.apiRequired)card.append(textNode("p","workshop-state-copy","请先配置 API Key"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","可翻译文件"),textNode("span","",`${payload.count||0} 个`));list.append(row);card.append(list,detailToggle(payload.raw||"文件检查已完成。"));body.append(card,actionButton("开始翻译",()=>triggerReactButton(startButton)));return body}
+if(state==="ready"){card.append(textNode("p","workshop-state-copy","可以开始了"));card.append(textNode("p","workshop-settings-status","提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。"));if(payload.apiRequired)card.append(textNode("p","workshop-state-copy","请先配置 API Key"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","可翻译文件"),textNode("span","",`${payload.count||0} 个`));list.append(row);card.append(list,detailToggle(payload.raw||"文件检查已完成。"));body.append(card,actionButton("开始翻译",()=>triggerReactButton(startButton)));return body}
 if(state==="translating"){card.append(textNode("p","workshop-state-copy","正在翻译文本"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","脚本进度"),textNode("span","",`${payload.current||0} / ${payload.total||payload.count||0}`));list.append(row);const progress=textNode("div","workshop-progress");const fill=textNode("i","","");const current=Number(payload.current)||0,total=Number(payload.total)||0;fill.style.width=`${total?Math.max(6,Math.min(100,Math.round(current/total*100))):20}%`;progress.append(fill);card.append(list,progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"正在翻译脚本文本，请保持应用在前台。",true));body.append(card);return body}
 if(state==="patching"){card.append(textNode("p","workshop-state-copy","正在生成补丁 APK"));const progress=textNode("div","workshop-progress");progress.append(textNode("i","",""));card.append(progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"译文已经完成，正在写入并签名补丁 APK。",true));body.append(card);return body}
 if(state==="completed"){card.append(textNode("p","workshop-state-copy","补丁 APK 已生成"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","已翻译文本"),textNode("span","",`${payload.translated||0} 条`));list.append(row);card.append(list);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"翻译和补丁写入已经完成。",true));body.append(card,actionButton("安装补丁版",()=>triggerReactButton(installButton)));return body}
@@ -236,7 +236,7 @@ function refresh(){if(!shell||retrying||settingsOpen)return;const snap=readTaskS
  function decorate(){const heading=[...document.querySelectorAll("#root h2")].find(el=>el.textContent&&el.textContent.includes("选择游戏 APK"));if(heading?.parentElement)heading.parentElement.classList.add("workshop-picker-source");startButton=findButton("开始翻译");if(startButton){startButton.classList.add("workshop-start-button");startButton.setAttribute("aria-hidden","true")}installButton=findButton("安装补丁版");if(installButton)installButton.setAttribute("aria-hidden","true");sourceButton=findButton("选择");if(sourceButton){sourceButton.classList.add("workshop-source-button");sourceButton.setAttribute("aria-label","选择 APK 文件");sourceButton.setAttribute("aria-hidden","true")}applyApiKeyToReact()}
 
 function formatBytes(bytes){const value=Number(bytes)||0;if(value<1024)return`${value} B`;const units=["KB","MB","GB"];let n=value/1024,unit=0;while(n>=1024&&unit<units.length-1){n/=1024;unit+=1}return`${n>=100?Math.round(n):Math.round(n*10)/10} ${units[unit]}`}
-function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u4f5c\u54c1"))?.setAttribute("aria-current","page");if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u6211\u7684\u8865\u4e01");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;top.append(back,textNode("h1","","\u6211\u7684\u8865\u4e01"));const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");galleryShell.append(top,list,refresh);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches()}
+function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u4f5c\u54c1"))?.setAttribute("aria-current","page");if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u6211\u7684\u8865\u4e01");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;top.append(back,textNode("h1","","\u6211\u7684\u8865\u4e01"));const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");const saveSection=textNode("section","workshop-saves-shell");const saveTitle=textNode("h2","workshop-settings-title","存档转移（雏形）");const saveHint=textNode("p","workshop-settings-status","备份当前游戏的 RenPy 存档，换机或重装后恢复。");const backupBtn=textNode("button","workshop-secondary-action","备份当前游戏存档");backupBtn.type="button";const restoreBtn=textNode("button","workshop-secondary-action","恢复所选备份");restoreBtn.type="button";const saveList=textNode("div","workshop-gallery-content");let saveBackups=[];const renderSaveList=()=>{saveList.replaceChildren();if(!saveBackups.length){saveList.append(textNode("p","workshop-gallery-status","还没有备份。"));return}for(const b of saveBackups){const row=textNode("div","workshop-patch-row");row.append(textNode("div","workshop-patch-name",b.name),textNode("div","workshop-patch-meta",`${b.fileCount||0} 个文件 · ${new Date(b.modifiedAt||Date.now()).toLocaleString()}`));const use=actionButton("恢复此备份",()=>restoreSelected(b));use.className="workshop-patch-save";row.append(use);saveList.append(row)}};const refreshSaves=async()=>{try{const r=await window.Capacitor.Plugins.FileManager.listSaveBackups();saveBackups=Array.isArray(r?.backups)?r.backups:[]}catch(e){saveBackups=[]}renderSaveList()};const backupSelected=async()=>{const meta=window.__slgSelectionMeta;if(!meta?.packageName){saveHint.textContent="请先在首页选择要备份的游戏。";return}backupBtn.disabled=true;saveHint.textContent="正在备份…";try{const r=await window.Capacitor.Plugins.FileManager.backupSaves({packageName:meta.packageName});saveHint.textContent=`已备份 ${r&&r.savedFiles||0} 个文件`;await refreshSaves()}catch(e){saveHint.textContent="备份失败："+(e&&e.message||String(e))}finally{backupBtn.disabled=false}};const restoreSelected=async(b)=>{const meta=window.__slgSelectionMeta;if(!meta?.packageName){saveHint.textContent="请先在首页选择要恢复的游戏。";return}restoreBtn.disabled=true;saveHint.textContent=`正在恢复 ${b.name} …`;try{const r=await window.Capacitor.Plugins.FileManager.restoreSaves({packageName:meta.packageName,backupDir:b.path});saveHint.textContent=`已恢复 ${r&&r.restoredFiles||0} 个文件，请重启游戏查看。`}catch(e){saveHint.textContent="恢复失败："+(e&&e.message||String(e))}finally{restoreBtn.disabled=false}};backupBtn.onclick=backupSelected;restoreBtn.onclick=()=>{saveHint.textContent="在下方备份列表选择要恢复的备份。";};saveSection.append(saveTitle,saveHint,backupBtn,restoreBtn,saveList);galleryShell.append(top,list,refresh,saveSection);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches();refreshSaves()}
 function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u9996\u9875"))?.setAttribute("aria-current","page");if(!preserveHistory)releaseModalHistory();refresh()}
 function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;list.replaceChildren();if(galleryLoading){list.append(textNode("p","workshop-gallery-status","\u6b63\u5728\u8bfb\u53d6\u8865\u4e01\u5217\u8868\u2026"));return}if(galleryError){list.append(textNode("p","workshop-gallery-status workshop-installed-error","\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError));return}if(!galleryPatches.length){list.append(textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u8865\u4e01 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u8865\u4e01\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));return}const rows=textNode("ul","workshop-gallery-list");for(const patch of galleryPatches){const item=textNode("li","");const card=textNode("div","workshop-patch-row");card.append(textNode("div","workshop-patch-name",patch.name||"\u672a\u547d\u540d\u8865\u4e01"));card.append(textNode("div","workshop-patch-meta",`${formatBytes(patch.size)} \u00b7 ${new Date(patch.modifiedAt||Date.now()).toLocaleString()}`));const save=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";card.append(save);item.append(card);rows.append(item)}list.append(rows)}
 async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager;galleryLoading=true;galleryError="";renderGallery();if(!plugin?.listPatchedApks){galleryLoading=false;galleryError="\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8bfb\u53d6\u8865\u4e01\u5217\u8868\uff0c\u8bf7\u5347\u7ea7\u5e94\u7528";renderGallery();return}try{const result=await plugin.listPatchedApks();galleryPatches=Array.isArray(result?.patches)?result.patches:[]}catch(error){galleryError=error?.message||String(error)}finally{galleryLoading=false;renderGallery()}}
@@ -251,7 +251,7 @@ document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-t
 
 def patch_scan_flow(js: str) -> str:
     old = """xe=async()=>{try{let e=await E.pickApkFile();r(e.uri),a(e.uri.split(`/`).pop()||`Unknown.apk`),s([]),fe(null),w([]),d(!0),O(`正在扫描 APK 中的文本文件...`,`info`);let t=await E.listApkEntries({uri:e.uri});s(t.entries);try{let t=await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);t.packageName&&(p(t.packageName),O(`识别到包名: `+t.packageName,`info`))}catch{}let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(e){e.message!==`User cancelled`&&O(`选择文件失败: ${e.message}`,`error`),d(!1)}}"""
-    new = """function withTimeout(promise,timeoutMs,message){let timer;return new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(new Error(message)),timeoutMs);Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))}loadSelectedApk=window.__slgLoadSelectedApk=async e=>{let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;try{window.__slgSelectionError=null,window.__slgSelectionMeta=e,r(e.uri),a(e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`),p(e.packageName||``),s([]),fe(null),he.current=[],w([]),d(!0),O(e.source===`installed`?`正在读取已安装应用的 APK...`:`正在扫描 APK 中的文本文件...`,`info`),e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);let t=await withTimeout(E.listApkEntries({uri:e.uri}),window.__slgScanTimeoutMs||65000,`APK 检查超时，请重新选择应用或文件。`);if(selectionEpoch!==window.__slgSelectionEpoch)return;if(e.splitApk&&t.entries.length===0)throw new Error(`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`);s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=e.packageName?{packageName:e.packageName}:t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);if(selectionEpoch!==window.__slgSelectionEpoch)return;n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}if(selectionEpoch!==window.__slgSelectionEpoch)return;let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1);if(window.__slgRenpyMenuType===`renpy`){try{let _m=await E.injectTranslatorMenu({apkUri:e.uri,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slg-translated'});window.__slgTranslatorLang=(_m&&_m.changed)?'slg-translated':''}catch{window.__slgTranslatorLang=''}}}catch(t){if(selectionEpoch!==window.__slgSelectionEpoch)return;t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t}},xe=async()=>{try{await loadSelectedApk(await E.pickApkFile())}catch(e){e.message!==`User cancelled`&&!window.__slgSelectionError&&(window.__slgSelectionError={message:e.message,fileName:``},O(`选择文件失败: ${e.message}`,`error`)),d(!1)}}"""
+    new = """function withTimeout(promise,timeoutMs,message){let timer;return new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(new Error(message)),timeoutMs);Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))}loadSelectedApk=window.__slgLoadSelectedApk=async e=>{let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;try{window.__slgSelectionError=null,window.__slgSelectionMeta=e,r(e.uri),a(e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`),p(e.packageName||``),s([]),fe(null),he.current=[],w([]),d(!0),O(e.source===`installed`?`正在读取已安装应用的 APK...`:`正在扫描 APK 中的文本文件...`,`info`),e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);let t=await withTimeout(E.listApkEntries({uri:e.uri}),window.__slgScanTimeoutMs||65000,`APK 检查超时，请重新选择应用或文件。`);if(selectionEpoch!==window.__slgSelectionEpoch)return;if(e.splitApk&&t.entries.length===0)throw new Error(`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`);s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=e.packageName?{packageName:e.packageName}:t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);if(selectionEpoch!==window.__slgSelectionEpoch)return;n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}if(selectionEpoch!==window.__slgSelectionEpoch)return;let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);if(window.__slgRenpyMenuType===`renpy`){try{let _m=await E.injectTranslatorMenu({apkUri:e.uri,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''}catch{window.__slgTranslatorLang=''}}O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(t){if(selectionEpoch!==window.__slgSelectionEpoch)return;t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t}},xe=async()=>{try{await loadSelectedApk(await E.pickApkFile())}catch(e){e.message!==`User cancelled`&&!window.__slgSelectionError&&(window.__slgSelectionError={message:e.message,fileName:``},O(`选择文件失败: ${e.message}`,`error`)),d(!1)}}"""
     new = new.replace(
         "function withTimeout(promise,timeoutMs,message){",
         "withTimeout=(promise,timeoutMs,message)=>{",
@@ -492,7 +492,7 @@ function setReactInputValue(input,value)""",
     guide_anchor = 'if(payload.patchedApkPath)card.append(textNode("p","workshop-state-copy workshop-scan-elapsed","' + "\u4f4d\u7f6e\uff1a" + '"+payload.patchedApkPath));'
     guide_new = (
         guide_anchor
-        + 'if(payload.renpyLang===`slg-translated`)card.append(textNode("p","workshop-state-copy","' "\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3" '"));' + 'else if(payload.renpyLang)card.append(textNode("p","workshop-state-copy","' "\u8bd1\u6587\u8bed\u8a00\uff1a" '"+payload.renpyLang+"' "\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587" '"));'
+        + 'if(window.__slgTranslatorLang===`slgtranslated`)card.append(textNode("p","workshop-state-copy","' "\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3\uff0c\u8bf7\u5728\u6e38\u620f\u8bbe\u7f6e\u8bed\u8a00\u4e2d\u9009\u62e9\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u67e5\u770b\u8bd1\u6587" '"));' + 'else if(payload.renpyLang)card.append(textNode("p","workshop-state-copy","' "\u8bd1\u6587\u8bed\u8a00\uff1a" '"+payload.renpyLang+"' "\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587" '"));'
         + 'else if(payload.renpyMenuType==="custom")card.append(textNode("p","workshop-state-copy","' "\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9" '"));'
     )
     if runtime.count(guide_anchor) != 1:
@@ -561,7 +561,7 @@ def patch_translation_network(js: str) -> str:
 function networkFailureParts(e){let t=[],n=e;for(let r=0;r<4&&n!=null;r++){if(typeof n===`object`){for(const e of[`name`,`code`,`message`])n[e]!=null&&t.push(String(n[e]));n=n.cause}else{t.push(String(n));break}}return t}
 function providerLabel(e){return/deepseek/i.test(e)?`DeepSeek`:/openai/i.test(e)?`OpenAI`:`自定义接口`}
 function isProviderNetworkFailure(e){return/^无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。$/.test(String(e||``))}
-async function runFileTasksUntilFatal(e,t){for(let n=0;n<e.length;n++){let r=await t(e[n],n);if(r)return r}return``}
+async function runFileTasksParallel(e,t,concurrency=2){let i=0,fatal=``;async function worker(){while(i<e.length&&!fatal){let j=i++,r=await t(e[j],j);if(r&&!fatal)fatal=r}}let ws=[];for(let k=0;k<Math.min(concurrency,e.length);k++)ws.push(worker());await Promise.all(ws);return fatal}
 async function Lo(e){'''
     if js.count(helpers_anchor) != 1:
         raise ValueError("Translation coordinator signature not found")
@@ -595,12 +595,62 @@ async function Lo(e){'''
         raise ValueError("Recursive batch signature not found")
     js = js.replace(old_split, new_split, 1)
 
+    # Source APK resilience: refresh the installed-app source to the persistent
+    # directory before translating so a cleared cache cannot break patch builds.
+    old_start = "Ce=async()=>{if(!n||ae.length===0||!te&&!oe)return;"
+    new_start = (
+        "Ce=async()=>{if(!n||ae.length===0||!te&&!oe)return;"
+        "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
+        "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
+        "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri)}"
+        "catch(_e){O(`\u91cd\u65b0\u83b7\u53d6\u6e38\u620f\u5b89\u88c5\u5305\u5931\u8d25: ${_e&&_e.message||_e}`,\u0060error\u0060)}}"
+    )
+    if js.count(old_start) != 1:
+        raise ValueError("Ce start signature not found")
+    js = js.replace(old_start, new_start, 1)
+
+    # Read and build from the refreshed meta uri when present.
+    old_read = "E.readFileContent({uri:n,entryName:o.name})"
+    new_read = (
+        "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name}):"
+        "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name})"
+    )
+    if js.count(old_read) != 1:
+        raise ValueError("Read file uri signature not found")
+    js = js.replace(old_read, new_read, 1)
+
+    old_build = (
+        "E.buildPatchedApk({uri:n,files:a,outputDirUri:m,outputName:Me(i),"
+        "targetRenpyLanguage:is(y),sourceRenpyLanguage:is(g)}"
+    )
+    new_build = (
+        "E.buildPatchedApk({uri:(window.__slgSelectionMeta?.uri||n),"
+        "files:(()=>{const _f=a.filter(_x=>!String(_x.path).includes(`/x-tl/`)&&!String(_x.path).includes(`/tl/`));return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
+        "outputDirUri:m,outputName:Me(i),"
+        "targetRenpyLanguage:window.__slgCompiledCount>0?'':is(y),sourceRenpyLanguage:window.__slgCompiledCount>0?'':is(g)}"
+    )
+    if js.count(old_build) != 1:
+        raise ValueError("Build uri signature not found")
+    js = js.replace(old_build, new_build, 1)
+
+    # Friendly error when the source APK was cleared by the system.
+    old_fail = "catch(e){r=!0,O(`\u5199\u5165\u8865\u4e01 APK \u5931\u8d25: ${e.message}`,\u0060error\u0060)}"
+    new_fail = (
+        "catch(e){r=!0;let _m=e&&e.message||String(e);O("
+        "/No such file|Failed to build patched APK|not found/i.test(_m)?"
+        "`\u5199\u5165\u8865\u4e01 APK \u5931\u8d25\uff1a\u6e90 APK \u5df2\u88ab\u7cfb\u7edf\u6e05\u7406\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9\u6e38\u620f\u540e\u91cd\u8bd5\uff08${_m}\uff09`:"
+        "`\u5199\u5165\u8865\u4e01 APK \u5931\u8d25: ${_m}`,\u0060error\u0060)}"
+    )
+    if js.count(old_fail) != 1:
+        raise ValueError("Build failure catch signature not found")
+    js = js.replace(old_fail, new_fail, 1)
+
     outer_state = 'let e=x===`custom`?re:_e.find(e=>e.id===x)?.baseURL||``,t=0,r=!1,a=[],o=``,s=``,c=!1,l=!1;'
     outer_state_with_fatal = 'let e=x===`custom`?re:_e.find(e=>e.id===x)?.baseURL||``,t=0,r=!1,N="",a=[],o=``,s=``,c=!1,l=!1;'
     outer_start = 'for(let i=0;i<ae.length;i+=fs){let o=ae.slice(i,i+fs);await Promise.allSettled(o.map((o,s)=>(async()=>{let c=i+s,l='
-    outer_start_sequential = 'N=await runFileTasksUntilFatal(ae,async(o,c)=>{let l='
+    outer_start_sequential = 'N=await runFileTasksParallel(ae,async(o,c)=>{let l='
     outer_end = '})()))}if(a.length>0||oe){'
-    outer_end_sequential = 'return N});if(!N&&(a.length>0||oe)){'
+    outer_end_sequential = 'return N},2);if(!N&&(a.length>0||oe)){'
     if (
         js.count(outer_state) != 1
         or js.count(outer_start) != 1
@@ -610,6 +660,21 @@ async function Lo(e){'''
     js = js.replace(outer_state, outer_state_with_fatal, 1)
     js = js.replace(outer_start, outer_start_sequential, 1)
     js = js.replace(outer_end, outer_end_sequential, 1)
+
+    # Compile the generated translation .rpy files into .rpyc before the APK
+    # is assembled: Ren'Py only loads compiled scripts from an APK archive,
+    # so plain .rpy files in the patch were never picked up by the game.
+    build_gate = 'return N},2);if(!N&&(a.length>0||oe)){O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
+    build_gate_compiled = (
+        'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk('
+        '{apkUri:(window.__slgSelectionMeta?.uri||n),items:a.map(_x=>({path:_x.path,content:_x.content}))}).then('
+        '_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;(_r&&_r.compiled>0)?O(`  \u5df2\u7f16\u8bd1\u5e76\u5408\u5e76\u53bb\u91cd ${_r.compiled} \u6761\u8bd1\u6587\uff0c\u6e38\u620f\u5c06\u76f4\u63a5\u52a0\u8f7d\u7f16\u8bd1\u7248\u672c`,`success`):O(`  \u6ca1\u6709\u53ef\u7f16\u8bd1\u7684 Ren\'Py \u7ffb\u8bd1\u8d44\u6e90`,`info`)}).catch('
+        '_e=>{O(`  \u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: ${_e&&_e.message||_e}`,`error`)});'
+        'O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
+    )
+    if js.count(build_gate) != 1:
+        raise ValueError("Build gate signature not found")
+    js = js.replace(build_gate, build_gate_compiled, 1)
 
     result_anchor = '}});if(p===0){'
     result_with_fatal = '}});if(m&&isProviderNetworkFailure(m)){N=m,r=!0,O(`  翻译失败: ${m}`,`error`),ue({current:c+1,total:ae.length});return N}if(p===0){'
@@ -624,7 +689,47 @@ async function Lo(e){'''
     final_error_with_fatal = '...r?{error:N||`部分文件处理失败，请查看日志`}:{}})'
     if js.count(final_error) != 1:
         raise ValueError("Translation final result signature not found")
-    return js.replace(final_error, final_error_with_fatal, 1)
+    js = js.replace(final_error, final_error_with_fatal, 1)
+
+    # Stable file-cache key: use the package name so the cache survives
+    # re-selecting the game (the APK uri changes on every copy).
+    old_key = "let _fk=`slg-file-v1:${U([n,o.name,g,y,S].join(`|`))}`"
+    new_key = "let _fk=`slg-file-v1:${U([window.__slgSelectionMeta?.packageName||n,o.name,g,y,S].join(`|`))}`"
+    if js.count(old_key) != 1:
+        raise ValueError("File cache key signature not found")
+    js = js.replace(old_key, new_key, 1)
+
+    # Resume regenerates .rpy outputs with the current language bucket instead
+    # of replaying stale paths baked into old cache entries.
+    old_resume = (
+        "if(_mode===`resume`&&_fr&&Array.isArray(_fr.outputs)&&_fr.outputs.length){"
+        "for(let e of _fr.outputs)await Ne(e.outputPath,e.content),a.push({path:e.outputPath,content:e.content});"
+        "t+=_fr.count||0,O(`  \u5df2\u5b8c\u6210\u6587\u4ef6\uff0c\u590d\u7528 ${_fr.count||0} \u6761\u8bd1\u6587`,`success`),ue({current:c+1,total:ae.length});return}"
+    )
+    new_resume = (
+        "if(_mode===`resume`&&_fr&&Array.isArray(_fr.translations)&&_fr.translations.length&&Array.isArray(_fr.texts)){"
+        "let _map=new Map(),_tmap=new Map(_fr.translations);"
+        "for(let r of _fr.texts){let v=_tmap.get(r.keyPath)||_tmap.get(r.text);if(v&&v.trim())_map.set(r.text,v)}"
+        "let{content:_c,fileType:_ft}=o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name}):await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name});"
+        "let l=ke(_c,_ft,``,g),_need=l.filter(t=>!t||!_map.has(t.text));"
+        "if(_need.length){let _r=await Lo({texts:_need,sourceLang:g,targetLang:y,baseURL:e,apiKey:te,model:S,batchSize:ps,onProgress:()=>{}});if(_r&&_r.successCount>0){for(let t of _need){let v=_r.translations.get(t.keyPath)||_r.translations.get(t.text);if(v&&v.trim())_map.set(t.text,v)}O(`  \u8865\u5145\u7ffb\u8bd1 ${_r.successCount} \u6761\u65b0\u6587\u672c`,`success`)}}"
+        "let _outs=[rs(o,l,_map,`None`),rs(o,l,_map,g)],_uniq=new Map;oe||_outs.unshift(rs(o,l,_map,y));"
+        "for(let e of _outs)_uniq.set(e.outputPath,e);"
+        "for(let e of _uniq.values())await Ne(e.outputPath,e.content),a.push({path:e.outputPath,content:e.content});"
+        "vo[_fk]={outputs:Array.from(_uniq.values()),texts:l,translations:Array.from(_map.entries()),count:l.length,updatedAt:Date.now()},bo=!0,await wo();"
+        "t+=l.length,O(`  \u5df2\u5b8c\u6210\u6587\u4ef6\uff0c\u590d\u7528 ${l.length} \u6761\u8bd1\u6587`,`success`),ue({current:c+1,total:ae.length});return}"
+    )
+    if js.count(old_resume) != 1:
+        raise ValueError("Resume regeneration signature not found")
+    js = js.replace(old_resume, new_resume, 1)
+
+    # Cache the raw translations + texts so resume can rebuild outputs.
+    old_cache = "vo[_fk]={outputs:_fo,count:p,updatedAt:Date.now()}"
+    new_cache = "vo[_fk]={outputs:_fo,texts:l,translations:Array.from(f.entries()),count:p,updatedAt:Date.now()}"
+    if js.count(old_cache) != 1:
+        raise ValueError("File cache write signature not found")
+    js = js.replace(old_cache, new_cache, 1)
+    return js
 
 
 def patch_translation_memory(js: str) -> str:
@@ -642,7 +747,7 @@ def patch_translation_memory(js: str) -> str:
         "bo=!1,bp=bp.then(()=>E.saveTranslationCache({data:e})).catch(()=>{bo=!0}),await bp}"
     )
     new_save = (
-        "var _saveBusy=!1,_saveAgain=!1;globalThis.__slgCacheDbg={calls:0,skipped:0,errors:0,lastError:null};"
+        "var _saveBusy=!1,_saveAgain=!1,_lastSaveAt=0;globalThis.__slgCacheDbg={calls:0,skipped:0,errors:0,lastError:null};"
         "async function wo(){globalThis.__slgCacheDbg.calls++;"
         "if(!yo){try{await Co()}catch(e){globalThis.__slgCacheDbg.lastError='co:'+(e&&e.message||e);"
         "O('  缓存加载失败: '+(e&&e.message||e),'error')}}"
@@ -650,9 +755,9 @@ def patch_translation_memory(js: str) -> str:
         "globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
         "if(_saveBusy){_saveAgain=!0;return}do{_saveAgain=!1,_saveBusy=!0;"
         "let _snap={};for(const[_k,_v]of Object.entries(vo)){"
-        "if(_k.startsWith(_o))_snap[_k]=_v}let _e=JSON.stringify(_snap);"
+        "if(_k.startsWith(_o)||_k.startsWith(`slg-file-v1:`))_snap[_k]=_v}let _e=JSON.stringify(_snap);"
         "try{await E.saveTranslationCache({data:_e})}catch(e){bo=!0;globalThis.__slgCacheDbg.errors++;globalThis.__slgCacheDbg.lastError='save:'+(e&&e.message||e)}"
-        "_saveBusy=!1}while(_saveAgain)}"
+        "_saveBusy=!1,_lastSaveAt=Date.now();if(_saveAgain)await new Promise(r=>setTimeout(r,1500))}while(_saveAgain)}"
     )
     if js.count(old_save) != 1:
         raise ValueError("Translation cache save signature not found")
@@ -673,6 +778,31 @@ def patch_translation_memory(js: str) -> str:
     js = js.replace(old_is, new_is, 1)
 
     return js
+
+def patch_rpyc_string_pipeline(js: str) -> str:
+    # RPYC strings already come from the native structural extractor, which
+    # guarantees they are user-visible Say/Menu/Translate/Text payloads. The
+    # generic He() filter must not run on them: it rejects dialogue starting
+    # with Ren'Py keywords (If/With/While/Stop/Call...), lines containing
+    # {/tag} closing tags (slash looks like a path) and short {#tag} menu
+    # labels. Only a minimal noise guard remains. The bridge escapes
+    # embedded newlines/tabs so the newline-delimited protocol round-trips.
+    old_ne = (
+        "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
+        "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12).trim();"
+        "!He(e,n)||i.has(e)||(i.add(e),r.push({keyPath:`${t}rpyc_string_${a++}`,text:e}))}return r}"
+    )
+    new_ne = (
+        "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
+        "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12);"
+        "if(!e.trim()||e.length<2||i.has(e))continue;"
+        "e=e.replace(/\\\\n/g,`\n`).replace(/\\\\r/g,`\r`).replace(/\\\\t/g,`\t`);"
+        "i.add(e),r.push({keyPath:`${t}rpyc_string_${a++}`,text:e})}return r}"
+    )
+    if js.count(old_ne) != 1:
+        raise ValueError("Rpyc string pipeline signature not found")
+    return js.replace(old_ne, new_ne, 1)
+
 
 def patch_extraction_rules(js: str) -> str:
     old_he = (
@@ -701,6 +831,73 @@ def patch_extraction_rules(js: str) -> str:
     if js.count(old_ve) != 1:
         raise ValueError("Ve extraction filter signature not found")
     js = js.replace(old_ve, new_ve, 1)
+    return js
+
+
+def patch_candidate_filter(js: str) -> str:
+    # Only story scripts should be candidates: existing translation buckets
+    # (x-tl/...) are never translated again, and rpy/rpyc duplicates collapse
+    # into the compiled variant so work is not doubled.
+    # Screen and engine-common files carry the visible menu UI text (_()
+    # marked strings), so they are candidates too; only pure-config files
+    # (options/style/common) remain skipped.
+    old_rpycskip = "var _rpycSkip=/^(?:x-)?(?:gui|media|gallery|gallery_new|screens?|options|common|style|audio|images?|init|splash|preferences)(?:[_-].*)?$/i"
+    new_rpycskip = "var _rpycSkip=/^(?:x-)?(?:gui|media|gallery|gallery_new|options|common|style|audio|images?|init|splash|preferences)(?:[_-].*)?$/i"
+    if js.count(old_rpycskip) != 1:
+        raise ValueError("Rpyc skip signature not found")
+    js = js.replace(old_rpycskip, new_rpycskip, 1)
+    old_renpy_skip = "if(r.includes(`/x-renpy/x-common/`)||qo.has(i))return!1;"
+    new_renpy_skip = "if(qo.has(i))return!1;"
+    if js.count(old_renpy_skip) != 1:
+        raise ValueError("Ren'Py common exclusion signature not found")
+    js = js.replace(old_renpy_skip, new_renpy_skip, 1)
+
+    # The .rpy output writer must keep the exact source string as the old
+    # key: trimming loses leading/trailing whitespace, so dialogue like
+    # " Alright, but before I go..." never matches at runtime.
+    old_as = (
+        "function as(e,t){let n=new Map;for(let r of e){let e=t.get(r.keyPath)||t.get(r.text);"
+        "if(!e?.trim())continue;let i=r.text.trim(),a=e.trim();!i||!a||n.has(i)||n.set(i,a)}"
+        "return Array.from(n,([e,t])=>({oldText:e,newText:t}))}"
+    )
+    new_as = (
+        "function as(e,t){let n=new Map;for(let r of e){let e=t.get(r.keyPath)||t.get(r.text);"
+        "if(!e?.trim())continue;let i=r.text,a=e.trim();!i||!a||n.has(i)||n.set(i,a)}"
+        "return Array.from(n,([e,t])=>({oldText:e,newText:t}))}"
+    )
+    if js.count(old_as) != 1:
+        raise ValueError("Output writer signature not found")
+    js = js.replace(old_as, new_as, 1)
+
+    # Engine common files (assets/x-renpy/x-common/...) have no game/x-game
+    # segment, so os() fell back to a bare tl/<lang>/ path that the compile
+    # step never scans. Route them into the same x-game/x-tl bucket so the
+    # engine UI strings reach the compiled translations.
+    old_os = (
+        "return`tl/${t}/${n.at(-1)||`strings`}.rpy`}"
+    )
+    new_os = (
+        "return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}"
+    )
+    if js.count(old_os) != 1:
+        raise ValueError("Output path fallback signature not found")
+    js = js.replace(old_os, new_os, 1)
+    old_jo = "function Jo(e,t,n){return e.filter(e=>Yo(e,t,n))}"
+    new_jo = (
+        "function Jo(e,t,n){let r=e.filter(e=>Yo(e,t,n)),m=new Map;"
+        "for(let e of r){let k=e.name.replace(/\\\\/g,`/`).replace(/\\.[^/.]+$/,'');"
+        "let p=m.get(k);if(!p||(e.fileType===`rpyc`&&p.fileType!==`rpyc`))m.set(k,e)}"
+        "return Array.from(m.values())}"
+    )
+    if js.count(old_jo) != 1:
+        raise ValueError("Candidate filter Jo signature not found")
+    js = js.replace(old_jo, new_jo, 1)
+
+    old_yb = "{let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:Zo(r,n)}"
+    new_yb = "{if(Qo(r)!=null)return!1;let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
+    if js.count(old_yb) != 1:
+        raise ValueError("Candidate filter Yo branch signature not found")
+    js = js.replace(old_yb, new_yb, 1)
     return js
 
 def _verify_digest(data: bytes, expected: str, label: str) -> None:
@@ -743,6 +940,8 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_translation_network(patched)
     patched = patch_translation_memory(patched)
     patched = patch_extraction_rules(patched)
+    patched = patch_rpyc_string_pipeline(patched)
+    patched = patch_candidate_filter(patched)
     return patched + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 

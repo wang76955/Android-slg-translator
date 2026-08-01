@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import struct
 from pathlib import Path
 
 
@@ -18,6 +19,59 @@ CAPACITOR_DEX = ROOT / "apk-work" / "extracted" / "classes3.dex"
 JAVA_HOME = ROOT / ".tools" / "jdk-17" / "jdk-17.0.19+10"
 JAVA = JAVA_HOME / "bin" / "java.exe"
 JAVAC = JAVA_HOME / "bin" / "javac.exe"
+
+RPC2_MAGIC = b"RENPY RPC2"
+
+def pickle_short(value: str) -> bytes:
+    payload = value.encode("utf-8")
+    if len(payload) > 255:
+        raise AssertionError("fixture strings must be short")
+    return b"\x8c" + bytes([len(payload)]) + payload
+
+def pickle_int1(value: int) -> bytes:
+    return b"\x4b" + bytes([value])
+
+def build_menu_fixture_rpyc() -> bytes:
+    """Builds a minimal RPC2 rpyc whose pickle contains a Menu node with
+    items labels, dialogue and an attr key that must be filtered."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Menu") + b"\x93"  # STACK_GLOBAL
+    p += b"\x29\x81\x4e\x7d\x28"  # EMPTY_TUPLE NEWOBJ NONE EMPTY_DICT MARK
+    p += pickle_short("linenumber") + pickle_int1(1)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what") + pickle_short("Hello, world!")
+    # Screen text marked with _("...") and a Character("Name") definition
+    # (inside a PyCode-style source payload).
+    p += pickle_short('_("Start")')
+    p += pickle_short('Character("Sky", color = "#fff")')
+    p += pickle_short("items")
+    # Screen text marked with _("...") and a Character("Name") definition
+    # (inside a PyCode-style source payload).
+    p += b"\x5d\x94\x28"  # EMPTY_LIST MEMOIZE MARK
+    for label, money in (("First choice", False), ("Second{#x}", False),
+                         ("$1100", True), ("Fine", False)):
+        p += pickle_short(label) + b"\x94"  # label MEMOIZE
+        p += b"\x4e"  # NONE condition
+        p += b"\x5d\x28\x65"  # EMPTY_LIST MARK APPENDS (empty block)
+        p += b"\x87\x94"  # TUPLE3 MEMOIZE
+    p += pickle_short("statement_start")  # must be filtered (attr key)
+    p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    pickle_bytes = bytes(p)
+    import zlib
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
 
 
 def java_block_after(source, marker):
@@ -230,7 +284,7 @@ public final class RenPyExtensionHarness {
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
                     *map(str, stubs),
-                    str(SCANNER),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
                     str(harness_path),
                 ],
                 check=True,
@@ -492,7 +546,9 @@ public final class WorkshopBackHandlerHarness {
             "context.getPackageName()",
             "sourceDir",
             "splitSourceDirs",
-            'new File(context.getCacheDir(), "installed-apks")',
+            'installedApksDir(context)',
+            "getExternalFilesDir(null)",
+            '"installed-apks"',
             'put("source", "installed")',
             'put("splitApk", splitCount > 0)',
         ):
@@ -794,6 +850,12 @@ public final class CacheOwnershipHarness {
             "translatorLang",
             "\\u7ffb\\u8bd1\\u6587\\u672c",
             "0x95",
+            "STATUS_ALREADY",
+            "menuHasLanguage",
+            'result.put("ready"',
+            "STATUS_ALREADY",
+            "menuHasLanguage",
+            'result.put("ready"',
         ):
             self.assertIn(token, source)
         self.assertNotIn("spliceButton", source)
@@ -803,6 +865,240 @@ public final class CacheOwnershipHarness {
             "LanguageMenuSupport;->injectTranslatorMenu",
         ):
             self.assertIn(token, builder)
+
+    def test_rpyc_text_extractor_registers_structural_reading_bridge(self):
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        self.assertTrue(extractor.exists(), "RpycTextExtractor.java must exist")
+        source = extractor.read_text("utf-8")
+        for token in (
+            "extractTexts", "walk", "MEMOIZE", "BINGET", "what", "caption",
+            "SHORT_BINUNICODE", "BINUNICODE",
+        ):
+            self.assertIn(token, source)
+        scanner = SCANNER.read_text("utf-8")
+        for token in ("readRenpyTexts", "RpycTextExtractor.extractTexts", "RPYC_STRING\\t"):
+            self.assertIn(token, scanner)
+        builder = BUILDER.read_text("utf-8")
+        for token in ("READ_TEXTS_SIGNATURE", "FastApkScanner;->readRenpyTexts"):
+            self.assertIn(token, builder)
+
+    def test_rpyc_extractor_keeps_menu_choices_and_single_token_labels(self):
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        for token in (
+            "itemsMode", "afterTuple3", "isChoiceLabel", "0x87", "TUPLE3",
+            "items\".equals(lastKey)", 
+        ):
+            self.assertIn(token, source)
+        scanner = SCANNER.read_text("utf-8")
+        for token in ('replace("\\n", "\\\\n")', 'RPYC_STRING\\t'):
+            self.assertIn(token, scanner)
+
+        fixture = build_menu_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class MenuExtractorHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("Hello, world!"), "dialogue must be extracted");
+        require(set.contains("First choice"), "first menu label must be extracted");
+        require(set.contains("Start"), "_() marked screen text must be extracted");
+        require(set.contains("Sky"), "Character name must be extracted");
+        require(set.contains("Second{#x}"), "tagged menu label must be extracted");
+        require(set.contains("$1100"), "money menu label must be extracted");
+        require(set.contains("Fine"), "single-token capitalized label must be extracted");
+        require(!set.contains("statement_start"), "attr key must not be treated as a label");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="menu-extractor-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "MenuExtractorHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "MenuExtractorHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_cleanup_storage_keeps_newest_patch_and_selection_source(self):
+        cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
+        self.assertTrue(cleanup.exists(), "CleanupSupport.java must exist")
+        builder = BUILDER.read_text("utf-8")
+        for token in (
+            "CLEANUP_SIGNATURE", "CLEANUP_DELEGATE", "CleanupSupport;->cleanupStorage",
+        ):
+            self.assertIn(token, builder)
+        harness = r"""
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.CleanupSupport;
+import java.io.File;
+
+public final class CleanupHarness {
+    static final class FakeContext extends Context {
+        File external;
+        @Override public File getExternalFilesDir(String type) { return external; }
+    }
+    static final class CapturingCall extends PluginCall {
+        String keepUri;
+        String rejected;
+        @Override public String getString(String key) {
+            return "keepUri".equals(key) ? keepUri : null;
+        }
+        @Override public void resolve(JSObject value) {}
+        @Override public void reject(String message) { rejected = message; }
+    }
+
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File installed = new File(base, "installed-apks"); installed.mkdirs();
+        File keep = new File(installed, "keep.apk"); require(keep.createNewFile(), "create keep");
+        File staleSource = new File(installed, "stale.apk"); require(staleSource.createNewFile(), "create stale");
+        File output = new File(base, "SLG-Translator-Output"); output.mkdirs();
+        File patchOld = new File(output, "patch-old.apk"); require(patchOld.createNewFile(), "create old patch");
+        patchOld.setLastModified(1000L);
+        File patchNew = new File(output, "patch-new.apk"); require(patchNew.createNewFile(), "create new patch");
+        patchNew.setLastModified(3000L);
+        FakeContext context = new FakeContext();
+        context.external = base;
+        CapturingCall call = new CapturingCall();
+        call.keepUri = keep.toURI().toString();
+        CleanupSupport.cleanupStorage(context, call);
+        require(call.rejected == null, "cleanup must resolve: " + call.rejected);
+        require(!staleSource.exists(), "stale installed copy must be deleted");
+        require(keep.exists(), "current selection source must be kept");
+        require(!patchOld.exists(), "old patch must be deleted");
+        require(patchNew.exists(), "newest patch must be kept");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="cleanup-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CleanupHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "CleanupHarness", str(fixture)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_save_transfer_copies_and_counts_files(self):
+        transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
+        self.assertTrue(transfer.exists(), "SaveTransfer.java must exist")
+        builder = BUILDER.read_text("utf-8")
+        for token in (
+            "SAVE_BACKUP_SIGNATURE", "SAVE_RESTORE_SIGNATURE", "SAVE_LIST_SIGNATURE",
+            "SaveTransfer;->backupSaves", "SaveTransfer;->restoreSaves", "SaveTransfer;->listSaveBackups",
+        ):
+            self.assertIn(token, builder)
+        harness = r"""
+import com.slgtranslator.app.SaveTransfer;
+import java.io.File;
+import java.lang.reflect.Method;
+
+public final class SaveTransferHarness {
+    public static void main(String[] args) throws Exception {
+        File source = new File(args[0]);
+        File dest = new File(args[1]);
+        File nested = new File(source, "game"); nested.mkdirs();
+        File slot = new File(source, "auto-1.save"); require(slot.createNewFile(), "create save");
+        File inner = new File(nested, "meta.bin"); require(inner.createNewFile(), "create meta");
+        Method copyTree = SaveTransfer.class.getDeclaredMethod("copyTree", File.class, File.class);
+        copyTree.setAccessible(true);
+        Method countFiles = SaveTransfer.class.getDeclaredMethod("countFiles", File.class);
+        countFiles.setAccessible(true);
+        int copied = (Integer) copyTree.invoke(null, source, dest);
+        require(copied == 2, "two files must be copied: " + copied);
+        require(new File(dest, "auto-1.save").isFile(), "save slot copied");
+        require(new File(dest, "game/meta.bin").isFile(), "nested file copied");
+        require((Integer) countFiles.invoke(null, dest) == 2, "count must match");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="save-transfer-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "SaveTransferHarness.java"
+            classes = temporary_path / "classes"
+            source_dir = temporary_path / "source"
+            dest_dir = temporary_path / "dest"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            source_dir.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SaveTransferHarness", str(source_dir), str(dest_dir)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
 
 
 if __name__ == "__main__":

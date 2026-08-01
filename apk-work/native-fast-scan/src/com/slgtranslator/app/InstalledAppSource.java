@@ -119,7 +119,7 @@ public final class InstalledAppSource {
                 return;
             }
 
-            File directory = new File(context.getCacheDir(), "installed-apks");
+            File directory = installedApksDir(context);
             if ((!directory.exists() && !directory.mkdirs()) || !directory.isDirectory()) {
                 call.reject("Cannot prepare private storage for the app APK. Free space and try again.");
                 return;
@@ -189,6 +189,18 @@ public final class InstalledAppSource {
         CharSequence label = packageManager.getApplicationLabel(applicationInfo);
         String value = label == null ? "" : label.toString().trim();
         return value.isEmpty() ? applicationInfo.packageName : value;
+    }
+
+    /**
+     * Persisted location for copied app APKs. The app cache directory is
+     * aggressively cleared by OEM cleanup policies (which already broke
+     * patch builds when the source APK disappeared), so the copy lives in
+     * the app's persistent external files directory instead.
+     */
+    static File installedApksDir(Context context) {
+        File external = context.getExternalFilesDir(null);
+        File base = external != null ? external : context.getFilesDir();
+        return new File(base, "installed-apks");
     }
 
     private static void copyAndSync(File source, File partial) throws IOException {
