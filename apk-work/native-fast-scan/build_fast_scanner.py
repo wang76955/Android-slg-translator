@@ -109,6 +109,76 @@ BACK_HANDLER_METHOD = """.method public final enableWorkshopBackHandling(Lcom/ge
     return-void
 .end method"""
 
+RENDER_GONE_SIGNATURE = (
+    ".method public onRenderProcessGone(Landroid/webkit/WebView;Landroid/webkit/RenderProcessGoneDetail;)Z"
+)
+RENDER_GONE_MARKER = "# workshop: keep app alive on renderer death"
+RENDER_GONE_PATTERN = re.compile(
+    r"(?ms)^\.method public onRenderProcessGone\(Landroid/webkit/WebView;Landroid/webkit/RenderProcessGoneDetail;\)Z\r?\n.*?^\.end method"
+)
+RENDER_GONE_METHOD = """.method public onRenderProcessGone(Landroid/webkit/WebView;Landroid/webkit/RenderProcessGoneDetail;)Z
+    .locals 2
+    .param p1, "view"    # Landroid/webkit/WebView;
+    .param p2, "detail"    # Landroid/webkit/RenderProcessGoneDetail;
+
+    # workshop: keep app alive on renderer death
+    const/4 v0, 0x1
+
+    :try_start_0
+    invoke-virtual {p1}, Landroid/webkit/WebView;->reload()V
+    :try_end_0
+    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
+
+    return v0
+
+    :catch_0
+    move-exception v1
+    return v0
+.end method"""
+
+SAVE_APK_SIGNATURE = ".method public final savePatchedApkToDownloads(Lcom/getcapacitor/PluginCall;)V"
+SAVE_APK_DELEGATE = "Lcom/slgtranslator/app/InstallSupport;->savePatchedApkToDownloads"
+SAVE_APK_METHOD = """.method public final savePatchedApkToDownloads(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/InstallSupport;->savePatchedApkToDownloads(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+LIST_PATCHES_SIGNATURE = ".method public final listPatchedApks(Lcom/getcapacitor/PluginCall;)V"
+LIST_PATCHES_DELEGATE = "Lcom/slgtranslator/app/InstallSupport;->listPatchedApks"
+LIST_PATCHES_METHOD = """.method public final listPatchedApks(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/InstallSupport;->listPatchedApks(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+INJECT_MENU_SIGNATURE = ".method public final injectTranslatorMenu(Lcom/getcapacitor/PluginCall;)V"
+INJECT_MENU_DELEGATE = "Lcom/slgtranslator/app/LanguageMenuSupport;->injectTranslatorMenu"
+INJECT_MENU_METHOD = """.method public final injectTranslatorMenu(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p0, p1}, Lcom/slgtranslator/app/LanguageMenuSupport;->injectTranslatorMenu(Landroid/content/Context;Ljava/lang/Object;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+
 ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
 ANDROID_NAME = f"{{{ANDROID_NAMESPACE}}}name"
 
@@ -197,7 +267,24 @@ def patch_launcher_queries(manifest: Path) -> None:
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
 
-def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path]:
+def patch_bridge_webview_client(decoded: Path) -> None:
+    candidates = list(decoded.glob("smali_classes3/com/getcapacitor/BridgeWebViewClient.smali"))
+    if len(candidates) != 1:
+        raise RuntimeError(f"Expected one BridgeWebViewClient smali file, found {len(candidates)}")
+    smali = candidates[0]
+    original = smali.read_text("utf-8")
+    existing = RENDER_GONE_PATTERN.findall(original)
+    if len(existing) != 1:
+        raise RuntimeError(f"Expected exactly one onRenderProcessGone method, found {len(existing)}")
+    if RENDER_GONE_MARKER in existing[0]:
+        return
+    patched, replacements = RENDER_GONE_PATTERN.subn(RENDER_GONE_METHOD, original, count=1)
+    if replacements != 1 or patched.count(RENDER_GONE_SIGNATURE) != 1:
+        raise RuntimeError("Failed to patch BridgeWebViewClient.onRenderProcessGone")
+    smali.write_text(patched, "utf-8", newline="\n")
+
+
+def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path]:
     overlay = build / "scanner-source.apk"
     decoded = build / "decoded"
     create_overlay_apk(overlay)
@@ -245,7 +332,29 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path]:
         raise RuntimeError(f"Workshop back bridge is repeatedly injected: {back_count}")
     if patched.count(BACK_HANDLER_SIGNATURE) != 1 or patched.count(BACK_HANDLER_DELEGATE) != 1:
         raise RuntimeError("Expected exactly one valid workshop back bridge")
+    save_apk_count = patched.count(SAVE_APK_SIGNATURE)
+    if save_apk_count == 0:
+        patched = patched.rstrip() + "\n\n" + SAVE_APK_METHOD + "\n"
+    elif save_apk_count != 1:
+        raise RuntimeError(f"Save APK bridge is repeatedly injected: {save_apk_count}")
+    if patched.count(SAVE_APK_SIGNATURE) != 1 or patched.count(SAVE_APK_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid save APK bridge")
+    list_patches_count = patched.count(LIST_PATCHES_SIGNATURE)
+    if list_patches_count == 0:
+        patched = patched.rstrip() + "\n\n" + LIST_PATCHES_METHOD + "\n"
+    elif list_patches_count != 1:
+        raise RuntimeError(f"Patch list bridge is repeatedly injected: {list_patches_count}")
+    if patched.count(LIST_PATCHES_SIGNATURE) != 1 or patched.count(LIST_PATCHES_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid patch list bridge")
+    inject_count = patched.count(INJECT_MENU_SIGNATURE)
+    if inject_count == 0:
+        patched = patched.rstrip() + "\n\n" + INJECT_MENU_METHOD + "\n"
+    elif inject_count != 1:
+        raise RuntimeError(f"Language menu bridge is repeatedly injected: {inject_count}")
+    if patched.count(INJECT_MENU_SIGNATURE) != 1 or patched.count(INJECT_MENU_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid language menu bridge")
     smali.write_text(patched, "utf-8", newline="\n")
+    patch_bridge_webview_client(decoded)
     run(
         [
             str(JAVA),
@@ -259,13 +368,16 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path]:
         env,
     )
     result = decoded / "build" / "apk" / "classes6.dex"
+    result3 = decoded / "build" / "apk" / "classes3.dex"
     compiled_manifest = decoded / "build" / "apk" / "AndroidManifest.xml"
     if not result.exists() or not compiled_manifest.exists():
         raise RuntimeError("apktool did not produce classes6.dex and AndroidManifest.xml")
-    return result, compiled_manifest
+    if not result3.exists():
+        raise RuntimeError("apktool did not produce classes3.dex")
+    return result, result3, compiled_manifest
 
 
-def main() -> tuple[Path, Path, Path]:
+def main() -> tuple[Path, Path, Path, Path]:
     env = os.environ.copy()
     env["JAVA_HOME"] = str(JAVA_HOME)
     ascii_temp = Path(env.get("CODEX_APK_BUILD_TEMP", "C:/codex-apk-build"))
@@ -276,14 +388,16 @@ def main() -> tuple[Path, Path, Path]:
     with tempfile.TemporaryDirectory(prefix="slg-fast-scan-", dir=ascii_temp) as temporary:
         build = Path(temporary)
         helper_dex = build_helper_dex(build, env)
-        plugin_dex, compiled_manifest = patch_plugin_dex(build, env)
+        plugin_dex, bridge_dex, compiled_manifest = patch_plugin_dex(build, env)
         classes6 = GENERATED / "classes6.dex"
+        classes3 = GENERATED / "classes3.dex"
         classes7 = GENERATED / "classes7.dex"
         manifest = GENERATED / "AndroidManifest.xml"
         shutil.copy2(plugin_dex, classes6)
+        shutil.copy2(bridge_dex, classes3)
         shutil.copy2(helper_dex, classes7)
         shutil.copy2(compiled_manifest, manifest)
-    return classes6, classes7, manifest
+    return classes6, classes7, manifest, classes3
 
 
 if __name__ == "__main__":

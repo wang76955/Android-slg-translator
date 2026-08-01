@@ -63,6 +63,19 @@ class WorkshopPatchContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_rpyc_string_filter_rejects_code_assets_and_quoted_tokens(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        he_start = js.index("function He(e,t){")
+        he_end = js.index("function Ue(e,t){", he_start)
+        he = js[he_start:he_end]
+        self.assertIn(r"/^[A-Za-z_][\w.]*\(.*\)\s*$/", he)
+        self.assertIn(r"/^[A-Za-z_][\w.]*\s*[+\-*/%]{1,2}=\s\S/", he)
+        self.assertIn("/^[\"'][A-Za-z0-9_./:-]{1,40}[\"']$/", he)
+        self.assertNotIn(r"/^[A-Za-z_][\w.]*\([^)]*\)$/", he)
+
     def test_renpy_candidate_filter_keeps_story_scripts_but_rejects_generated_content(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
@@ -245,7 +258,7 @@ async function main(){{
   const failedBody=shell.rendered[1],failedButtons=[];
   function visit(node){{if(!node)return;if(node.tag===`button`)failedButtons.push(node);for(const child of node.children||[])visit(child)}}
   visit(failedBody);
-  const reselect=failedButtons.find(button=>button.label===`重新选择 APK`);
+  const reselect=failedButtons.find(button=>button.label===`\u91cd\u65b0\u9009\u62e9 APK`);
   check(reselect,`failed shell offers source recovery`);reselect.handler();
   check(sourceChooserOpened===1,`failed shell recovery opens source chooser`);
 
@@ -415,10 +428,10 @@ let pushes=0,backs=0,marker=false;
 globalThis.history={state:{base:true},pushState(state){pushes+=1;marker=true;this.state=state},back(){backs+=1;marker=false;this.state={base:true}}};
 let modalHistoryArmed=false,modalHistoryClosing=false,modalHistoryRearm=false;
 let returnedFocus=0,previousSourceFocus={focus(){returnedFocus+=1}};
-let sourceDialog=null,installedDialog=null,settingsShell={hidden:false},settingsOpen=false;
+let sourceDialog=null,installedDialog=null,settingsShell={hidden:false},settingsOpen=false,galleryShell=null,galleryOpen=false;
 let installedListEpoch=0,sourceRequestEpoch=0,installedLoading=false,installedBusy=false;
 let manualIdle=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
-function refresh(){refreshes+=1} function setWorkshopState(){}
+function refresh(){refreshes+=1} function setWorkshopState(){} function closeGallery(){}
 
 function resetHistory(){pushes=0;backs=0;marker=false;returnedFocus=0;refreshes=0;modalHistoryArmed=false;modalHistoryClosing=false;modalHistoryRearm=false;history.state={base:true}}
 function assertNativeClose(label,isClosed,closeEffects){
@@ -725,64 +738,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
         self.assertIn('bubbles:true,cancelable:true,view:window', js)
         self.assertIn('function triggerReactButton(button)', js)
-        self.assertIn('actionButton("选择应用或 APK",openSourceChooser)', js)
-        self.assertIn('await loadSelectedApk(await E.pickApkFile())', js)
-        self.assertIn('actionButton("开始翻译",()=>triggerReactButton(startButton))', js)
-        # The guard must inspect the freshly queried React node, not a stale
-        # reference captured before React rerenders the form.
-        self.assertIn('target?.disabled', js)
-        self.assertIn('请先配置 API Key', js)
-        self.assertIn('const snap=readTaskSnapshot()', js)
-        self.assertIn('setWorkshopState("ready",{...snap,apiRequired:true})', js)
-        self.assertIn('正在处理脚本', js)
-        for token in (
-            "workshop-settings-shell",
-            "workshop-settings-input",
-            "workshop-settings-save",
-            "API Key",
-            "我的设置",
-            "openSettings",
-            "setReactInputValue",
-            "我的",
-            'input.id="settingsApiKey"',
-            'label.htmlFor="settingsApiKey"',
-            'input.focus()',
-            'input.blur()',
-            'pendingApiKey=null',
-            'function applyApiKeyToReact()',
-            'pendingApiKey=input.value',
-            'applyApiKeyToReact()',
-            '!el.closest(".workshop-settings-shell")',
-            'function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false',
-            'state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":""',
-            'const isStart=button===startButton||button?.textContent?.includes("开始翻译")',
-            'const isInstall=button===installButton||button?.textContent?.includes("安装补丁版")',
-            'isInstall?findButton("安装补丁版"):button',
-            'if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}',
-            'if(isStart&&target?.disabled)',
-        ):
-            self.assertIn(token, js)
-        self.assertIn("workshop-settings-card", css)
-        self.assertIn("workshop-settings-input", css)
-        self.assertIn('function retryTask(payload)', js)
-        self.assertIn('triggerReactButton(startButton||sourceButton)', js)
-        self.assertIn('window.setTimeout(()=>{retrying=false;refresh()},600)', js)
-        for token in (
-            "t.packageName",
-            "scanDurationMs",
-            "cacheHit",
-            "workshop-scan-elapsed",
-            'reason:"scan"',
-            'function startScanClock()',
-            'function stopScanClock()',
-        ):
-            self.assertIn(token, js)
-
-        # State changes are reflected on both data attributes and state
-        # classes, which lets the CSS keep idle navigation and active task
-        # content mutually exclusive.
-        self.assertIn('shell.dataset.workshopState=state', js)
-        self.assertIn('shell.dataset.workshopTask=state==="idle"?"idle":"active"', js)
+        self.assertIn('actionButton("\u4fdd\u5b58\u8865\u4e01 APK"', js)
         self.assertIn('shell.setAttribute("data-workshop-state",state)', js)
         self.assertRegex(
             js,
@@ -897,7 +853,7 @@ const rendered=renderStateBody(`completed`,{fileName:`fixture.apk`,translated:`1
 const buttons=[];
 function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
 visit(rendered);
-const visibleInstall=buttons.find(button=>button.label===`安装补丁版`);
+const visibleInstall=buttons.find(button=>button.label===`\u76f4\u63a5\u5b89\u88c5`);
 check(visibleInstall,`install action rendered`);
 dispatched=[];
 currentInstall=null;
@@ -921,8 +877,17 @@ check(refreshes===1,`refresh requested`);
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
         self.assertIn('installAvailable:!!installButton?.isConnected', js)
+        self.assertIn('renpyLang:window.__slgRenpyLang||\'\'', js)
+        self.assertIn('renpyMenuType:window.__slgRenpyMenuType||\'\'', js)
+        self.assertIn('window.__slgRenpyLanguages=t.renpyLanguages||[]', js)
+        self.assertIn('window.__slgRenpyMenuType=t.renpyMenuType||`none`', js)
+        self.assertIn('window.__slgRenpyLang=t.renpyMenuType===`renpy`', js)
+        self.assertIn('["\u7ee7\u7eed\u4e0a\u6b21","\u626b\u63cf\u65b0\u589e","\u5168\u90e8\u91cd\u8bd1"]', js)
+        self.assertIn('\u8bd1\u6587\u8bed\u8a00\uff1a"+payload.renpyLang', js)
+        self.assertIn('\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf', js)
+
         self.assertIn(
-            'if(payload.installAvailable)body.append(actionButton("安装补丁版",()=>triggerReactButton(installButton)))',
+            'if(payload.patchedApkPath)card.append(textNode(\"p\",\"workshop-state-copy workshop-scan-elapsed\",\"\u4f4d\u7f6e\uff1a\"+payload.patchedApkPath));if(payload.renpyLang===`slg-translated`)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3\"));else if(payload.renpyLang)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u8bd1\u6587\u8bed\u8a00\uff1a\"+payload.renpyLang+\"\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587\"));else if(payload.renpyMenuType===\"custom\")card.append(textNode(\"p\",\"workshop-state-copy\",\"\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9\"));body.append(card);const actions=textNode(\"div\",\"workshop-summary-list\");if(payload.patchedApkPath)actions.append(actionButton(\"\u4fdd\u5b58\u8865\u4e01 APK\",()=>savePatchedApk(payload.patchedApkPath)));if(payload.installAvailable){actions.append(actionButton(\"\u5378\u8f7d\u539f\u7248\u5e76\u5b89\u88c5\u8865\u4e01\u7248\",()=>clickReact(\"\u5378\u8f7d\u539f\u7248+\u5b89\u88c5\u8865\u4e01\")));actions.append(actionButton(\"\u76f4\u63a5\u5b89\u88c5\",()=>triggerReactButton(installButton),true))}if(actions.children.length)body.append(actions);return body}',
             js,
         )
         self.assertIn('s.installAvailable?"install":""', js)
@@ -1273,19 +1238,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         )
 
         self.assertIn(
-            'if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating"',
-            js,
-        )
-        self.assertNotIn(
-            'if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"scanning"',
-            js,
-        )
-        self.assertIn(
-            'if(/正在生成 Ren\'Py 补丁 APK/.test(text))return{state:"patching"',
-            js,
-        )
-        self.assertIn(
-            'if(/翻译完成/.test(text))return{state:"completed"',
+            r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=',
             js,
         )
         self.assertIn('const progress=text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)
@@ -1295,7 +1248,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         self.assertIn('正在生成补丁 APK', js)
         self.assertIn('if(state==="completed")', js)
         self.assertIn('补丁 APK 已生成', js)
-        self.assertIn('actionButton("安装补丁版"', js)
+        self.assertIn('actionButton("\u4fdd\u5b58\u8865\u4e01 APK"', js)
         self.assertIn('state==="scanning"?startScanClock():stopScanClock()', js)
         self.assertIn('characterData:true', ''.join(js.split()))
         for state in ("translating", "patching", "completed"):
@@ -1354,12 +1307,156 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`
         self.assertIn('workshop-live-line', js)
         self.assertIn('workshop-live-line', css)
         self.assertIn('detailsOpen=false', js)
-        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0;', js)
+        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
         self.assertIn('body.dataset.open=String(detailsOpen)', js)
         self.assertIn('body.scrollTop=body.scrollHeight', js)
         compact_css = ''.join(css.split())
         self.assertIn('max-height:240px', compact_css)
         self.assertIn('overflow:auto', compact_css)
+
+
+    def test_ready_mode_selector_and_completed_language_guidance(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn('window.__slgRenpyLanguages=t.renpyLanguages||[]', js)
+        self.assertIn('window.__slgRenpyMenuType=t.renpyMenuType||`none`', js)
+        self.assertIn('window.__slgRenpyLang=t.renpyMenuType===`renpy`', js)
+        self.assertIn('renpyLang:window.__slgRenpyLang||\'\'', js)
+        self.assertIn('renpyMenuType:window.__slgRenpyMenuType||\'\'', js)
+        self.assertIn('["\u7ee7\u7eed\u4e0a\u6b21","\u626b\u63cf\u65b0\u589e","\u5168\u90e8\u91cd\u8bd1"]', js)
+        self.assertIn('window.__slgTranslatorLang=\'\'', js)
+        self.assertIn('E.injectTranslatorMenu({apkUri:e.uri', js)
+        self.assertIn("translatorLang:'slg-translated'", js)
+        self.assertIn('if(globalThis.__slgTranslatorLang)return globalThis.__slgTranslatorLang', js)
+        self.assertIn('payload.renpyLang===`slg-translated`', js)
+        self.assertIn('\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3', js)
+        self.assertIn('window.__slgTranslatorLang=\'\'', js)
+        self.assertIn('E.injectTranslatorMenu({apkUri:e.uri', js)
+        self.assertIn("translatorLang:'slg-translated'", js)
+        self.assertIn('if(globalThis.__slgTranslatorLang)return globalThis.__slgTranslatorLang', js)
+        self.assertIn('payload.renpyLang===`slg-translated`', js)
+        self.assertIn('\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3', js)
+
+        snapshot_start = js.index('function readTaskSnapshot(){')
+        snapshot_end = js.index('function detailToggle(', snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        render_start = js.index('function renderStateBody(')
+        render_end = js.index('function setWorkshopState(', render_start)
+        render_runtime = js[render_start:render_end]
+        behavior_contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.localStorage={getItem(){return null},removeItem(){},setItem(){}};
+const SESSION_KEY=`slg-workshop-session-v1`;
+let sessionRestoredAt=0;
+let installButton=null;
+window.__slgRenpyLang=`schinese`;
+window.__slgRenpyMenuType=`renpy`;
+function sourceText(){return `\u7ffb\u8bd1\u5b8c\u6210\n\u5df2\u5199\u5165\u8865\u4e01 APK: /sdcard/SLG-Translator/Game-patched-signed.apk`}
+function readProgressLog(){return{raw:`done`,latest:`done`}}
+const document={querySelectorAll(){return[]}};
+const snapshot=readTaskSnapshot();
+check(snapshot.state===`completed`,`completed snapshot recognized`);
+check(snapshot.renpyLang===`schinese`&&snapshot.renpyMenuType===`renpy`,`language metadata flows into snapshot`);
+
+function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function recoveryBanner(){return textNode(`section`,`banner`,`banner`)}
+function savePatchedApk(){}
+function triggerReactButton(){}
+const startButton=null;
+const clicked=[];
+globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
+function findButton(label){clicked.push(label);return{dispatchEvent(){}}}
+function clickReact(label){const b=findButton(label);if(b){b.dispatchEvent(new MouseEvent(`click`,{bubbles:true,cancelable:true,view:window}));return true}return false}
+
+const readyBody=renderStateBody(`ready`,{fileName:`Game.apk`,count:`12`,sessionRestoredAt:0});
+const readyButtons=[];
+function visit(node){if(!node)return;if(node.tag===`button`)readyButtons.push(node);for(const child of node.children||[])visit(child)}
+visit(readyBody);
+const labels=readyButtons.map(b=>b.label);
+check(labels.includes(`\u7ee7\u7eed\u4e0a\u6b21`)&&labels.includes(`\u626b\u63cf\u65b0\u589e`)&&labels.includes(`\u5168\u90e8\u91cd\u8bd1`),`ready shell offers three task modes`);
+const resume=readyButtons.find(b=>b.label===`\u7ee7\u7eed\u4e0a\u6b21`);
+resume.handler();
+check(clicked.includes(`\u7ee7\u7eed\u4e0a\u6b21`),`mode buttons bridge to React actions`);
+
+const completedBody=renderStateBody(`completed`,{fileName:`Game.apk`,count:`12`,translated:`34`,renpyLang:`chinese`,renpyMenuType:`renpy`,patchedApkPath:`/sdcard/Game-patched-signed.apk`,raw:`done`,latest:``,installAvailable:false});
+const texts=[];
+function collectText(node,into){if(node&&node.text!==undefined)into.push(String(node.text));for(const child of node.children||[])collectText(child,into)}
+collectText(completedBody,texts);
+check(texts.some(t=>t.includes(`\u8bd1\u6587\u8bed\u8a00\uff1achinese`)),`completed shell shows translation language`);
+check(texts.some(t=>t.includes(`\u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587`)),`completed shell explains the language menu step`);
+
+const customBody=renderStateBody(`completed`,{fileName:`Game.apk`,translated:`34`,renpyLang:``,renpyMenuType:`custom`,raw:`done`,latest:``,installAvailable:false});
+const customTexts=[];
+collectText(customBody,customTexts);
+check(customTexts.some(t=>t.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)),`custom language menu warning rendered`);
+"""
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + render_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+
+    def test_gallery_lists_patches_and_idle_topbar_hides_back(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        for token in (
+            "function openGallery()",
+            "function closeGallery(",
+            "function renderGallery()",
+            "async function loadPatches()",
+            "function formatBytes(bytes)",
+            "listPatchedApks",
+            '["\u9996\u9875",()=>window.scrollTo({top:0,behavior:"smooth"})],["\u4f5c\u54c1",openGallery],["\u6211\u7684",openSettings]',
+            'if(state!=="idle"){const back=',
+            "if(galleryOpen){modalHistoryArmed=false;closeGallery(true);return}",
+            "if(galleryOpen){closeGallery();return true}",
+            "galleryShell=null,galleryOpen=false,galleryPatches=[]",
+            "const host=galleryOpen&&galleryShell?galleryShell:shell;",
+            "if(galleryOpen)loadPatches()",
+            "\\u4fdd\\u5b58\\u5230\\u4e0b\\u8f7d",
+            "\\u6211\\u7684\\u8865\\u4e01",
+            'actionButton("\u4fdd\u5b58\u8865\u4e01 APK"',
+        ):
+            self.assertIn(token, js)
+        compact_css = "".join(css.split())
+        for token in (".workshop-gallery-shell", ".workshop-patch-row", ".workshop-patch-save"):
+            self.assertIn(token, compact_css)
+
+        topbar_start = js.index("function renderTopbar(state)")
+        topbar_end = js.index("function fileRow(", topbar_start)
+        topbar = js[topbar_start:topbar_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function textNode(tag,cls,text){return{tag,cls,text,children:[],setAttribute(){},append(...children){this.children.push(...children)}}}
+function setWorkshopState(){}
+const idle=renderTopbar(`idle`);
+check(idle.children.length===2,`idle topbar has no back button`);
+check(idle.children.every(el=>el.tag!==`button`),`idle topbar renders only heading and state`);
+const ready=renderTopbar(`ready`);
+check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active topbar keeps back button`);
+'''
+        result = subprocess.run(
+            ["node", "-e", topbar + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

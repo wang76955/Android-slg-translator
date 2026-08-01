@@ -290,7 +290,7 @@ public final class RenPyExtensionHarness {
         self.assertGreaterEqual(len(invokes), 3)
 
         completed = subprocess.run(
-            [str(DEXDUMP.relative_to(ROOT)), str(CAPACITOR_DEX.relative_to(ROOT))],
+            [str(DEXDUMP), str(CAPACITOR_DEX.relative_to(ROOT))],
             check=True,
             cwd=ROOT,
             stdout=subprocess.PIPE,
@@ -672,7 +672,7 @@ public final class CacheOwnershipHarness {
         def dump(path, disassemble=False):
             completed = subprocess.run(
                 [
-                    str(DEXDUMP.relative_to(ROOT)),
+                    str(DEXDUMP),
                     *(["-d"] if disassemble else []),
                     str(path.relative_to(ROOT)),
                 ],
@@ -780,6 +780,29 @@ public final class CacheOwnershipHarness {
                 actual_methods,
                 f"generated external invoke is absent from real base ABI: {target}",
             )
+
+
+    def test_language_menu_support_rewrites_expendable_slot(self):
+        support = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "LanguageMenuSupport.java"
+        self.assertTrue(support.exists(), "LanguageMenuSupport.java must exist")
+        source = support.read_text("utf-8")
+        for token in (
+            "injectTranslatorMenu",
+            "rewriteButton",
+            "rewriteApkMenu",
+            'Language(\\"',
+            "translatorLang",
+            "\\u7ffb\\u8bd1\\u6587\\u672c",
+            "0x95",
+        ):
+            self.assertIn(token, source)
+        self.assertNotIn("spliceButton", source)
+        builder = BUILDER.read_text("utf-8")
+        for token in (
+            "INJECT_MENU_SIGNATURE",
+            "LanguageMenuSupport;->injectTranslatorMenu",
+        ):
+            self.assertIn(token, builder)
 
 
 if __name__ == "__main__":

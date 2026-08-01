@@ -242,7 +242,7 @@ class BuiltApkTest(unittest.TestCase):
                         [str(DEXDUMP), str(dex_path.relative_to(ROOT))]
                     )
                     dumps[dex_name] = self.assert_tool_success(completed)
-                    if dex_name in ("classes6.dex", "classes7.dex"):
+                    if dex_name in ("classes3.dex", "classes6.dex", "classes7.dex"):
                         completed = self.run_tool(
                             [str(DEXDUMP), "-d", str(dex_path.relative_to(ROOT))]
                         )
@@ -259,6 +259,14 @@ class BuiltApkTest(unittest.TestCase):
             plugin_code,
         )
         helper_code = re.sub(r"\s+", "", code_dumps["classes7.dex"])
+        bridge_code = re.sub(r"\s+", "", code_dumps["classes3.dex"])
+        render_gone_start = bridge_code.index("BridgeWebViewClient.onRenderProcessGone:(" "Landroid/webkit/WebView;Landroid/webkit/RenderProcessGoneDetail;)Z")
+        render_gone_tail = bridge_code.find("Lcom/getcapacitor/BridgeWebViewClient;", render_gone_start + 1)
+        render_gone_end = render_gone_tail if render_gone_tail != -1 else len(bridge_code)
+        render_gone = bridge_code[render_gone_start:render_gone_end]
+        self.assertIn("const/4v0,#int1", render_gone)
+        self.assertIn("Landroid/webkit/WebView;.reload:()V", render_gone)
+        self.assertNotIn("getWebViewListeners", render_gone)
         self.assertIn(
             "Landroidx/activity/OnBackPressedDispatcher;.addCallback:"
             "(Landroidx/lifecycle/LifecycleOwner;"
@@ -288,7 +296,7 @@ class BuiltApkTest(unittest.TestCase):
             (
                 "classes6.dex",
                 "Lcom/slgtranslator/app/FileManagerPlugin;",
-                ("listInstalledApps", "selectInstalledApp", "enableWorkshopBackHandling"),
+                ("listInstalledApps", "selectInstalledApp", "enableWorkshopBackHandling", "savePatchedApkToDownloads", "listPatchedApks", "injectTranslatorMenu"),
             ),
             (
                 "classes7.dex",

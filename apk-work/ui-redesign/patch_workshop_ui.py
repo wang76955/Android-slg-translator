@@ -99,7 +99,7 @@ WORKSHOP_CSS = r"""
 body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{display:none!important}
 .workshop-bottom-nav{position:fixed;z-index:30;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,1fr);padding:6px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:22px;background:color-mix(in oklch,var(--workshop-bg) 94%,transparent);box-shadow:0 10px 35px color-mix(in oklch,var(--workshop-ink) 16%,transparent)}
 .workshop-bottom-nav button{min-height:52px;border:0;border-radius:16px;background:transparent;color:var(--workshop-muted);font-size:13px;font-weight:650}.workshop-bottom-nav button[aria-current="page"]{background:var(--workshop-surface);color:var(--workshop-primary)}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.workshop-gallery-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}.workshop-gallery-shell[hidden]{display:none!important}.workshop-gallery-content{display:grid;gap:10px}.workshop-gallery-status{margin:0;padding:16px;border-radius:14px;background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-gallery-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.workshop-patch-row{padding:14px 16px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:16px;background:var(--workshop-surface)}.workshop-patch-name{font-weight:720;overflow-wrap:anywhere}.workshop-patch-meta{margin-top:4px;color:var(--workshop-muted);font-size:13px}.workshop-patch-save{min-height:44px;margin-top:10px;padding:0 16px;border:0;border-radius:12px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:700}.workshop-gallery-shell .workshop-secondary-action{align-self:flex-start;min-height:48px;padding:0 12px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 """
 
 # Task shell runtime: source React controls stay mounted and are activated via
@@ -109,7 +109,7 @@ WORKSHOP_RUNTIME = r"""
 function textNode(tag,cls,text){const el=document.createElement(tag);el.className=cls;if(text!==undefined)el.textContent=text;return el}
 function setReactInputValue(input,value){if(!input)return;input.focus();const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;if(setter)setter.call(input,value);else input.value=value;input.dispatchEvent(new Event("input",{bubbles:true}));input.dispatchEvent(new Event("change",{bubbles:true}));input.blur()}
 function findReactApiInput(){return[...document.querySelectorAll("#root input")].find(el=>!el.closest(".workshop-settings-shell")&&(el.type==="password"||/api.?key/i.test(el.placeholder||el.getAttribute("aria-label")||"")))}
-function applyApiKeyToReact(){const input=findReactApiInput();if(!input)return false;reactApiInput=input;if(pendingApiKey!==null&&input.value!==pendingApiKey)setReactInputValue(input,pendingApiKey);return true}
+function applyApiKeyToReact(){const input=findReactApiInput();if(!input)return false;reactApiInput=input;if(pendingApiKey!==null&&input.value!==pendingApiKey)setReactInputValue(input,pendingApiKey);if(!input.__slgKeyHooked){input.__slgKeyHooked=true;input.addEventListener('input',()=>{pendingApiKey=input.value;try{const p=readSettingsPrefs();p.apiKey=input.value;saveSettingsPrefs(p)}catch{}})}return true}
 const SETTINGS_KEY="slg-workshop-settings-v1";
 const PROVIDERS={
   openai:{label:"OpenAI",models:[
@@ -211,12 +211,12 @@ async function openInstalledApps(){previousSourceFocus=previousSourceFocus||docu
 async function chooseInstalledApp(app){const epoch=++sourceRequestEpoch;installedBusy=true;installedError="";renderInstalledApps();try{const selection=await window.Capacitor.Plugins.FileManager.selectInstalledApp({packageName:app.packageName});if(epoch!==sourceRequestEpoch||!installedDialog||installedDialog.hidden)return;installedBusy=false;closeInstalledApps(false,true);sourceRequestEpoch+=1;await window.__slgLoadSelectedApk(selection)}catch(error){if(epoch!==sourceRequestEpoch||!installedDialog||installedDialog.hidden)return;installedError=error?.message||String(error);renderInstalledApps()}finally{if(epoch===sourceRequestEpoch&&installedDialog&&!installedDialog.hidden){installedBusy=false;renderInstalledApps();focusInstalledTarget()}}}
 function closeInstalledApps(preserveHistory=false,preserveSourceRequest=false){installedListEpoch+=1;if(!preserveSourceRequest)sourceRequestEpoch+=1;installedLoading=false;installedBusy=false;if(installedDialog){installedDialog.hidden=true;installedDialog.setAttribute("aria-busy","false")}if(!preserveHistory)releaseModalHistory();previousSourceFocus?.focus()}
 function findButton(label){return[...document.querySelectorAll("#root button")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent&&el.textContent.includes(label))}
-function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("开始翻译");const isInstall=button===installButton||button?.textContent?.includes("安装补丁版");const target=isStart?(findButton("开始翻译")||button):isInstall?findButton("安装补丁版"):button;if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
+function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}const isInstall=button===installButton||button?.textContent?.includes("安装补丁版");const target=isStart?(findButton("开始翻译")||button):isInstall?findButton("安装补丁版"):button;if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
 function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();return clone.textContent||""}
 function readProgressLog(){const source=[...document.querySelectorAll("#root details")].find(el=>!el.closest(".workshop-task-shell")&&el.querySelector('[class*="font-mono"]'));const panel=source?.querySelector('[class*="font-mono"]');const lines=[...(panel?.children||[])].slice(-40).map(row=>(row.innerText||row.textContent||"").trim()).filter(Boolean);return{raw:lines.join("\n"),latest:lines.at(-1)||""}}
 function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog=window.__slgScanWatchdog,selectionMeta=window.__slgSelectionMeta,text=sourceText();const selected=text.match(/已选择\s*[:：]?\s*([^\n]{1,180}?)(?=发现|正在|处理|$)/);const fileName=selected?.[1]?.trim()||"";const found=text.match(/发现\s*(\d+)\s*个可翻译文件/),headerCount=text.match(/(?:·\s*)?(\d+)\s*个脚本/);const count=found?.[1]||headerCount?.[1]||"";const progress=text.match(/正在处理脚本\s*(\d+)\s*\/\s*(\d+)/);const current=progress?.[1]||"0",total=progress?.[2]||count||"0";const translated=text.match(/共翻译\s*(\d+)\s*条文本/)?.[1]||"";const log=readProgressLog();const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))return{state:"failed",reason:"space",raw:failed.textContent};const networkFailed=text.match(/翻译失败\s*[:：]?\s*(无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。)/);if(networkFailed)return{state:"failed",reason:"network",raw:networkFailed[1]};if(/翻译完成/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest};if(/正在生成 Ren'Py 补丁 APK/.test(text))return{state:"patching",fileName,count,current,total,raw:log.raw,latest:log.latest};if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating",fileName,count,current,total,raw:log.raw,latest:log.latest};if(count==="0"&&watchdog?.epoch===window.__slgSelectionEpoch&&watchdog.settled&&!watchdog.timerFired)return{state:"empty",fileName,count,splitApk:!!selectionMeta?.splitApk,splitCount:selectionMeta?.splitCount||0};if(count!==""&&count!=="0")return{state:"ready",fileName,count};if(fileName||/正在扫描|正在检查文件|检查文件/.test(text))return{state:"scanning",fileName};return{state:"idle"}}
 function detailToggle(raw,live=false){const wrap=textNode("div","workshop-detail-wrap");const toggle=textNode("button","workshop-detail-toggle",detailsOpen?"收起详情":"处理详情");toggle.type="button";toggle.setAttribute("aria-expanded",String(detailsOpen));const body=textNode("div","workshop-detail-body",raw||"暂无更多信息");body.dataset.open=String(detailsOpen);const scrollLatest=()=>{if(live&&detailsOpen)window.requestAnimationFrame(()=>{body.scrollTop=body.scrollHeight})};toggle.onclick=()=>{detailsOpen=!detailsOpen;body.dataset.open=String(detailsOpen);toggle.setAttribute("aria-expanded",String(detailsOpen));toggle.textContent=detailsOpen?"收起详情":"处理详情";scrollLatest()};wrap.append(toggle,body);scrollLatest();return wrap}
- function renderTopbar(state){const bar=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回");back.onclick=()=>setWorkshopState("idle",{fromBack:true});const label=state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":"";bar.append(back,textNode("h1","","APK 翻译"),textNode("span","workshop-topbar-state",label));return bar}
+ function renderTopbar(state){const bar=textNode("header","workshop-task-topbar");const label=state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":"";if(state!=="idle"){const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回");back.onclick=()=>setWorkshopState("idle",{fromBack:true});bar.append(back)}bar.append(textNode("h1","","APK 翻译"),textNode("span","workshop-topbar-state",label));return bar}
 function fileRow(fileName){const row=textNode("div","workshop-file-row");row.append(textNode("span","workshop-file-icon","APK"));const copy=textNode("div","workshop-file-copy");copy.append(textNode("div","workshop-file-name",fileName||"尚未选择 APK"),textNode("div","workshop-file-meta",fileName?"已选择文件":"支持 Android APK 文件"));row.append(copy);return row}
 function actionButton(label,handler,secondary){const button=textNode("button",secondary?"workshop-secondary-action":"workshop-primary-action",label);button.type="button";button.onclick=handler;return button}
 function renderStateBody(state,payload){const body=textNode("div","workshop-task-body");if(state==="idle"){const brand=textNode("section","workshop-brand-panel");brand.append(textNode("p","","今天翻译什么？"),textNode("h2","","让喜欢的故事，用中文继续。"));const card=textNode("section","workshop-task-card");card.append(fileRow(""),textNode("p","workshop-state-copy","选择一个应用或 APK，开始你的中文旅程。"),actionButton("选择应用或 APK",openSourceChooser));body.append(brand,card);return body}
@@ -232,20 +232,26 @@ const title=textNode("h2","workshop-error-title","手机空间不足");const cop
 function setWorkshopState(state,payload={}){if(!shell)return;shell.dataset.workshopState=state;shell.setAttribute("data-workshop-state",state);shell.dataset.workshopTask=state==="idle"?"idle":"active";const task=shell.dataset.workshopTask;shell.setAttribute("data-workshop-task",shell.dataset.workshopTask);runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",task);shell.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");shell.classList.add(`workshop-state-${state}`);runtimeRoot?.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");runtimeRoot?.classList.add(`workshop-state-${state}`);shell.replaceChildren(renderTopbar(state),renderStateBody(state,payload))}
 function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.current||"",s.total||"",s.translated||"",s.reason||"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""].join("|")}
 function retryTask(payload){retrying=true;triggerReactButton(startButton||sourceButton);setWorkshopState("scanning",payload);window.setTimeout(()=>{retrying=false;refresh()},600)}
-function refresh(){if(!shell||manualIdle||retrying||settingsOpen)return;const snap=readTaskSnapshot(),key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
+function refresh(){if(!shell||retrying||settingsOpen)return;const snap=readTaskSnapshot();const active=snap.state==='scanning'||snap.state==='translating'||snap.state==='patching'||snap.state==='completed'||snap.state==='failed';if(manualIdle&&!active)return;const key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
  function decorate(){const heading=[...document.querySelectorAll("#root h2")].find(el=>el.textContent&&el.textContent.includes("选择游戏 APK"));if(heading?.parentElement)heading.parentElement.classList.add("workshop-picker-source");startButton=findButton("开始翻译");if(startButton){startButton.classList.add("workshop-start-button");startButton.setAttribute("aria-hidden","true")}installButton=findButton("安装补丁版");if(installButton)installButton.setAttribute("aria-hidden","true");sourceButton=findButton("选择");if(sourceButton){sourceButton.classList.add("workshop-source-button");sourceButton.setAttribute("aria-label","选择 APK 文件");sourceButton.setAttribute("aria-hidden","true")}applyApiKeyToReact()}
+
+function formatBytes(bytes){const value=Number(bytes)||0;if(value<1024)return`${value} B`;const units=["KB","MB","GB"];let n=value/1024,unit=0;while(n>=1024&&unit<units.length-1){n/=1024;unit+=1}return`${n>=100?Math.round(n):Math.round(n*10)/10} ${units[unit]}`}
+function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u4f5c\u54c1"))?.setAttribute("aria-current","page");if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u6211\u7684\u8865\u4e01");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;top.append(back,textNode("h1","","\u6211\u7684\u8865\u4e01"));const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");galleryShell.append(top,list,refresh);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches()}
+function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u9996\u9875"))?.setAttribute("aria-current","page");if(!preserveHistory)releaseModalHistory();refresh()}
+function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;list.replaceChildren();if(galleryLoading){list.append(textNode("p","workshop-gallery-status","\u6b63\u5728\u8bfb\u53d6\u8865\u4e01\u5217\u8868\u2026"));return}if(galleryError){list.append(textNode("p","workshop-gallery-status workshop-installed-error","\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError));return}if(!galleryPatches.length){list.append(textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u8865\u4e01 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u8865\u4e01\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));return}const rows=textNode("ul","workshop-gallery-list");for(const patch of galleryPatches){const item=textNode("li","");const card=textNode("div","workshop-patch-row");card.append(textNode("div","workshop-patch-name",patch.name||"\u672a\u547d\u540d\u8865\u4e01"));card.append(textNode("div","workshop-patch-meta",`${formatBytes(patch.size)} \u00b7 ${new Date(patch.modifiedAt||Date.now()).toLocaleString()}`));const save=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";card.append(save);item.append(card);rows.append(item)}list.append(rows)}
+async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager;galleryLoading=true;galleryError="";renderGallery();if(!plugin?.listPatchedApks){galleryLoading=false;galleryError="\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8bfb\u53d6\u8865\u4e01\u5217\u8868\uff0c\u8bf7\u5347\u7ea7\u5e94\u7528";renderGallery();return}try{const result=await plugin.listPatchedApks();galleryPatches=Array.isArray(result?.patches)?result.patches:[]}catch(error){galleryError=error?.message||String(error)}finally{galleryLoading=false;renderGallery()}}
 function enableNativeBackHandling(){if(nativeBackEnabled||nativeBackPending)return;const plugin=window.Capacitor?.Plugins?.FileManager;if(!plugin?.enableWorkshopBackHandling)return;nativeBackPending=true;Promise.resolve(plugin.enableWorkshopBackHandling()).then(()=>{nativeBackEnabled=true}).catch(()=>{}).finally(()=>{nativeBackPending=false})}
-function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["作品",()=>document.querySelector("#root")?.scrollIntoView({behavior:"smooth",block:"start"})],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
-function handleWorkshopPopState(){if(modalHistoryClosing){modalHistoryClosing=false;if(modalHistoryRearm){modalHistoryRearm=false;armModalHistory()}return}if(installedDialog&&!installedDialog.hidden){modalHistoryArmed=false;closeInstalledApps(true);return}if(sourceDialog&&!sourceDialog.hidden){modalHistoryArmed=false;closeSourceChooser(true);return}if(settingsOpen){modalHistoryArmed=false;closeSettings(true);return}if(shell?.dataset.workshopTask==="active"){manualIdle=true;setWorkshopState("idle",{fromBack:true})}}
+function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["作品",openGallery],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
+function handleWorkshopPopState(){if(modalHistoryClosing){modalHistoryClosing=false;if(modalHistoryRearm){modalHistoryRearm=false;armModalHistory()}return}if(installedDialog&&!installedDialog.hidden){modalHistoryArmed=false;closeInstalledApps(true);return}if(sourceDialog&&!sourceDialog.hidden){modalHistoryArmed=false;closeSourceChooser(true);return}if(settingsOpen){modalHistoryArmed=false;closeSettings(true);return}if(galleryOpen){modalHistoryArmed=false;closeGallery(true);return}if(shell?.dataset.workshopTask==="active"){manualIdle=true;setWorkshopState("idle",{fromBack:true})}}
 function schedule(){clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)}
-window.__slgHandleAndroidBack=()=>{if(installedDialog&&!installedDialog.hidden){closeInstalledApps();return true}if(sourceDialog&&!sourceDialog.hidden){closeSourceChooser();return true}if(settingsOpen){closeSettings();return true}return false};
+window.__slgHandleAndroidBack=()=>{if(installedDialog&&!installedDialog.hidden){closeInstalledApps();return true}if(sourceDialog&&!sourceDialog.hidden){closeSourceChooser();return true}if(settingsOpen){closeSettings();return true}if(galleryOpen){closeGallery();return true}return false};
 document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-task-back"))manualIdle=true},{capture:true});observer=new MutationObserver(schedule);observer.observe(document.querySelector("#root")||document.documentElement,{childList:true,subtree:true,characterData:true});window.addEventListener("popstate",handleWorkshopPopState);document.readyState==="loading"?document.addEventListener("DOMContentLoaded",mount):mount()})();
 """
 
 
 def patch_scan_flow(js: str) -> str:
     old = """xe=async()=>{try{let e=await E.pickApkFile();r(e.uri),a(e.uri.split(`/`).pop()||`Unknown.apk`),s([]),fe(null),w([]),d(!0),O(`正在扫描 APK 中的文本文件...`,`info`);let t=await E.listApkEntries({uri:e.uri});s(t.entries);try{let t=await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);t.packageName&&(p(t.packageName),O(`识别到包名: `+t.packageName,`info`))}catch{}let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(e){e.message!==`User cancelled`&&O(`选择文件失败: ${e.message}`,`error`),d(!1)}}"""
-    new = """function withTimeout(promise,timeoutMs,message){let timer;return new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(new Error(message)),timeoutMs);Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))}loadSelectedApk=window.__slgLoadSelectedApk=async e=>{let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;try{window.__slgSelectionError=null,window.__slgSelectionMeta=e,r(e.uri),a(e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`),p(e.packageName||``),s([]),fe(null),he.current=[],w([]),d(!0),O(e.source===`installed`?`正在读取已安装应用的 APK...`:`正在扫描 APK 中的文本文件...`,`info`),e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);let t=await withTimeout(E.listApkEntries({uri:e.uri}),window.__slgScanTimeoutMs||65000,`APK 检查超时，请重新选择应用或文件。`);if(selectionEpoch!==window.__slgSelectionEpoch)return;if(e.splitApk&&t.entries.length===0)throw new Error(`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`);s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=e.packageName?{packageName:e.packageName}:t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);if(selectionEpoch!==window.__slgSelectionEpoch)return;n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}if(selectionEpoch!==window.__slgSelectionEpoch)return;let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(t){if(selectionEpoch!==window.__slgSelectionEpoch)return;t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t}},xe=async()=>{try{await loadSelectedApk(await E.pickApkFile())}catch(e){e.message!==`User cancelled`&&!window.__slgSelectionError&&(window.__slgSelectionError={message:e.message,fileName:``},O(`选择文件失败: ${e.message}`,`error`)),d(!1)}}"""
+    new = """function withTimeout(promise,timeoutMs,message){let timer;return new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(new Error(message)),timeoutMs);Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))}loadSelectedApk=window.__slgLoadSelectedApk=async e=>{let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;try{window.__slgSelectionError=null,window.__slgSelectionMeta=e,r(e.uri),a(e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`),p(e.packageName||``),s([]),fe(null),he.current=[],w([]),d(!0),O(e.source===`installed`?`正在读取已安装应用的 APK...`:`正在扫描 APK 中的文本文件...`,`info`),e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);let t=await withTimeout(E.listApkEntries({uri:e.uri}),window.__slgScanTimeoutMs||65000,`APK 检查超时，请重新选择应用或文件。`);if(selectionEpoch!==window.__slgSelectionEpoch)return;if(e.splitApk&&t.entries.length===0)throw new Error(`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`);s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=e.packageName?{packageName:e.packageName}:t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);if(selectionEpoch!==window.__slgSelectionEpoch)return;n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}if(selectionEpoch!==window.__slgSelectionEpoch)return;let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1);if(window.__slgRenpyMenuType===`renpy`){try{let _m=await E.injectTranslatorMenu({apkUri:e.uri,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slg-translated'});window.__slgTranslatorLang=(_m&&_m.changed)?'slg-translated':''}catch{window.__slgTranslatorLang=''}}}catch(t){if(selectionEpoch!==window.__slgSelectionEpoch)return;t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t}},xe=async()=>{try{await loadSelectedApk(await E.pickApkFile())}catch(e){e.message!==`User cancelled`&&!window.__slgSelectionError&&(window.__slgSelectionError={message:e.message,fileName:``},O(`选择文件失败: ${e.message}`,`error`)),d(!1)}}"""
     new = new.replace(
         "function withTimeout(promise,timeoutMs,message){",
         "withTimeout=(promise,timeoutMs,message)=>{",
@@ -301,6 +307,24 @@ def patch_scan_flow(js: str) -> str:
         "O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t})}"
     )
     new = new[:loader_start] + deadline_loader + new[loader_end:]
+    session_save = "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
+    session_replacement = (
+        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
+        "try{globalThis.localStorage?.setItem('slg-workshop-session-v1',"
+        "JSON.stringify({uri:e.uri,name:e.name||e.label,packageName:e.packageName||'',source:e.source||'',savedAt:Date.now()}))}catch{}"
+    )
+    if new.count(session_save) != 1:
+        raise ValueError("Session persistence signature not found")
+    new = new.replace(session_save, session_replacement, 1)
+
+    lang_stash_old = 's(t.entries),O(`APK '
+    lang_stash_new = ('window.__slgRenpyLanguages=t.renpyLanguages||[],'
+                      'window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgTranslatorLang=\'\',' 
+                      'window.__slgRenpyLang=t.renpyMenuType===`renpy`?([`chinese`,`schinese`,`zh-cn`,`zh-hans`,`zh-tw`,`zh`,`zh-hant`,`tchinese`,`simplified-chinese`,`simplified_chinese`,`traditional_chinese`].find(c=>(t.renpyLanguages||[]).includes(c))||``):``,'
+                      's(t.entries),O(`APK ')
+    if new.count(lang_stash_old) != 1:
+        raise ValueError("Language stash signature not found")
+    new = new.replace(lang_stash_old, lang_stash_new, 1)
     if js.count(old) != 1:
         raise ValueError("APK picker flow signature not found")
     return js.replace(old, new, 1)
@@ -356,7 +380,139 @@ function setReactInputValue(input,value)""",
         's.reason||"",s.installAvailable?"install":"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""',
         1,
     )
+    # --- session auto-resume (renderer-crash recovery) ---
+    session_state_old = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0;"
+    session_state_new = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError='';"
+    if runtime.count(session_state_old) != 1:
+        raise ValueError("Session state signature not found")
+    runtime = runtime.replace(session_state_old, session_state_new, 1)
+
+    session_key_old = 'const SETTINGS_KEY="slg-workshop-settings-v1";'
+    session_key_new = 'const SETTINGS_KEY="slg-workshop-settings-v1";const SESSION_KEY="slg-workshop-session-v1";'
+    if runtime.count(session_key_old) != 1:
+        raise ValueError("Session key signature not found")
+    runtime = runtime.replace(session_key_old, session_key_new, 1)
+
+    save_key_old = "pendingApiKey=input.value;saveSettingsPrefs(next);"
+    save_key_new = "pendingApiKey=input.value;next.apiKey=input.value;saveSettingsPrefs(next);"
+    if runtime.count(save_key_old) != 1:
+        raise ValueError("API key save signature not found")
+    runtime = runtime.replace(save_key_old, save_key_new, 1)
+
+    apply_prefs_old = "function applySettingsToReact(prefs){"
+    apply_prefs_new = "function applySettingsToReact(prefs){if(prefs?.apiKey)pendingApiKey=prefs.apiKey;"
+    if runtime.count(apply_prefs_old) != 1:
+        raise ValueError("Apply settings signature not found")
+    runtime = runtime.replace(apply_prefs_old, apply_prefs_new, 1)
+
+    mount_old = "function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;"
+    mount_new = (
+        "function restoreSession(){if(restoringSession||window.__slgSelectionMeta)return;let raw=null;try{raw=localStorage.getItem(SESSION_KEY)}catch{}"
+        "if(!raw)return;let s=null;try{s=JSON.parse(raw)}catch{}if(!s||!s.uri)return;restoringSession=true;"
+        "Promise.resolve(window.__slgLoadSelectedApk?.({uri:s.uri,name:s.name||s.label||\"\",packageName:s.packageName||\"\",source:s.source||\"installed\",splitApk:false,splitCount:0}))"
+        ".catch(()=>{}).finally(()=>{restoringSession=false;sessionRestoredAt=s.savedAt||Date.now();refresh()})}\n"
+        "function recoveryBanner(savedAt){const wrap=textNode(\"section\",\"workshop-task-card\");"
+        "wrap.append(textNode(\"h2\",\"workshop-settings-title\",\"" "\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad" "\"),"
+        "textNode(\"p\",\"workshop-state-copy\",\"" "\u7ffb\u8bd1\u4f1a\u8bdd\u56e0\u9875\u9762\u5237\u65b0\u4e2d\u65ad\uff0c\u5df2\u5b8c\u6210\u5185\u5bb9\u5df2\u4fdd\u5b58\u5728\u672c\u673a\u7f13\u5b58\u4e2d\u3002" "\"),"
+        "textNode(\"p\",\"workshop-state-copy\",`" "\u4e2d\u65ad\u65f6\u95f4\uff1a" "${new Date(savedAt).toLocaleTimeString()}`));"
+        "const resume=actionButton(\"" "\u7ee7\u7eed\u4e0a\u6b21\u7ffb\u8bd1" "\",()=>triggerReactButton(startButton));"
+        "const dismiss=textNode(\"button\",\"workshop-secondary-action\",\"" "\u653e\u5f03\u6062\u590d" "\");dismiss.type=\"button\";"
+        "dismiss.onclick=()=>{try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;refresh()};"
+        "wrap.append(resume,dismiss);return wrap}\n"
+        "function mount(){const _prefs=readSettingsPrefs();if(_prefs.apiKey)pendingApiKey=_prefs.apiKey;"
+        "decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;restoreSession();"
+    )
+    if runtime.count(mount_old) != 1:
+        raise ValueError("Mount signature not found")
+    runtime = runtime.replace(mount_old, mount_new, 1)
+
+    ready_payload_old = 'return{state:"ready",fileName,count};'
+    ready_payload_new = 'return{state:"ready",fileName,count,sessionRestoredAt};'
+    if runtime.count(ready_payload_old) != 1:
+        raise ValueError("Ready payload signature not found")
+    runtime = runtime.replace(ready_payload_old, ready_payload_new, 1)
+
+    ready_banner_old = 'body.append(card,actionButton("\u5f00\u59cb\u7ffb\u8bd1",()=>triggerReactButton(startButton)));return body}'
+    ready_banner_new = 'if(payload.sessionRestoredAt)body.append(recoveryBanner(payload.sessionRestoredAt));body.append(card,actionButton("\u5f00\u59cb\u7ffb\u8bd1",()=>triggerReactButton(startButton)));return body}'
+    if runtime.count(ready_banner_old) != 1:
+        raise ValueError("Ready banner signature not found")
+    runtime = runtime.replace(ready_banner_old, ready_banner_new, 1)
+
+    completed_old = 'if(state==="completed"){card.append(textNode("p","workshop-state-copy","\u8865\u4e01 APK \u5df2\u751f\u6210"));'
+    completed_new = 'if(state==="completed"){try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;card.append(textNode("p","workshop-state-copy","\u8865\u4e01 APK \u5df2\u751f\u6210"));'
+    if runtime.count(completed_old) != 1:
+        raise ValueError("Completed clear signature not found")
+    runtime = runtime.replace(completed_old, completed_new, 1)
+
+    # --- patched APK visibility & signature-conflict handling ---
+    snap_old = 'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected};'
+    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
+                'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected}}')
+    if runtime.count(snap_old) != 1:
+        raise ValueError("Completed snapshot signature not found")
+    runtime = runtime.replace(snap_old, snap_new, 1)
+
+    branch_old = 'body.append(card);if(payload.installAvailable)body.append(actionButton("\u5b89\u88c5\u8865\u4e01\u7248",()=>triggerReactButton(installButton)));return body}'
+    branch_new = (
+        'if(payload.patchedApkPath)card.append(textNode("p","workshop-state-copy workshop-scan-elapsed","' + "\u4f4d\u7f6e\uff1a" + '"+payload.patchedApkPath));'
+        'body.append(card);const actions=textNode("div","workshop-summary-list");'
+        'if(payload.patchedApkPath)actions.append(actionButton("' + "\u4fdd\u5b58\u8865\u4e01 APK" + '",()=>savePatchedApk(payload.patchedApkPath)));'
+        'if(payload.installAvailable){actions.append(actionButton("' + "\u5378\u8f7d\u539f\u7248\u5e76\u5b89\u88c5\u8865\u4e01\u7248" + '",()=>clickReact("' + "\u5378\u8f7d\u539f\u7248+\u5b89\u88c5\u8865\u4e01" + '")));'
+        'actions.append(actionButton("' + "\u76f4\u63a5\u5b89\u88c5" + '",()=>triggerReactButton(installButton),true))}'
+        'if(actions.children.length)body.append(actions);return body}'
+    )
+    if runtime.count(branch_old) != 1:
+        raise ValueError("Completed branch signature not found")
+    runtime = runtime.replace(branch_old, branch_new, 1)
+
+    helpers_anchor = 'function mount(){const _prefs=readSettingsPrefs();'
+    helpers_new = (
+        'function clickReact(label){const b=findButton(label);if(b){b.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));return true}return false}'
+        'function savePatchedApk(path){const plugin=window.Capacitor?.Plugins?.FileManager;'
+        'const host=galleryOpen&&galleryShell?galleryShell:shell;'
+        'const status=textNode("p","workshop-live-line","' + "\u6b63\u5728\u4fdd\u5b58\u8865\u4e01 APK\uff08\u5927\u6587\u4ef6\u53ef\u80fd\u9700\u8981\u4e00\u70b9\u65f6\u95f4\uff09..." + '");host?.append(status);'
+        'if(!plugin?.savePatchedApkToDownloads){status.textContent="' + "\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u4fdd\u5b58\u8865\u4e01 APK\uff0c\u8bf7\u5347\u7ea7\u5e94\u7528" + '";return}'
+        'Promise.resolve(plugin.savePatchedApkToDownloads({path})).then(r=>{const name=(r&&r.path&&r.path.split("/").pop())||path.split("/").pop()||"";status.textContent="' + "\u5df2\u4fdd\u5b58\u5230 \u4e0b\u8f7d/SLG-Translator/" + '"+(name||"");if(galleryOpen)loadPatches()}).catch(e=>{status.textContent="' + "\u4fdd\u5b58\u5931\u8d25\uff1a" + '"+(e&&e.message||e)})}'
+        'function mount(){const _prefs=readSettingsPrefs();'
+    )
+    if runtime.count(helpers_anchor) != 1:
+        raise ValueError("Mount helpers anchor not found")
+    runtime = runtime.replace(helpers_anchor, helpers_new, 1)
+
+
+    # --- translation language guidance + task mode selector ---
+    snap_guid_old = 'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected}}'
+    snap_guid_new = ('return{state:"completed",fileName,count,translated,patchedApkPath,'
+                     'renpyLang:window.__slgRenpyLang||\'\',renpyMenuType:window.__slgRenpyMenuType||\'\','
+                     'raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected}}')
+    if runtime.count(snap_guid_old) != 1:
+        raise ValueError("Completed snapshot language signature not found")
+    runtime = runtime.replace(snap_guid_old, snap_guid_new, 1)
+
+    guide_anchor = 'if(payload.patchedApkPath)card.append(textNode("p","workshop-state-copy workshop-scan-elapsed","' + "\u4f4d\u7f6e\uff1a" + '"+payload.patchedApkPath));'
+    guide_new = (
+        guide_anchor
+        + 'if(payload.renpyLang===`slg-translated`)card.append(textNode("p","workshop-state-copy","' "\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3" '"));' + 'else if(payload.renpyLang)card.append(textNode("p","workshop-state-copy","' "\u8bd1\u6587\u8bed\u8a00\uff1a" '"+payload.renpyLang+"' "\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587" '"));'
+        + 'else if(payload.renpyMenuType==="custom")card.append(textNode("p","workshop-state-copy","' "\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9" '"));'
+    )
+    if runtime.count(guide_anchor) != 1:
+        raise ValueError("Language guidance signature not found")
+    runtime = runtime.replace(guide_anchor, guide_new, 1)
+
+    mode_anchor = 'if(state==="ready"){card.append(textNode("p","workshop-state-copy","'
+    # mode selector inserted right after the ready card opens (before ?????)
+    mode_new = (
+        'if(state==="ready"){const modes=textNode("div","workshop-summary-list");'
+        '["' "\u7ee7\u7eed\u4e0a\u6b21" '","' "\u626b\u63cf\u65b0\u589e" '","' "\u5168\u90e8\u91cd\u8bd1" '"].forEach(label=>{modes.append(actionButton(label,()=>clickReact(label),true))});'
+        'card.append(modes);card.append(textNode("p","workshop-state-copy","'
+    )
+    if runtime.count(mode_anchor) != 1:
+        raise ValueError("Ready mode selector signature not found")
+    runtime = runtime.replace(mode_anchor, mode_new, 1)
+
     return runtime
+
+
 
 
 def patch_translation_cache(js: str) -> str:
@@ -471,6 +627,82 @@ async function Lo(e){'''
     return js.replace(final_error, final_error_with_fatal, 1)
 
 
+def patch_translation_memory(js: str) -> str:
+    old_log = "he.current=[...he.current,n],w(he.current)}"
+    new_log = (
+        "he.current.push(n),he.current.length>400&&he.current.splice(0,"
+        "he.current.length-400),w(he.current.slice())}"
+    )
+    if js.count(old_log) != 1:
+        raise ValueError("Translation log state signature not found")
+    js = js.replace(old_log, new_log, 1)
+
+    old_save = (
+        "async function wo(){if(!yo||!bo)return;let e=JSON.stringify(vo);"
+        "bo=!1,bp=bp.then(()=>E.saveTranslationCache({data:e})).catch(()=>{bo=!0}),await bp}"
+    )
+    new_save = (
+        "var _saveBusy=!1,_saveAgain=!1;globalThis.__slgCacheDbg={calls:0,skipped:0,errors:0,lastError:null};"
+        "async function wo(){globalThis.__slgCacheDbg.calls++;"
+        "if(!yo){try{await Co()}catch(e){globalThis.__slgCacheDbg.lastError='co:'+(e&&e.message||e);"
+        "O('  缓存加载失败: '+(e&&e.message||e),'error')}}"
+        "if(!yo||!bo){globalThis.__slgCacheDbg.skipped++;return}"
+        "globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
+        "if(_saveBusy){_saveAgain=!0;return}do{_saveAgain=!1,_saveBusy=!0;"
+        "let _snap={};for(const[_k,_v]of Object.entries(vo)){"
+        "if(_k.startsWith(_o))_snap[_k]=_v}let _e=JSON.stringify(_snap);"
+        "try{await E.saveTranslationCache({data:_e})}catch(e){bo=!0;globalThis.__slgCacheDbg.errors++;globalThis.__slgCacheDbg.lastError='save:'+(e&&e.message||e)}"
+        "_saveBusy=!1}while(_saveAgain)}"
+    )
+    if js.count(old_save) != 1:
+        raise ValueError("Translation cache save signature not found")
+    js = js.replace(old_save, new_save, 1)
+
+    old_debug_log = (
+        "try{s===`rpyc`&&console.log(JSON.stringify({rpycEntry:o.name,extracted:l.length,"
+        "sample:l.slice(0,8).map(e=>e.text)}))}catch{}"
+    )
+    if js.count(old_debug_log) != 1:
+        raise ValueError("Translation debug log signature not found")
+    js = js.replace(old_debug_log, "", 1)
+
+    old_is = "function is(e){return ts[e]||e}"
+    new_is = "function is(e){if(e===`zh`){if(globalThis.__slgTranslatorLang)return globalThis.__slgTranslatorLang;if(globalThis.__slgRenpyLang)return globalThis.__slgRenpyLang;}return ts[e]||e}"
+    if js.count(old_is) != 1:
+        raise ValueError("RenPy language mapper signature not found")
+    js = js.replace(old_is, new_is, 1)
+
+    return js
+
+def patch_extraction_rules(js: str) -> str:
+    old_he = (
+        "/^[A-Za-z_][\\w.]*\\([^)]*\\)$/.test(n)||/^(?:pause|stop|play|scene|show|hide|with|jump|call|return|"
+        "if|elif|else|while|python|init|default|define|image|transform|label)\\b/i.test(n)||!We(n,t)||Ke(n))}"
+    )
+    new_he = (
+        "/^[A-Za-z_][\\w.]*\\(.*\\)\\s*$/.test(n)||/^[A-Za-z_][\\w.]*\\s*[+\\-*/%]{1,2}=\\s\\S/.test(n)||"
+        "/^[\"'][A-Za-z0-9_./:-]{1,40}[\"']$/.test(n)||/__/.test(n)||"
+        "/^[a-z][A-Za-z0-9_]*[A-Z]/.test(n)||(n.length<=16&&!n.includes(' ')&&n.includes('#'))||"
+        "/^\\[[A-Za-z0-9_]+\\][!?.,]*$/.test(n)||/^(?:pause|stop|play|scene|show|hide|with|jump|call|return|"
+        "if|elif|else|while|python|init|default|define|image|transform|label)\\b/i.test(n)||!We(n,t)||Ke(n))}"
+    )
+    if js.count(old_he) != 1:
+        raise ValueError("He extraction filter signature not found")
+    js = js.replace(old_he, new_he, 1)
+
+    old_ve = "/^[0-9a-fA-F]{8,}$/.test(e)||!We(n,t))}function He(e,t)"
+    new_ve = (
+        "/^[0-9a-fA-F]{8,}$/.test(e)||/^[A-Za-z_][\\w.]*\\(.*\\)\\s*$/.test(n)||"
+        "/^[A-Za-z_][\\w.]*\\s*[+\\-*/%]{1,2}=\\s\\S/.test(n)||/^[\"'][A-Za-z0-9_./:-]{1,40}[\"']$/.test(n)||/__/.test(n)||"
+        "/^[a-z][A-Za-z0-9_]*[A-Z]/.test(n)||(n.length<=16&&!n.includes(' ')&&n.includes('#'))||"
+        "/^\\[[A-Za-z0-9_]+\\][!?.,]*$/.test(n)||"
+        "!We(n,t))}function He(e,t)"
+    )
+    if js.count(old_ve) != 1:
+        raise ValueError("Ve extraction filter signature not found")
+    js = js.replace(old_ve, new_ve, 1)
+    return js
+
 def _verify_digest(data: bytes, expected: str, label: str) -> None:
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected:
@@ -509,6 +741,8 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_scan_flow(js)
     patched = patch_translation_cache(patched)
     patched = patch_translation_network(patched)
+    patched = patch_translation_memory(patched)
+    patched = patch_extraction_rules(patched)
     return patched + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 

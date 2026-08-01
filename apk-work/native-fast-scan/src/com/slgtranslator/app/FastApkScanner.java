@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -196,8 +197,102 @@ public final class FastApkScanner {
                 Object extracted = extractPackage.invoke(plugin, manifestBytes);
                 packageName = extracted instanceof String ? (String) extracted : "";
             }
+            LinkedHashSet<String> languages = new LinkedHashSet<>();
+            for (ApkEntry entry : entries) {
+                String name = entry.name;
+                if (name.startsWith("assets/")) {
+                    String normalized = name.substring("assets/".length());
+                    if (normalized.startsWith("x-")) {
+                        normalized = normalized.substring(2);
+                    }
+                    String[] parts = normalized.split("/");
+                    for (int i = 0; i + 1 < parts.length; i++) {
+                        String dir = parts[i];
+                        if ("tl".equals(dir) || "x-tl".equals(dir)) {
+                            String code = parts[i + 1];
+                            if (code != null && !code.isEmpty() && !code.contains(".")) {
+                                languages.add(normalizeLangCode(code));
+                            }
+                        } else if (dir.startsWith("x-lang_")) {
+                            String code = dir.substring("x-lang_".length());
+                            if (!code.isEmpty()) {
+                                languages.add(normalizeLangCode(code));
+                            }
+                        }
+                    }
+                }
+            }
+            String menuType = detectLanguageMenuType(zip, entries, deadline);
+            return new ScanResult(entries, packageName, new ArrayList<>(languages), menuType);
         }
-        return new ScanResult(entries, packageName);
+    }
+
+    private static String normalizeLangCode(String code) {
+        String value = code.trim().toLowerCase(Locale.ROOT);
+        if (value.startsWith("x-")) {
+            value = value.substring(2);
+        }
+        return value.replace("_", "-");
+    }
+
+    private static String detectLanguageMenuType(ZipFile zip, List<ApkEntry> entries, long deadline) throws Exception {
+        boolean sawLanguageButton = false;
+        boolean sawCustomLanguage = false;
+        boolean sawRenpyBucket = false;
+        boolean sawCustomBucket = false;
+        int scanned = 0;
+        StringBuilder haystack = new StringBuilder();
+        for (ApkEntry entry : entries) {
+            String name = entry.name;
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.contains("x-lang_")) {
+                sawCustomBucket = true;
+            }
+            if (!lower.contains("screens") && !lower.contains("preferences")
+                    && !lower.contains("gamemenu") && !lower.contains("mainmenu")) {
+                continue;
+            }
+            if (entry.compressedSize <= 0 || entry.compressedSize > 400_000L) continue;
+            if (scanned++ >= 6) break;
+            ZipEntry zipEntry = zip.getEntry(name);
+            if (zipEntry == null) continue;
+            byte[] bytes = readEntry(zip, zipEntry, deadline);
+            String text = new String(bytes, StandardCharsets.ISO_8859_1);
+            haystack.append(text);
+            if (text.contains("Language")) {
+                sawLanguageButton = true;
+            }
+            if (text.contains("profiler_language") || text.contains("PROFILER_LANGUAGE")) {
+                sawCustomLanguage = true;
+            }
+        }
+        if (sawCustomLanguage || sawCustomBucket) {
+            return "custom";
+        }
+        if (sawLanguageButton) {
+            return "renpy";
+        }
+        for (ApkEntry entry : entries) {
+            String name = entry.name;
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (!lower.startsWith("assets/")) continue;
+            String path = lower.substring("assets/".length());
+            if (path.startsWith("x-")) {
+                path = path.substring(2);
+            }
+            String[] parts = path.split("/");
+            for (int i = 0; i + 1 < parts.length; i++) {
+                String dir = parts[i];
+                if (("tl".equals(dir) || "x-tl".equals(dir))
+                        && parts[i + 1].length() > 0
+                        && !"none".equalsIgnoreCase(parts[i + 1])) {
+                    sawRenpyBucket = true;
+                    break;
+                }
+            }
+            if (sawRenpyBucket) break;
+        }
+        return sawRenpyBucket ? "renpy" : "none";
     }
 
     private static byte[] readEntry(ZipFile zip, ZipEntry entry, long deadline) throws IOException {
@@ -235,6 +330,12 @@ public final class FastApkScanner {
         response.put("entries", entries);
         response.put("totalFiles", entries.length());
         response.put("packageName", result.packageName);
+        JSArray languages = new JSArray();
+        for (String language : result.renpyLanguages) {
+            languages.put(language);
+        }
+        response.put("renpyLanguages", languages);
+        response.put("renpyMenuType", result.renpyMenuType);
         response.put("scanDurationMs", durationMs);
         response.put("cacheHit", cacheHit);
         return response;
@@ -332,10 +433,14 @@ public final class FastApkScanner {
     private static final class ScanResult {
         final List<ApkEntry> entries;
         final String packageName;
+        final List<String> renpyLanguages;
+        final String renpyMenuType;
 
-        ScanResult(List<ApkEntry> entries, String packageName) {
+        ScanResult(List<ApkEntry> entries, String packageName, List<String> renpyLanguages, String renpyMenuType) {
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
             this.packageName = packageName == null ? "" : packageName;
+            this.renpyLanguages = Collections.unmodifiableList(new ArrayList<>(renpyLanguages));
+            this.renpyMenuType = renpyMenuType == null ? "none" : renpyMenuType;
         }
     }
 }
