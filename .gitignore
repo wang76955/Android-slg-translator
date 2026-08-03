@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Build artifacts
+apk-work/*.apk
+apk-work/**/generated/
+apk-work/**/build/
+*.tmp
+*.partial
+*.idsig
+
+# QA / diagnostics (keep tracked test sources only)
+apk-work/ui-redesign/qa/tmp/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local tools and credentials
+.tools/
+*.keystore
+.env
+
+# Logs
+*.log
