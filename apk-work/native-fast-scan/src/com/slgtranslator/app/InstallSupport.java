@@ -2,6 +2,7 @@ package com.slgtranslator.app;
 
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.ContentResolver;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -52,11 +53,17 @@ public final class InstallSupport {
                 values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + SUB_DIR);
                 targetUri = context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                 if (targetUri != null) {
-                    try (InputStream in = new FileInputStream(source);
-                         OutputStream out = context.getContentResolver().openOutputStream(targetUri)) {
-                        if (out != null) {
+                    try {
+                        try (InputStream in = new FileInputStream(source);
+                             OutputStream out = context.getContentResolver().openOutputStream(targetUri)) {
+                            if (out == null) {
+                                throw new IOException("output stream unavailable");
+                            }
                             copy(in, out);
                         }
+                    } catch (IOException copyFailure) {
+                        deleteQuietly(context.getContentResolver(), targetUri);
+                        throw copyFailure;
                     }
                 }
             }
@@ -189,6 +196,15 @@ public final class InstallSupport {
         int read;
         while ((read = in.read(buffer)) != -1) {
             out.write(buffer, 0, read);
+        }
+    }
+
+    /** Removes a MediaStore row that was inserted but never fully written. */
+    private static void deleteQuietly(ContentResolver resolver, Uri uri) {
+        try {
+            resolver.delete(uri, null, null);
+        } catch (RuntimeException ignored) {
+            // Best-effort cleanup; the save failure is already surfaced to the caller.
         }
     }
 }

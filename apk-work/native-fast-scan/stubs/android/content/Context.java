@@ -10,4 +10,7 @@ public class Context {
     public File getCacheDir() { return null; }
     public PackageManager getPackageManager() { return null; }
     public String getPackageName() { return null; }
+    public Context getApplicationContext() { return null; }
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) { return null; }
+    public void unregisterReceiver(BroadcastReceiver receiver) {}
 }

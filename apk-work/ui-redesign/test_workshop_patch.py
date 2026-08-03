@@ -81,20 +81,97 @@ class WorkshopPatchContractTest(unittest.TestCase):
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        filter_start = js.index("function Jo(e,t,n){return e.filter(e=>Yo(e,t,n))}")
+        filter_start = js.index("function Jo(e,t,n){")
         filter_end = js.index("var ts=", filter_start)
         candidate_filter = js[filter_start:filter_end]
 
-        self.assertIn("/x-renpy/x-common/", candidate_filter)
+        self.assertNotIn("/x-renpy/x-common/", candidate_filter)
         self.assertIn("_rpycSkip", candidate_filter)
-        self.assertIn("screens?|options|common|style", candidate_filter)
-        self.assertIn("Zo(r,n)", candidate_filter)
+        self.assertNotIn("screens?", candidate_filter)
+        self.assertIn("common|style", candidate_filter)
+        self.assertNotIn("options|", candidate_filter)
+        self.assertIn("let q=Qo(r);if(q!=null)", candidate_filter)
         self.assertIn("e===`tl`||e===`x-tl`", candidate_filter)
+        self.assertIn("p.fileType!==`rpyc`", candidate_filter)
         renpy_start = candidate_filter.index("if(e.fileType===`rpyc`||e.fileType===`rpy`)")
         renpy_end = candidate_filter.index("}return!!", renpy_start)
         renpy_branch = candidate_filter[renpy_start:renpy_end]
         for obsolete_keyword in ("text", "string", "dialogue", "script"):
             self.assertNotIn(obsolete_keyword, renpy_branch)
+
+    def test_translation_bucket_files_seed_supplementary_corpus(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        filter_start = js.index("function Jo(e,t,n){")
+        filter_end = js.index("var ts=", filter_start)
+        candidate_filter = js[filter_start:filter_end]
+        self.assertIn("slgtranslated", candidate_filter)
+        self.assertIn("es(q)", candidate_filter)
+
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+var qo=new Set(['png','jpg','jpeg','gif','webp','bmp','ico','mp3','wav','ogg','aac','flac','m4a','mp4','webm','avi','mkv','mov','ttf','otf','woff','woff2']);
+check(Yo({name:'assets/x-game/x-tl/x-chinese/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'chinese tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-german/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'german tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-slgtranslated/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'slgtranslated bucket must be excluded');
+check(Yo({name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},'auto','zh')===true,'story script must stay a candidate');
+"""
+        result = subprocess.run(
+            ["node", "-e", candidate_filter + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_build_files_filter_keeps_translation_buckets_except_slgtranslated(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("x-slgtranslated", js)
+        self.assertIn("a.filter", js)
+        build_fragment = js[js.index("files:(()=>{const _f="):js.index("files:(()=>{const _f=") + 260]
+        self.assertIn("x-slgtranslated", build_fragment)
+        self.assertNotIn("includes(`/x-tl/`)", build_fragment)
+
+    def test_output_path_keeps_translation_bucket_source_prefix(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        os_start = js.index("function os(e,t){")
+        os_end = js.index("function ss(", os_start)
+        os_fn = js[os_start:os_end]
+        self.assertIn("x-${s}-${n[n.length-1]}", os_fn)
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+function es(e){return e.trim().toLowerCase().replace(/^x[-_]/,``).replace(/[\s-]+/g,`_`)}
+function ss(e,t){return e.startsWith(`x-`)?`x-${t}`:t}
+// original script keeps its plain name
+check(os('assets/x-game/x-ch1ep1.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-ch1ep1.rpy'),'original keeps plain output: '+os('assets/x-game/x-ch1ep1.rpyc','slgtranslated'));
+// translation bucket gets source-language prefix so it never clobbers the original
+check(os('assets/x-game/x-tl/x-german/x-ch1ep1.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-german-x-ch1ep1.rpy'),'german bucket prefixed: '+os('assets/x-game/x-tl/x-german/x-ch1ep1.rpyc','slgtranslated'));
+check(os('assets/x-game/x-tl/x-chinese/x-phone.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-chinese-x-phone.rpy'),'chinese bucket prefixed: '+os('assets/x-game/x-tl/x-chinese/x-phone.rpyc','slgtranslated'));
+// engine common fallback still lands in the x-game bucket
+check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('assets/x-game/x-tl/x-slgtranslated/'),'engine common routed: '+os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated'));
+"""
+        result = subprocess.run(
+            ["node", "-e", os_fn + contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translation_state_requests_screen_wakelock(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("navigator.wakeLock?.request", js)
+        self.assertIn("__slgWakeLock", js)
+        self.assertIn('state==="patching"', js)
 
     def test_installed_app_source_chooser_contract(self):
         module = self.load_patch()
@@ -430,8 +507,9 @@ let modalHistoryArmed=false,modalHistoryClosing=false,modalHistoryRearm=false;
 let returnedFocus=0,previousSourceFocus={focus(){returnedFocus+=1}};
 let sourceDialog=null,installedDialog=null,settingsShell={hidden:false},settingsOpen=false,galleryShell=null,galleryOpen=false;
 let installedListEpoch=0,sourceRequestEpoch=0,installedLoading=false,installedBusy=false;
-let manualIdle=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
+let manualIdle=false,manualIdleBeforeOverlay=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
 function refresh(){refreshes+=1} function setWorkshopState(){} function closeGallery(){}
+function beginOverlay(){manualIdleBeforeOverlay=manualIdle;manualIdle=true} function endOverlay(){manualIdle=manualIdleBeforeOverlay}
 
 function resetHistory(){pushes=0;backs=0;marker=false;returnedFocus=0;refreshes=0;modalHistoryArmed=false;modalHistoryClosing=false;modalHistoryRearm=false;history.state={base:true}}
 function assertNativeClose(label,isClosed,closeEffects){
@@ -887,7 +965,7 @@ check(refreshes===1,`refresh requested`);
         self.assertIn('\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf', js)
 
         self.assertIn(
-            'if(payload.patchedApkPath)card.append(textNode(\"p\",\"workshop-state-copy workshop-scan-elapsed\",\"\u4f4d\u7f6e\uff1a\"+payload.patchedApkPath));if(payload.renpyLang===`slg-translated`)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3\"));else if(payload.renpyLang)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u8bd1\u6587\u8bed\u8a00\uff1a\"+payload.renpyLang+\"\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587\"));else if(payload.renpyMenuType===\"custom\")card.append(textNode(\"p\",\"workshop-state-copy\",\"\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9\"));body.append(card);const actions=textNode(\"div\",\"workshop-summary-list\");if(payload.patchedApkPath)actions.append(actionButton(\"\u4fdd\u5b58\u8865\u4e01 APK\",()=>savePatchedApk(payload.patchedApkPath)));if(payload.installAvailable){actions.append(actionButton(\"\u5378\u8f7d\u539f\u7248\u5e76\u5b89\u88c5\u8865\u4e01\u7248\",()=>clickReact(\"\u5378\u8f7d\u539f\u7248+\u5b89\u88c5\u8865\u4e01\")));actions.append(actionButton(\"\u76f4\u63a5\u5b89\u88c5\",()=>triggerReactButton(installButton),true))}if(actions.children.length)body.append(actions);return body}',
+            'if(payload.patchedApkPath)card.append(textNode(\"p\",\"workshop-state-copy workshop-scan-elapsed\",\"\u4f4d\u7f6e\uff1a\"+payload.patchedApkPath));if(window.__slgTranslatorLang===`slgtranslated`)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3\uff0c\u8bf7\u5728\u6e38\u620f\u8bbe\u7f6e\u8bed\u8a00\u4e2d\u9009\u62e9\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u67e5\u770b\u8bd1\u6587\"));else if(payload.renpyLang)card.append(textNode(\"p\",\"workshop-state-copy\",\"\u8bd1\u6587\u8bed\u8a00\uff1a\"+payload.renpyLang+\"\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587\"));else if(payload.renpyMenuType===\"custom\")card.append(textNode(\"p\",\"workshop-state-copy\",\"\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9\"));body.append(card);const actions=textNode(\"div\",\"workshop-summary-list\");if(payload.patchedApkPath)actions.append(actionButton(\"\u4fdd\u5b58\u8865\u4e01 APK\",()=>savePatchedApk(payload.patchedApkPath)));if(payload.installAvailable){actions.append(actionButton(\"\u5378\u8f7d\u539f\u7248\u5e76\u5b89\u88c5\u8865\u4e01\u7248\",()=>clickReact(\"\u5378\u8f7d\u539f\u7248+\u5b89\u88c5\u8865\u4e01\")));actions.append(actionButton(\"\u76f4\u63a5\u5b89\u88c5\",()=>triggerReactButton(installButton),true))}if(actions.children.length)body.append(actions);return body}',
             js,
         )
         self.assertIn('s.installAvailable?"install":""', js)
@@ -1083,11 +1161,11 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        self.assertIn('async function runFileTasksUntilFatal(e,t)', js)
-        self.assertIn('N=await runFileTasksUntilFatal(ae,async(o,c)=>{', js)
+        self.assertIn('async function runFileTasksParallel(e,t,concurrency=3)', js)
+        self.assertIn('N=await runFileTasksParallel(ae,async(o,c)=>{', js)
         self.assertIn('...r?{error:N||`部分文件处理失败，请查看日志`}:{}', js)
 
-        start = js.index('async function runFileTasksUntilFatal(e,t)')
+        start = js.index('async function runFileTasksParallel(e,t,concurrency=3)')
         end = js.index('async function Lo(e){', start)
         scheduler = js[start:end]
         behavior_contract = r'''
@@ -1095,11 +1173,14 @@ function check(condition,label){if(!condition)throw new Error(label)}
 async function main(){
   const fatal=`无法连接 OpenAI。请检查网络，或前往“我的”切换供应商。`;
   const started=[];
-  const result=await runFileTasksUntilFatal([`file-1`,`file-2`],async file=>{
+  const result=await runFileTasksParallel([`file-1`,`file-2`,`file-3`],async file=>{
     started.push(file);
-    return file===`file-1`?fatal:``;
-  });
-  check(started.join(`,`)===`file-1`,`second file does not start`);
+    if(file===`file-1`)return fatal;
+    await new Promise(r=>setTimeout(r,5));
+    return ``;
+  },2);
+  check(started.includes(`file-1`)&&started.includes(`file-2`),`two files start concurrently`);
+  check(!started.includes(`file-3`),`third file does not start after fatal`);
   check(result===fatal,`task-wide fatal result survives`);
 }
 main().catch(error=>{console.error(error);process.exitCode=1});
@@ -1121,7 +1202,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
 
-        controller_start = js.index("N=await runFileTasksUntilFatal")
+        controller_start = js.index("N=await runFileTasksParallel")
         network_check = js.index("m&&isProviderNetworkFailure(m)", controller_start)
         result_start = network_check - 3 if js[network_check - 3 : network_check] == "if(" else network_check
         result_end = js.index("t+=p,O(", result_start)
@@ -1307,7 +1388,13 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`
         self.assertIn('workshop-live-line', js)
         self.assertIn('workshop-live-line', css)
         self.assertIn('detailsOpen=false', js)
-        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
+        self.assertIn('_k.startsWith(`slg-file-v1:`)', js)
+        self.assertIn('_lastSaveAt', js)
+        self.assertIn('selectInstalledApp({packageName:window.__slgSelectionMeta.packageName', js)
+        self.assertIn('window.__slgSelectionMeta?.uri||n', js)
+        self.assertIn('No such file|Failed to build patched APK', js)
+
+        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
         self.assertIn('body.dataset.open=String(detailsOpen)', js)
         self.assertIn('body.scrollTop=body.scrollHeight', js)
         compact_css = ''.join(css.split())
@@ -1328,15 +1415,28 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`
         self.assertIn('["\u7ee7\u7eed\u4e0a\u6b21","\u626b\u63cf\u65b0\u589e","\u5168\u90e8\u91cd\u8bd1"]', js)
         self.assertIn('window.__slgTranslatorLang=\'\'', js)
         self.assertIn('E.injectTranslatorMenu({apkUri:e.uri', js)
-        self.assertIn("translatorLang:'slg-translated'", js)
+        self.assertIn("translatorLang:'slgtranslated'", js)
+        self.assertIn("o.fileType===`rpyc`?await E.readRenpyTexts(", js)
+        self.assertIn("_map.set(r.text,v)", js)
+        self.assertNotIn("let _map=new Map(_fr.translations)", js)
         self.assertIn('if(globalThis.__slgTranslatorLang)return globalThis.__slgTranslatorLang', js)
-        self.assertIn('payload.renpyLang===`slg-translated`', js)
+        self.assertIn('window.__slgTranslatorLang===`slgtranslated`', js)
+        self.assertIn("_m.ready", js)
+        self.assertIn("window.__slgSelectionMeta?.packageName||n", js)
+        self.assertIn("Array.isArray(_fr.translations)", js)
+        self.assertIn("translations:Array.from(f.entries())", js)
+
         self.assertIn('\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3', js)
         self.assertIn('window.__slgTranslatorLang=\'\'', js)
         self.assertIn('E.injectTranslatorMenu({apkUri:e.uri', js)
-        self.assertIn("translatorLang:'slg-translated'", js)
+        self.assertIn("translatorLang:'slgtranslated'", js)
         self.assertIn('if(globalThis.__slgTranslatorLang)return globalThis.__slgTranslatorLang', js)
-        self.assertIn('payload.renpyLang===`slg-translated`', js)
+        self.assertIn('window.__slgTranslatorLang===`slgtranslated`', js)
+        self.assertIn("_m.ready", js)
+        self.assertIn("window.__slgSelectionMeta?.packageName||n", js)
+        self.assertIn("Array.isArray(_fr.translations)", js)
+        self.assertIn("translations:Array.from(f.entries())", js)
+
         self.assertIn('\u5df2\u6dfb\u52a0\u72ec\u7acb\u7684\u300c\u7ffb\u8bd1\u6587\u672c\u300d\u5165\u53e3', js)
 
         snapshot_start = js.index('function readTaskSnapshot(){')
@@ -1457,6 +1557,372 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
+
+
+    def test_candidate_filter_drops_tl_duplicates_and_crashes_never(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("var qo=new Set(")
+        end = js.index("function rs(e,t,n,r)", start)
+        runtime = js[start:end]
+        contract = (
+            "function check(condition,label){if(!condition)throw new Error(label)}\n"
+            "const entries=[\n"
+            "  {name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-ch1ep1.rpy',fileType:'rpy'},\n"
+            "  {name:'assets/x-game/x-tl/x-chinese/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-tl/x-german/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-tl/x-slgtranslated/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-gui.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-renpy/x-common/x-00gamemenu.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-special.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-special.rpy',fileType:'rpy'}\n"
+            "];\n"
+            "const result=Jo(entries,`all`,`zh`);\n"
+            "check(result.length===5,`story + translation buckets kept: `+result.length);\n"
+            "check(result.some(e=>e.name.includes(`x-00gamemenu.rpyc`)),`engine common kept`);\n"
+            "check(result.every(e=>e.fileType===`rpyc`),`compiled variant wins`);\n"
+            "check(result.some(e=>e.name.includes(`x-tl/x-chinese/x-ch1ep1.rpyc`)),`chinese tl bucket kept as corpus`);\n"
+            "check(result.some(e=>e.name.includes(`x-tl/x-german/x-ch1ep1.rpyc`)),`german tl bucket kept as corpus`);\n"
+            "check(result.every(e=>!e.name.includes(`x-slgtranslated`)),`slgtranslated bucket excluded`);\n"
+            "check(result.some(e=>e.name.includes(`x-ch1ep1.rpyc`)),`story kept`);\n"
+            "check(result.some(e=>e.name.includes(`x-special.rpyc`)),`special kept`)\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", runtime + contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        ne_start = js.index("function Ne(e,t=``,n)")
+        ne_end = js.index("function Pe(", ne_start)
+        ne = js[ne_start:ne_end]
+        self.assertNotIn("!He(e,n)", ne)
+        self.assertIn("e=e.replace(/\\\\(?:\\\\|n|r|t)/g", ne)
+        self.assertIn("let i=r.text,a=e.trim();", js)
+        self.assertNotIn("let i=r.text.trim(),a=e.trim();", js)
+        self.assertIn("cleanupStorage", js)
+        self.assertIn("清理安装包与旧缓存", js)
+        self.assertIn("workshop-settings-cleanup", js)
+        self.assertIn("backupSaves", js)
+        self.assertIn("restoreSaves", js)
+        self.assertIn("listSaveBackups", js)
+        self.assertIn("存档转移（雏形）", js)
+        self.assertIn("继续上次只翻译新增文本（推荐）", js)
+        self.assertIn("return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}", js)
+        self.assertNotIn("return`tl/${t}/${n.at(-1)||`strings`}.rpy`}", js)
+        lines = [
+            "RPYC_STRING\tSaturday, early morning...",
+            "RPYC_STRING\t{i}I cosplay and wear dresses I like for my viewers to see.{w} \\nIt must be nice, then?",
+            "RPYC_STRING\tIf Aine really does have feelings for me... Then, I honestly don't know what I should do about it.",
+            "RPYC_STRING\tWith all that said... I'm still quite interested in ya.",
+            "RPYC_STRING\tStop it. There is no point talking about a person who's no longer here.",
+            "RPYC_STRING\tEnter{#ep2}",
+            "RPYC_STRING\tTease her",
+            "RPYC_STRING\tFine",
+            "RPYC_STRING\tSky",
+            "RPYC_STRING\tstatement_start",
+            "RPYC_STRING\t Alright, but before I go...",
+            "not a rpyc line",
+        ]
+        harness = """
+%s
+const joined = [%s].join(String.fromCharCode(10));
+const out = Ne(joined, "f", "en").map(x => x.text);
+for (const want of ["If Aine really does have feelings for me... Then, I honestly don't know what I should do about it.", "With all that said... I'm still quite interested in ya.", "Stop it. There is no point talking about a person who's no longer here.", "Enter{#ep2}", "Fine", "Sky"]) {
+  if (!out.includes(want)) throw new Error("missing: " + want);
+}
+if (!out.includes(" Alright, but before I go...")) throw new Error("leading whitespace must be preserved");
+const nl = out.filter(x => x.includes("cosplay"));
+if (nl.length !== 1 || !nl[0].includes(String.fromCharCode(10))) throw new Error("newline round-trip failed");
+if (out.some(x => x.startsWith("not "))) throw new Error("non-RPYC line leaked");
+console.log("ok");
+"""
+        js_lines = ", ".join(repr(line) for line in lines)
+        result = subprocess.run(
+            ["node", "-e", harness % (ne, js_lines)],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+        os_start = js.index("function os(e,t){")
+        os_end = js.index("function cs(e,t,n){", os_start)
+        os_code = js[os_start:os_end]
+        os_harness = """
+%s
+const engine = os('assets/x-renpy/x-common/x-00preferences.rpyc', 'slgtranslated');
+if (engine !== 'assets/x-game/x-tl/x-slgtranslated/x-00preferences.rpy') throw new Error('engine path: ' + engine);
+const story = os('assets/x-game/x-ch1ep1.rpyc', 'slgtranslated');
+if (story !== 'assets/x-game/x-tl/x-slgtranslated/x-ch1ep1.rpy') throw new Error('story path: ' + story);
+console.log('ok');
+"""
+        result = subprocess.run(
+            ["node", "-e", os_harness % os_code],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+
+    def test_dismiss_recovery_banner_re_renders_immediately(self):
+        """Dismissing the interrupted-session banner must re-render right away."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_start = js.index("function readTaskSnapshot(){")
+        snapshot_end = js.index("function detailToggle(", snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        topbar_start = js.index("function renderTopbar(state)")
+        topbar_end = js.index("function fileRow(", topbar_start)
+        topbar_runtime = js[topbar_start:topbar_end]
+        render_start = js.index("function renderStateBody(state,payload)")
+        render_end = js.index("function setWorkshopState(", render_start)
+        render_runtime = js[render_start:render_end]
+        state_start = render_end
+        state_end = js.index("function snapshotKey(", state_start)
+        state_runtime = js[state_start:state_end]
+        key_start = js.index("function snapshotKey(s){")
+        key_end = js.index("function retryTask(", key_start)
+        key_runtime = js[key_start:key_end]
+        refresh_start = js.index("function refresh(){")
+        refresh_end = js.index("function decorate(){", refresh_start)
+        refresh_runtime = js[refresh_start:refresh_end]
+        recovery_start = js.index("function recoveryBanner(savedAt){")
+        recovery_end = js.index("function mount(){", recovery_start)
+        recovery_runtime = js[recovery_start:recovery_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+const document={querySelectorAll(){return[]}};
+let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0;
+function sourceText(){return`已选择：Broken.apk发现 5 个可翻译文件`}
+function readProgressLog(){return{raw:"",latest:""}}
+function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function openSourceChooser(){} function openSettings(){} function retryTask(){} function triggerReactButton(){}
+const startButton=null,installButton=null,sourceButton=null;
+function startScanClock(){} function stopScanClock(){}
+function classList(){return{remove(){},add(){}}}
+let shell={dataset:{},classList:classList(),setAttribute(){},replaceChildren(...nodes){this.rendered=nodes}};
+const runtimeRoot={classList:classList(),setAttribute(){}};
+function collectText(node){let out=node.text||"";for(const child of node.children||[])out+=collectText(child);return out}
+function collectButtons(node,acc){if(!node)return acc;if(node.tag===`button`)acc.push(node);for(const child of node.children||[])collectButtons(child,acc);return acc}
+sessionRestoredAt=123;
+refresh();
+let buttons=collectButtons(shell.rendered[1],[]);
+const dismiss=buttons.find(b=>(b.label||b.text)===`放弃恢复`);
+check(dismiss,`recovery banner offers dismiss`);
+check(collectText(shell.rendered[1]).includes(`上次翻译中断`),`banner visible before dismiss`);
+dismiss.onclick();
+check(sessionRestoredAt===0,`dismiss clears restored marker`);
+check(!collectText(shell.rendered[1]).includes(`上次翻译中断`),`dismiss must re-render immediately without banner`);
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_session_banner_only_after_translation_started(self):
+        """Recovery banner must only appear for sessions where translation started."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        restore_start = js.index("function restoreSession(){")
+        restore_end = js.index("function recoveryBanner(savedAt){", restore_start)
+        restore_runtime = js[restore_start:restore_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+let restoringSession=false,sessionRestoredAt=0;
+let loaded=null;
+window.__slgLoadSelectedApk=async e=>{loaded=e};
+function refresh(){}
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function main(){
+  localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",name:"Picked.apk",packageName:"game.pkg",source:"installed",savedAt:123,translating:false});
+  restoreSession();
+  await tick();
+  check(loaded&&loaded.uri==="file://picked.apk","selection-only session is still restored silently");
+  check(sessionRestoredAt===0,"selection-only session must not show recovery banner");
+  loaded=null;
+  localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",name:"Picked.apk",packageName:"game.pkg",source:"installed",savedAt:456,translating:true});
+  restoreSession();
+  await tick();
+  check(sessionRestoredAt===456,"translation session restores the interrupted marker");
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", restore_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translation_heartbeat_updates_session(self):
+        """While translating, the persisted session gets a fresh heartbeat."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_start = js.index("function readTaskSnapshot(){")
+        snapshot_end = js.index("function detailToggle(", snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        key_start = js.index("function snapshotKey(s){")
+        key_end = js.index("function retryTask(", key_start)
+        key_runtime = js[key_start:key_end]
+        refresh_start = js.index("function refresh(){")
+        refresh_end = js.index("function decorate(){", refresh_start)
+        refresh_runtime = js[refresh_start:refresh_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+const document={querySelectorAll(){return[]}};
+let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionLastBeat=0;
+function sourceText(){return`正在处理脚本 1/5`}
+function readProgressLog(){return{raw:"",latest:""}}
+const shell={};
+let states=[];function setWorkshopState(state,payload){states.push([state,payload])}
+const before=Date.now();
+localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",savedAt:0,translating:true});
+refresh();
+const session=JSON.parse(localStorage.data[SESSION_KEY]);
+check(session.translating===true,"heartbeat keeps translating flag");
+check(session.savedAt>=before,"heartbeat refreshes savedAt while translating");
+check(states[0][0]===`translating`,"shell still shows translating after heartbeat");
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + key_runtime + refresh_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_overlay_close_preserves_manual_idle_state(self):
+        """Closing settings/gallery must restore the idle state from before opening."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        settings_start = js.index("function beginOverlay(){")
+        settings_end = js.index("function openSettings(){", settings_start)
+        settings_runtime = js[settings_start:settings_end]
+        gallery_start = js.index("function closeGallery(preserveHistory=false){")
+        gallery_end = js.index("function renderGallery(){", gallery_start)
+        gallery_runtime = js[gallery_start:gallery_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const document={querySelector(){return{children:[],removeAttribute(){},textContent:""}}};
+function releaseModalHistory(){}
+let refreshes=0;function refresh(){refreshes+=1}
+let manualIdle=true,manualIdleBeforeOverlay=true,galleryOpen=true,settingsOpen=true,lastSnapshot="x";
+const galleryShell={hidden:false};const settingsShell={hidden:false};const shell={hidden:false};
+closeSettings();
+check(manualIdle===true,"closing settings restores the pre-overlay idle state");
+check(settingsOpen===false&&settingsShell.hidden===true,"settings actually closes");
+manualIdle=true;manualIdleBeforeOverlay=true;galleryOpen=true;settingsOpen=false;lastSnapshot="y";
+closeGallery();
+check(manualIdle===true,"closing gallery restores the pre-overlay idle state");
+check(galleryOpen===false&&galleryShell.hidden===true,"gallery actually closes");
+'''
+        result = subprocess.run(
+            ["node", "-e", settings_runtime + gallery_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for token in (
+            "function beginOverlay(){",
+            "function endOverlay(){",
+            "beginOverlay();settingsOpen=true",
+            "settingsOpen=false;endOverlay()",
+            "beginOverlay();galleryOpen=true",
+            "galleryOpen=false;endOverlay()",
+        ):
+            self.assertIn(token, js, token)
+
+    def test_filters_keep_every_audit_missing_string(self):
+        """Regression: the 19 audit-verified gaps must survive the text filters."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        ue_start = js.index("function Ue(e,t){")
+        ue_end = js.index("function Ke(e){", ue_start)
+        ue = js[ue_start:ue_end]
+        ke_start = ue_end
+        ke_end = js.index("function qe(", ke_start) if "function qe(" in js[ke_start:] else ke_start + 900
+        ke = js[ke_start:ke_end]
+        ne_start = js.index("function Ne(e,t=``,n){")
+        ne_end = js.index("function Pe(", ne_start)
+        ne = js[ne_start:ne_end]
+        skip_start = js.index("var _rpycSkip=")
+        skip_end = js.index("function Yo(", skip_start)
+        skip = js[skip_start:skip_end]
+        contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const NL = String.fromCharCode(10);
+const mustKeep = [
+  'E',
+  'My Bully is My Lover',
+  'Right Trigger' + NL + 'A/Bottom Button',
+  'Mouse Wheel Up' + NL + 'Click Rollback Side',
+  'Loading will lose unsaved progress.' + NL + 'Are you sure you want to do this?',
+  "This will upload your saves to the {a=https://sync.renpy.org}Ren'Py Sync Server{/a}." + NL + 'Do you want to continue?',
+  '\\n{color=#fff}Copied to clipboard.{/color}',
+];
+for (const s of mustKeep) {
+  check(Ue(s, 'en') === false, 'Ue must keep: ' + JSON.stringify(s));
+  check(Ke(s) === false, 'Ke must keep: ' + JSON.stringify(s));
+}
+const mustDrop = ['bar', 'SKIP', 'assets/x-game/x-ch1.rpyc', 'renpy.config.developer', 'statement_start'];
+for (const s of mustDrop) {
+  check(Ue(s, 'en') === true || Ke(s) === true, 'filter must drop: ' + JSON.stringify(s));
+}
+// Ne must preserve literal backslash-n (2 chars) and restore real newlines.
+const literalBackslashN = 'Press <esc> to exit console. Type help for help.\\n';
+const realNewline = 'Line one' + NL + 'Line two';
+const protocolLiteral = 'RPYC_STRING\t' + 'Press <esc> to exit console. Type help for help.' + '\\\\n' + NL;
+const protocolReal = 'RPYC_STRING\t' + 'Line one' + '\\n' + 'Line two' + NL;
+const out = Ne(protocolLiteral + protocolReal, '', 'en');
+check(out.length === 2, 'Ne keeps both lines: ' + out.length);
+check(out[0].text === literalBackslashN, 'Ne preserves literal backslash-n: ' + JSON.stringify(out[0].text));
+check(out[1].text === realNewline, 'Ne preserves real newline: ' + JSON.stringify(out[1].text));
+// candidate filter must include the options file (game title lives there)
+check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
+'''
+        result = subprocess.run(
+            ["node", "-e", ue + ke + ne + skip + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

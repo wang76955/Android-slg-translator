@@ -32,6 +32,9 @@ public final class LanguageMenuSupport {
 
     private static final byte[] RPC2_MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
     private static final String TRANSLATOR_LABEL = "\u7ffb\u8bd1\u6587\u672c"; // 翻译文本
+    private static final int STATUS_NOOP = 0;
+    private static final int STATUS_CHANGED = 1;
+    private static final int STATUS_ALREADY = 2;
 
     private LanguageMenuSupport() {
     }
@@ -50,9 +53,10 @@ public final class LanguageMenuSupport {
                 call.reject("\u8865\u4e01\u6e90 APK \u4e0d\u5b58\u5728: " + apkUri);
                 return;
             }
-            boolean changed = rewriteApkMenu(apk, gameTargetLang, translatorLang);
+            int status = rewriteApkMenu(apk, gameTargetLang, translatorLang);
             JSObject result = new JSObject();
-            result.put("changed", changed);
+            result.put("changed", status == STATUS_CHANGED);
+            result.put("ready", status != STATUS_NOOP);
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();
@@ -75,13 +79,15 @@ public final class LanguageMenuSupport {
         return new File(normalized);
     }
 
-    /** Rewrites the language menu inside an APK in place. Returns true when a menu button was added. */
-    static boolean rewriteApkMenu(File apk, String gameTargetLang, String translatorLang) throws IOException {
+    /**
+     * Rewrites the language menu inside an APK in place. Returns STATUS_CHANGED
+     * when a new 翻译文本 entry was added, STATUS_ALREADY when the entry already
+     * exists (idempotent success), or STATUS_NOOP when no compatible menu exists.
+     */
+    static int rewriteApkMenu(File apk, String gameTargetLang, String translatorLang) throws IOException {
         if (gameTargetLang == null) {
             gameTargetLang = "";
         }
-        String menuEntry = null;
-        byte[] newBytes = null;
         try (ZipFile zip = new ZipFile(apk)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -100,19 +106,44 @@ public final class LanguageMenuSupport {
                     continue;
                 }
                 byte[] original = readEntry(zip, entry);
+                boolean already = menuHasLanguage(original, translatorLang);
                 byte[] rewritten = injectMenu(original, gameTargetLang, translatorLang);
                 if (rewritten != null) {
-                    menuEntry = name;
-                    newBytes = rewritten;
-                    break;
+                    replaceZipEntry(apk, name, rewritten);
+                    return STATUS_CHANGED;
+                }
+                if (already) {
+                    return STATUS_ALREADY;
                 }
             }
         }
-        if (menuEntry == null || newBytes == null) {
+        return STATUS_NOOP;
+    }
+
+    /** Returns true when a rpyc already contains the translator language entry. */
+    private static boolean menuHasLanguage(byte[] rpyc, String translatorLang) {
+        if (rpyc.length < RPC2_MAGIC.length || !startsWith(rpyc, RPC2_MAGIC)) {
             return false;
         }
-        replaceZipEntry(apk, menuEntry, newBytes);
-        return true;
+        byte[] needle = ("Language(\"" + translatorLang + "\")").getBytes(StandardCharsets.UTF_8);
+        int tablePos = RPC2_MAGIC.length;
+        while (tablePos + 12 <= rpyc.length) {
+            int id = le32(rpyc, tablePos);
+            int offset = le32(rpyc, tablePos + 4);
+            int length = le32(rpyc, tablePos + 8);
+            if (id == 0) {
+                break;
+            }
+            if (offset < 0 || length < 0 || offset + length > rpyc.length) {
+                return false;
+            }
+            byte[] inflated = inflate(slice(rpyc, offset, offset + length));
+            if (inflated != null && containsAscii(inflated, new String(needle, StandardCharsets.UTF_8))) {
+                return true;
+            }
+            tablePos += 12;
+        }
+        return false;
     }
 
     /**
@@ -175,72 +206,6 @@ public final class LanguageMenuSupport {
      * screen structure (the same mechanism the native mirror uses). Returns the
      * rewritten slot, or null when this slot has no compatible menu.
      */
-    private static byte[] rewriteButton(byte[] data, String gameTargetLang, String translatorLang) {
-        List<int[]> ops = walk(data);
-        if (ops == null) {
-            return null;
-        }
-        int candidateIdx = -1;
-        String candidateLang = null;
-        for (int k = 0; k < ops.size(); k++) {
-            String payload = stringPayload(data, ops, k);
-            if (payload == null) {
-                continue;
-            }
-            if (payload.equals("Language(\"" + translatorLang + "\")")) {
-                return null; // already injected
-            }
-            String lang = languageCode(payload);
-            if (lang != null) {
-                if (!lang.equals("None") && !lang.isEmpty() && !lang.equals(gameTargetLang)) {
-                    candidateIdx = k;
-                    candidateLang = lang;
-                }
-            }
-        }
-        if (candidateIdx < 0 || candidateLang == null) {
-            return null;
-        }
-        // Extract the button's display label from the Text(("LABEL"), style=...)
-        // strings that precede its Language action.
-        String label = null;
-        for (int k = Math.max(0, candidateIdx - 40); k < candidateIdx; k++) {
-            String payload = stringPayload(data, ops, k);
-            if (payload != null && payload.startsWith("Text((\"") && payload.contains("\"), style=")) {
-                label = payload.substring("Text((\"".length(), payload.indexOf("\"), style="));
-                if (!label.isEmpty()) {
-                    break;
-                }
-            }
-        }
-        if (label == null || label.isEmpty()) {
-            return null;
-        }
-        // Rebuild the slot: drop stale FRAME lengths, rewrite label and language.
-        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length + 64);
-        for (int k = 0; k < ops.size(); k++) {
-            int[] op = ops.get(k);
-            if (op[0] == 0x95) { // FRAME lengths become stale after rewriting; frames are optional
-                continue;
-            }
-            byte[] chunk = slice(data, op[1], op[2]);
-            String payload = stringPayload(data, ops, k);
-            if (payload != null && payload.startsWith("Text((\"") && payload.contains("\"), style=")) {
-                String inner = payload.substring("Text((\"".length(), payload.indexOf("\"), style="));
-                if (inner.equals(label)) {
-                    String next = "Text((\"" + TRANSLATOR_LABEL + payload.substring(payload.indexOf("\"), style="));
-                    writeShortUnicode(out, next);
-                    continue;
-                }
-            }
-            if (payload != null && payload.equals("Language(\"" + candidateLang + "\")")) {
-                writeShortUnicode(out, "Language(\"" + translatorLang + "\")");
-                continue;
-            }
-            out.write(chunk, 0, chunk.length);
-        }
-        return out.toByteArray();
-    }
 
     private static void writeShortUnicode(ByteArrayOutputStream out, String value) {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
@@ -249,7 +214,256 @@ public final class LanguageMenuSupport {
         out.write(bytes, 0, bytes.length);
     }
 
-    private static String stringPayload(byte[] data, List<int[]> ops, int index) {
+    /**
+     * Rewrites the last non-default, non-target language button into an
+     * independent 翻译文本 entry that selects the translator language. The
+     * rewrite preserves the compiled screen structure. The label style is
+     * taken from a button that already displays non-ASCII text when one
+     * exists (many games reserve a dedicated CJK-capable style, and the
+     * default button style cannot render Chinese glyphs).
+     */
+    private static byte[] rewriteButton(byte[] data, String gameTargetLang, String translatorLang) {
+        List<int[]> ops = walk(data);
+        if (ops == null) {
+            return null;
+        }
+        List<String> langs = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        List<List<String>> labelPayloads = new ArrayList<>();
+        for (int k = 0; k < ops.size(); k++) {
+            String payload = stringPayload(data, ops, k);
+            if (payload == null) {
+                continue;
+            }
+            String lang = languageCode(payload);
+            if (lang == null) {
+                continue;
+            }
+            String label = null;
+            List<String> payloads = new ArrayList<>();
+            for (int j = k - 1; j >= Math.max(0, k - 120); j--) {
+                String p = stringPayload(data, ops, j);
+                String lab = textLabel(p);
+                if (lab != null) {
+                    label = lab;
+                    for (int j2 = Math.max(0, k - 120); j2 < k; j2++) {
+                        String p2 = stringPayload(data, ops, j2);
+                        if (p2 != null && lab.equals(textLabel(p2))) {
+                            payloads.add(p2);
+                        }
+                    }
+                    break;
+                }
+            }
+            langs.add(lang);
+            labels.add(label);
+            labelPayloads.add(payloads);
+        }
+        int candidateIdx = -1;
+        for (int i = 0; i < langs.size(); i++) {
+            if (langs.get(i).equals(translatorLang)) {
+                candidateIdx = i; // repair the existing 翻译文本 button
+                break;
+            }
+            String lang = langs.get(i);
+            if (!lang.equals("None") && !lang.isEmpty() && !lang.equals(gameTargetLang)) {
+                candidateIdx = i;
+            }
+        }
+        boolean repairMode = candidateIdx >= 0 && langs.get(candidateIdx).equals(translatorLang);
+        if (candidateIdx < 0 || labels.get(candidateIdx) == null) {
+            return null;
+        }
+        String[] styles = chooseStyles(labels, labelPayloads, candidateIdx);
+        String candidateLang = langs.get(candidateIdx);
+        String candidateLabel = labels.get(candidateIdx);
+        List<String> candidatePayloads = labelPayloads.get(candidateIdx);
+        // Rebuild the slot: drop stale FRAME lengths, rewrite label and language.
+        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length + 128);
+        boolean changed = false;
+        for (int k = 0; k < ops.size(); k++) {
+            int[] op = ops.get(k);
+            if (op[0] == 0x95) { // FRAME lengths become stale after rewriting; frames are optional
+                continue;
+            }
+            byte[] chunk = slice(data, op[1], op[2]);
+            String payload = stringPayload(data, ops, k);
+            if (payload != null) {
+                if (candidatePayloads.contains(payload)) {
+                    String next = rewriteTextPayload(payload, TRANSLATOR_LABEL, styles);
+                    if (next != null && !next.equals(payload)) {
+                        changed = true;
+                        writeShortUnicode(out, next);
+                        continue;
+                    }
+                }
+                if (payload.equals("Language(\"" + candidateLang + "\")")) {
+                    if (!repairMode) {
+                        changed = true;
+                        writeShortUnicode(out, "Language(\"" + translatorLang + "\")");
+                        continue;
+                    }
+                }
+            }
+            out.write(chunk, 0, chunk.length);
+        }
+        return changed ? out.toByteArray() : null;
+    }
+
+
+    /**
+     * Extracts the label text from Text(...) payloads like
+     * Text(("English"), style="..."), Text("中文", style="...") or
+     * Text(_("Info"), style="..."). Returns null when the payload is not a
+     * Text label payload.
+     */
+    private static String textLabel(String payload) {
+        if (payload == null || !payload.startsWith("Text(")) {
+            return null;
+        }
+        int open = -1;
+        int start = 0;
+        if (payload.startsWith("Text((\"")) {
+            start = "Text((\"".length();
+        } else if (payload.startsWith("Text(\"")) {
+            start = "Text(\"".length();
+        } else if (payload.startsWith("Text(_(\"")) {
+            start = "Text(_(\"".length();
+        } else {
+            return null;
+        }
+        int end = payload.indexOf("\", style=", start);
+        if (end < 0) {
+            end = payload.indexOf("\"), style=", start);
+        }
+        if (end < 0) {
+            return null;
+        }
+        String label = payload.substring(start, end);
+        return label.isEmpty() ? null : label;
+    }
+
+    /** Returns {normalStyle, hoverStyle} or null. */
+    private static String[] stylesOf(List<String> payloads) {
+        if (payloads == null || payloads.isEmpty()) {
+            return null;
+        }
+        String normal = null;
+        String hover = null;
+        for (String payload : payloads) {
+            String style = styleName(payload);
+            if (style == null) {
+                continue;
+            }
+            if (style.endsWith("_hover")) {
+                hover = style;
+            } else {
+                normal = style;
+            }
+        }
+        if (normal == null && hover == null) {
+            return null;
+        }
+        if (normal == null) {
+            normal = hover.substring(0, hover.length() - "_hover".length());
+        }
+        if (hover == null) {
+            hover = normal + "_hover";
+        }
+        return new String[]{normal, hover};
+    }
+
+    private static String styleName(String payload) {
+        if (payload == null) {
+            return null;
+        }
+        int idx = payload.indexOf("style=\"");
+        if (idx < 0) {
+            return null;
+        }
+        int start = idx + "style=\"".length();
+        int end = payload.indexOf('"', start);
+        if (end < 0) {
+            return null;
+        }
+        return payload.substring(start, end);
+    }
+
+    /**
+     * Picks the label style for the injected button: prefer a language
+     * button whose label already contains non-ASCII characters (its style is
+     * likely CJK-capable), otherwise fall back to the candidate's own style.
+     */
+    private static String[] chooseStyles(List<String> labels, List<List<String>> labelPayloads,
+                                        int candidateIdx) {
+        String[] fallback = stylesOf(labelPayloads.get(candidateIdx));
+        for (int i = 0; i < labels.size(); i++) {
+            String label = labels.get(i);
+            if (label == null) {
+                continue;
+            }
+            boolean nonAscii = false;
+            for (int c = 0; c < label.length(); c++) {
+                if (label.charAt(c) > 127) {
+                    nonAscii = true;
+                    break;
+                }
+            }
+            if (nonAscii) {
+                String[] styles = stylesOf(labelPayloads.get(i));
+                if (styles != null) {
+                    return styles;
+                }
+            }
+        }
+        return fallback;
+    }
+
+    /**
+     * Rewrites a Text payload: replaces the label text with the translator
+     * label and swaps in the chosen style name (keeping the payload's own
+     * structural form).
+     */
+    private static String rewriteTextPayload(String payload, String newLabel, String[] styles) {
+        if (styles == null) {
+            return null;
+        }
+        int prefix = -1;
+        String separator;
+        if (payload.startsWith("Text((\"")) {
+            prefix = "Text((\"".length();
+            separator = "\"), style=";
+        } else if (payload.startsWith("Text(\"")) {
+            prefix = "Text(\"".length();
+            separator = "\", style=";
+        } else if (payload.startsWith("Text(_(\"")) {
+            prefix = "Text(_(\"".length();
+            separator = "\"), style=";
+        } else {
+            return null;
+        }
+        int open = payload.indexOf(separator, prefix);
+        if (open < 0) {
+            return null;
+        }
+        String style = styleName(payload);
+        String chosen = style != null && style.endsWith("_hover") ? styles[1] : styles[0];
+        String head = payload.substring(0, prefix);
+        String tail = payload.substring(open);
+        int styleIdx = tail.indexOf("style=\"");
+        if (styleIdx < 0) {
+            return null;
+        }
+        int styleStart = styleIdx + "style=\"".length();
+        int styleEnd = tail.indexOf('"', styleStart);
+        if (styleEnd < 0) {
+            return null;
+        }
+        return head + newLabel + tail.substring(0, styleStart) + chosen + tail.substring(styleEnd);
+    }
+
+
+    static String stringPayload(byte[] data, List<int[]> ops, int index) {
         int[] op = ops.get(index);
         int code = op[0];
         if (code == 0x8c) { // SHORT_BINUNICODE
@@ -274,7 +488,7 @@ public final class LanguageMenuSupport {
      * Walks a pickle stream, returning [opcode, start, end] triples. Returns
      * null when the stream contains an opcode we do not recognize.
      */
-    private static List<int[]> walk(byte[] data) {
+    static List<int[]> walk(byte[] data) {
         List<int[]> ops = new ArrayList<>();
         int pos = 0;
         int n = data.length;
