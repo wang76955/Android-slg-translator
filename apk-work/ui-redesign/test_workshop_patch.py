@@ -1014,7 +1014,7 @@ check(refreshes===1,`refresh requested`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        start = js.index('var _o=`slg-translator-cache:`')
+        start = js.index('var _o=`slg-translator-cache:v2:`')
         end = js.index('function Do()', start)
         cache_runtime = js[start:end]
         behavior_contract = r'''
@@ -1358,7 +1358,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         )
 
         self.assertIn(
-            r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=',
+            r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=',
             js,
         )
         self.assertIn('const progress=text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)

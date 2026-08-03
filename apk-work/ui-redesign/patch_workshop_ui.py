@@ -211,7 +211,7 @@ function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=fals
 function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsPrevNav){const nav=document.querySelector(".workshop-bottom-nav");settingsPrevNav=nav?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("我的"))?.setAttribute("aria-current","page")}let menuView=null,serviceView=null,savesView=null,cleanupView=null,aboutView=null;const showMenu=()=>{if(menuView)menuView.hidden=false;if(serviceView)serviceView.hidden=true;if(savesView)savesView.hidden=true;if(cleanupView)cleanupView.hidden=true;if(aboutView)aboutView.hidden=true};const showView=(v)=>{if(!menuView)return;menuView.hidden=true;serviceView.hidden=v!==serviceView;savesView.hidden=v!==savesView;cleanupView.hidden=v!==cleanupView;aboutView.hidden=v!==aboutView};if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");function makeView(){const v=textNode("section","workshop-settings-view");v.hidden=true;return v}function viewBack(label,handler){const b=textNode("button","workshop-task-back","‹ 返回");b.type="button";b.setAttribute("aria-label",label);b.onclick=handler;return b}menuView=makeView();serviceView=makeView();savesView=makeView();cleanupView=makeView();aboutView=makeView();const menuTop=textNode("header","workshop-task-topbar");const back=viewBack("返回任务",closeSettings);menuTop.append(back,textNode("h1","","我的设置"));const menu=textNode("div","workshop-settings-menu");function makeMenuItem(label,desc){const row=textNode("button","workshop-menu-item");row.type="button";const name=textNode("span","workshop-menu-item-label",label);const note=textNode("span","workshop-menu-item-desc",desc||"");const arrow=textNode("span","workshop-menu-item-arrow","›");row.append(name,note,arrow);return row}const service=makeMenuItem("翻译服务","配置 AI 供应商与 API Key");const saves=makeMenuItem("存档转移","备份与恢复游戏存档");const cleanup=makeMenuItem("清理安装包与旧缓存","释放手机存储空间");cleanup.classList.add("workshop-settings-cleanup");const about=makeMenuItem("关于","版本信息");menu.append(service,saves,cleanup,about);menuView.append(menuTop,menu);
 const serviceTop=textNode("header","workshop-task-topbar");const serviceBack=viewBack("返回菜单",showMenu);serviceTop.append(serviceBack,textNode("h1","","翻译服务"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper);serviceView.append(serviceTop,card);
 const savesTop=textNode("header","workshop-task-topbar");const savesBack=viewBack("返回菜单",showMenu);savesTop.append(savesBack,textNode("h1","","存档转移"));const savesCard=textNode("section","workshop-settings-card");savesCard.append(textNode("h2","workshop-settings-title","存档转移"),textNode("p","workshop-settings-helper","存档转移功能即将推出，敬请期待。"));savesView.append(savesTop,savesCard);
-const cleanupTop=textNode("header","workshop-task-topbar");const cleanupBack=viewBack("返回菜单",showMenu);cleanupTop.append(cleanupBack,textNode("h1","","清理安装包与旧缓存"));const cleanupCard=textNode("section","workshop-settings-card");const cleanupTitle=textNode("h2","workshop-settings-title","清理安装包与旧缓存");const cleanupStatus=textNode("p","workshop-settings-status","删除已生成的补丁 APK 与旧翻译缓存，释放手机存储空间。");const cleanupBtn=textNode("button","workshop-settings-save","立即清理");cleanupBtn.type="button";const cleanupResult=textNode("p","workshop-settings-status");cleanupBtn.onclick=async()=>{cleanupBtn.disabled=true;cleanupBtn.textContent="正在清理…";try{const r=await window.Capacitor.Plugins.FileManager.cleanupStorage({keepUri:(window.__slgSelectionMeta?.uri)||""});cleanupResult.textContent=`已清理 ${formatBytes(r&&r.freedBytes)} ，删除 ${(r&&r.deletedCount)||0} 个文件`}catch(e){cleanupResult.textContent="清理失败："+(e&&e.message||String(e))}finally{cleanupBtn.disabled=false;cleanupBtn.textContent="立即清理"}};cleanupCard.append(cleanupTitle,cleanupStatus,cleanupBtn,cleanupResult);cleanupView.append(cleanupTop,cleanupCard);
+const cleanupTop=textNode("header","workshop-task-topbar");const cleanupBack=viewBack("返回菜单",showMenu);cleanupTop.append(cleanupBack,textNode("h1","","清理安装包与旧缓存"));const cleanupCard=textNode("section","workshop-settings-card");const cleanupTitle=textNode("h2","workshop-settings-title","清理安装包与旧缓存");const cleanupStatus=textNode("p","workshop-settings-status","删除已生成的补丁 APK 与旧翻译缓存，释放手机存储空间。");const cleanupBtn=textNode("button","workshop-settings-save","立即清理");cleanupBtn.type="button";const cleanupResult=textNode("p","workshop-settings-status");cleanupBtn.onclick=async()=>{cleanupBtn.disabled=true;cleanupBtn.textContent="正在清理…";try{const r=await window.Capacitor.Plugins.FileManager.cleanupStorage({keepUri:(window.__slgSelectionMeta?.uri)||"",packageName:(window.__slgSelectionMeta?.packageName)||""});cleanupResult.textContent=`已清理 ${formatBytes(r&&r.freedBytes)} ，删除 ${(r&&r.deletedCount)||0} 个文件`}catch(e){cleanupResult.textContent="清理失败："+(e&&e.message||String(e))}finally{cleanupBtn.disabled=false;cleanupBtn.textContent="立即清理"}};cleanupCard.append(cleanupTitle,cleanupStatus,cleanupBtn,cleanupResult);cleanupView.append(cleanupTop,cleanupCard);
 const aboutTop=textNode("header","workshop-task-topbar");const aboutBack=viewBack("返回菜单",showMenu);aboutTop.append(aboutBack,textNode("h1","","关于"));const aboutCard=textNode("section","workshop-settings-card");aboutCard.append(textNode("h2","workshop-settings-title","SLG 翻译器"),textNode("p","workshop-settings-helper","版本：Android v1.0.2"),textNode("p","workshop-settings-helper","把喜欢的游戏，用中文继续。"));aboutView.append(aboutTop,aboutCard);
 service.onclick=()=>showView(serviceView);saves.onclick=()=>showView(savesView);cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}
 function armModalHistory(){if(modalHistoryClosing){modalHistoryRearm=true;return}if(modalHistoryArmed)return;try{history.pushState({...history.state,__slgSourceModal:ID},"")}catch(e){}modalHistoryArmed=true}
@@ -229,7 +229,7 @@ async function chooseInstalledApp(app){const epoch=++sourceRequestEpoch;installe
 function closeInstalledApps(preserveHistory=false,preserveSourceRequest=false){installedListEpoch+=1;if(!preserveSourceRequest)sourceRequestEpoch+=1;installedLoading=false;installedBusy=false;if(installedDialog){installedDialog.hidden=true;installedDialog.setAttribute("aria-busy","false")}if(!preserveHistory)releaseModalHistory();previousSourceFocus?.focus()}
 function findButton(label){return[...document.querySelectorAll("#root button")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent&&el.textContent.includes(label))}
 function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}const isInstall=button===installButton||button?.textContent?.includes("安装补丁版");const target=isStart?(findButton("开始翻译")||button):isInstall?findButton("安装补丁版"):button;if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
-function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();return clone.textContent||""}
+function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();clone.querySelector(".workshop-source-dialog")?.remove();clone.querySelector(".workshop-installed-dialog")?.remove();clone.querySelector(".workshop-settings-shell")?.remove();clone.querySelector(".workshop-gallery-shell")?.remove();return clone.textContent||""}
 function readProgressLog(){const source=[...document.querySelectorAll("#root details")].find(el=>!el.closest(".workshop-task-shell")&&el.querySelector('[class*="font-mono"]'));const panel=source?.querySelector('[class*="font-mono"]');const lines=[...(panel?.children||[])].slice(-40).map(row=>(row.innerText||row.textContent||"").trim()).filter(Boolean);return{raw:lines.join("\n"),latest:lines.at(-1)||""}}
 function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog=window.__slgScanWatchdog,selectionMeta=window.__slgSelectionMeta,text=sourceText();const selected=text.match(/已选择\s*[:：]?\s*([^\n]{1,180}?)(?=发现|正在|处理|$)/);const fileName=selected?.[1]?.trim()||"";const found=text.match(/发现\s*(\d+)\s*个可翻译文件/),headerCount=text.match(/(?:·\s*)?(\d+)\s*个脚本/);const count=found?.[1]||headerCount?.[1]||"";const progress=text.match(/正在处理脚本\s*(\d+)\s*\/\s*(\d+)/);const current=progress?.[1]||"0",total=progress?.[2]||count||"0";const translated=text.match(/共翻译\s*(\d+)\s*条文本/)?.[1]||"";const log=readProgressLog();const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))return{state:"failed",reason:"space",raw:failed.textContent};const networkFailed=text.match(/翻译失败\s*[:：]?\s*(无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。)/);if(networkFailed)return{state:"failed",reason:"network",raw:networkFailed[1]};if(/翻译完成/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest};if(/正在生成 Ren'Py 补丁 APK/.test(text))return{state:"patching",fileName,count,current,total,raw:log.raw,latest:log.latest};if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating",fileName,count,current,total,raw:log.raw,latest:log.latest};if(count==="0"&&watchdog?.epoch===window.__slgSelectionEpoch&&watchdog.settled&&!watchdog.timerFired)return{state:"empty",fileName,count,splitApk:!!selectionMeta?.splitApk,splitCount:selectionMeta?.splitCount||0};if(count!==""&&count!=="0")return{state:"ready",fileName,count};if(fileName||/正在扫描|正在检查文件|检查文件/.test(text))return{state:"scanning",fileName};return{state:"idle"}}
 function detailToggle(raw,live=false){const wrap=textNode("div","workshop-detail-wrap");const toggle=textNode("button","workshop-detail-toggle",detailsOpen?"收起详情":"处理详情");toggle.type="button";toggle.setAttribute("aria-expanded",String(detailsOpen));const body=textNode("div","workshop-detail-body",raw||"暂无更多信息");body.dataset.open=String(detailsOpen);const scrollLatest=()=>{if(live&&detailsOpen)window.requestAnimationFrame(()=>{body.scrollTop=body.scrollHeight})};toggle.onclick=()=>{detailsOpen=!detailsOpen;body.dataset.open=String(detailsOpen);toggle.setAttribute("aria-expanded",String(detailsOpen));toggle.textContent=detailsOpen?"收起详情":"处理详情";scrollLatest()};wrap.append(toggle,body);scrollLatest();return wrap}
@@ -489,7 +489,7 @@ function setReactInputValue(input,value)""",
 
     # --- patched APK visibility & signature-conflict handling ---
     snap_old = 'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected};'
-    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
+    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
                 'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected}}')
     if runtime.count(snap_old) != 1:
         raise ValueError("Completed snapshot signature not found")
@@ -1054,6 +1054,21 @@ Output: {"translations":["新的旅程"]}"""
 
 
 def patch_translation_quality(js: str) -> str:
+    # 0) keyPath 前缀：提取文本时把文件路径写入 keyPath（o.name + "::"），
+    #    供 Vo 注入 Source file / 同文件场景上下文
+    old_ke = r'''l=ke(i,s,``,g)'''
+    new_ke = r'''l=ke(i,s,o.name+`::`,g)'''
+    if js.count(old_ke) != 1:
+        raise ValueError("Text extraction call signature not found")
+    js = js.replace(old_ke, new_ke, 1)
+
+    # 0b) 缓存键版本：质量策略升级后旧缓存自动失效
+    old_o = r'''var _o=`slg-translator-cache:`,vo={}'''
+    new_o = r'''var _o=`slg-translator-cache:v2:`,vo={}'''
+    if js.count(old_o) != 1:
+        raise ValueError("Cache namespace signature not found")
+    js = js.replace(old_o, new_o, 1)
+
     # 1) Le：Ren'Py 源格式解析捕获说话人名字（maria "text" → speaker: maria）
     old_le = r'''let c=s.match(/^(['"])((?:[^"'\\]|\\.)+)\1\s*:/),l=s.match(/^(?:(?:[A-Za-z_]\w*|\w+\.[A-Za-z_]\w*)\s+)?(['"])((?:[^"'\\]|\\.)+)\1\s*(?:#.*)?$/),u=c?.[2]??l?.[2];u&&He(u,n)&&!i.has(u)&&(i.add(u),r.push({keyPath:`${t}rpy_${a++}`,text:u}))'''
     new_le = r'''let c=s.match(/^(['"])((?:[^"'\\]|\\.)+)\1\s*:/),l=s.match(/^(?:([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s+)?(['"])((?:[^"'\\]|\\.)+)\2\s*(?:#.*)?$/),u=c?.[2]??l?.[3],sp=l?.[1];u&&He(u,n)&&!i.has(u)&&(i.add(u),r.push({keyPath:`${t}rpy_${a++}`,text:u,...sp?{speaker:sp}:{}}))'''
@@ -1063,14 +1078,14 @@ def patch_translation_quality(js: str) -> str:
 
     # 2) No：去重时保留第一个说话人字段，避免 speaker 在去重后丢失
     old_no = r'''function No(e){let t=new Map;for(let n of e){let e=n.text.trim();if(!e)continue;let r=t.get(e);if(r){r.duplicateKeys.push(n.keyPath);continue}t.set(e,{keyPath:n.keyPath,text:n.text,duplicateKeys:[]})}return Array.from(t.values())}'''
-    new_no = r'''function No(e){let t=new Map;for(let n of e){let e=n.text.trim();if(!e)continue;let r=t.get(e);if(r){r.duplicateKeys.push(n.keyPath);continue}t.set(e,{keyPath:n.keyPath,text:n.text,duplicateKeys:[],speaker:n.speaker})}return Array.from(t.values())}'''
+    new_no = r'''function No(e){let t=new Map;for(let n of e){let e=n.text.trim();if(!e)continue;let r=t.get(e);if(r){r.duplicateKeys.push(n.keyPath);continue}t.set(e,{keyPath:n.keyPath,text:n.text,duplicateKeys:[],...(n.speaker?{speaker:n.speaker}:{})})}return Array.from(t.values())}'''
     if js.count(old_no) != 1:
         raise ValueError("Dedupe signature not found")
     js = js.replace(old_no, new_no, 1)
 
     # 3) Ro：占位符保护后仍携带 speaker 字段，供 Vo 构造上下文
     old_ro = r'''function Ro(e){return{...e,protectedText:Fo(e.text)}}'''
-    new_ro = r'''function Ro(e){return{...e,protectedText:Fo(e.text),speaker:e.speaker}}'''
+    new_ro = r'''function Ro(e){return{...e,protectedText:Fo(e.text),...(e.speaker?{speaker:e.speaker}:{})}}'''
     if js.count(old_ro) != 1:
         raise ValueError("Placeholder protection signature not found")
     js = js.replace(old_ro, new_ro, 1)
@@ -1093,13 +1108,51 @@ Return only JSON: {"translations":["..."]}`),i}'''
     old_vo = r'''async function Vo(e,t,n,r,i,a,o){let s=new Map,c=Go(r,i,a,o),l=`Translate this JSON array. `+(o?`Return a JSON object exactly like {"translations":["..."]} with translations in the same order:
 `:`Return a JSON array with translations in the same order:
 `)+Po(n.map(e=>({...e,text:e.protectedText.text}))),u=(await e.chat.completions.create({model:t,messages:[{role:`system`,content:c},{role:`user`,content:l}],temperature:.3,...o?{response_format:{type:`json_object`}}:{}})).choices[0]?.message?.content;if(!u)throw Error(`API returned empty content`);let d=Ho(u);for(let e=0;e<n.length;e++){let t=d[e];typeof t==`string`&&t.trim()&&s.set(e,Io(t,n[e].protectedText))}return s}'''
-    new_vo = r'''async function Vo(e,t,n,r,i,a,o){let s=new Map,c=Go(r,i,a,o),p0=String(n[0]?.keyPath||``),_f=p0.includes(`::`)?p0.split(`::`)[0]:``,w=_f.split(`/`).pop()||``,sc=!!_f&&n.every(e=>String(e.keyPath||``).split(`::`)[0]===_f),l=((_f?`Source file: ${w}\n`:`\n`)+(sc?`These are consecutive lines from the same scene (${w}). Translate them as one coherent dialogue flow — keep tone, terminology and speaking habits consistent across all lines.\n`:`\n`)+(n.some(e=>e.speaker)?`Context hints (index → speaker):\n`+n.map((e,i)=>`[${i}]${e.speaker?` → ${e.speaker}`:``}\n`).join(``):``)+`Translate this JSON array. `+(o?`Return a JSON object exactly like {"translations":["..."]} with translations in the same order:
+    new_vo = r'''async function Vo(e,t,n,r,i,a,o){let s=new Map,c=Go(r,i,a,o),p0=String(n[0]?.keyPath||``),_f=p0.includes(`::`)?p0.split(`::`)[0]:``,w=_f.split(`/`).pop()||``,sf=!!_f&&n.length>1&&n.every(e=>String(e.keyPath||``).split(`::`)[0]===_f),_ns=n.map(e=>{let k=String(e.keyPath||``).split(`::`).pop()||``,m=k.match(/(?:^|_)(\d+)$/)||k.match(/\[L(\d+)\]/)||k.match(/\[r(\d+)c/);return m?+m[1]:null}).filter(x=>x!==null).sort((a,b)=>a-b),_sc=sf&&_ns.length===n.length&&_ns.length>1&&_ns.every((x,i)=>i===0||x-_ns[i-1]===1),l=((_f?`Source file: ${w}\n`:`\n`)+(_sc?`These are consecutive lines from the same scene (${w}). Translate them as one coherent dialogue flow — keep tone, terminology and speaking habits consistent across all lines.\n`:(sf?`These lines belong to the same file (${w}). Translate them as one coherent passage — keep tone, terminology and speaking habits consistent.\n`:`\n`))+(n.some(e=>e.speaker)?`Context hints (index → speaker):\n`+n.map((e,i)=>`[${i}]${e.speaker?` → ${e.speaker}`:``}\n`).join(``):``)+`Translate this JSON array. `+(o?`Return a JSON object exactly like {"translations":["..."]} with translations in the same order:
 `:`Return a JSON array with translations in the same order:
 `)+Po(n.map(e=>({...e,text:e.protectedText.text})))),u=(await e.chat.completions.create({model:t,messages:[{role:`system`,content:c},{role:`user`,content:l}],temperature:.3,...o?{response_format:{type:`json_object`}}:{}})).choices[0]?.message?.content;if(!u)throw Error(`API returned empty content`);let d=Ho(u);for(let e=0;e<n.length;e++){let t=d[e];typeof t==`string`&&t.trim()&&s.set(e,Io(t,n[e].protectedText))}return s}'''
     if js.count(old_vo) != 1:
         raise ValueError("Batch request signature not found")
     js = js.replace(old_vo, new_vo, 1)
     return js
+
+
+# ===== 缓存内存管理：full 清空同步清 cacheIndex + 缓存上限淘汰 =====
+CACHE_PRUNE_LIMIT = 30000
+
+
+def patch_cache_memory(js: str) -> str:
+    # 1) full 模式清空 vo 时必须同步清 cacheIndex，否则旧缓存引用残留，
+    #    内存不释放且 To() 仍能从 cacheIndex 命中旧缓存（清理无效）。
+    old_full = "_mode===`full`&&(vo={},bo=!0,await wo())"
+    new_full = "_mode===`full`&&(vo={},cacheIndex={},bo=!0,await wo())"
+    if js.count(old_full) != 1:
+        raise ValueError("Full-clear signature not found")
+    js = js.replace(old_full, new_full, 1)
+
+    # 2) 缓存上限：超过 CACHE_PRUNE_LIMIT 条时按 updatedAt 淘汰最旧一半，
+    #    并从 cacheIndex 同步删除引用。在 wo() 保存前调用。
+    prune_fn = (
+        "function maybePruneCache(){let ks=[],pre=_o+`v2|`;"
+        "for(const k of Object.keys(vo)){if(k.startsWith(_o))ks.push(k)}"
+        f"if(ks.length<={CACHE_PRUNE_LIMIT})return;"
+        "ks.sort((a,b)=>(vo[a].updatedAt||0)-(vo[b].updatedAt||0));"
+        "let drop=Math.floor(ks.length/2);"
+        "for(let i=0;i<drop;i++){let k=ks[i],id=k.startsWith(pre)?k.slice(pre.length):k.slice(_o.length);"
+        "delete vo[k];delete cacheIndex[id]}bo=!0}"
+    )
+    old_anchor = "async function wo(){"
+    if js.count(old_anchor) != 1:
+        raise ValueError("wo anchor signature not found")
+    js = js.replace(old_anchor, prune_fn + old_anchor, 1)
+
+    old_save = "globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
+    new_save = "maybePruneCache();globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
+    if js.count(old_save) != 1:
+        raise ValueError("wo save point signature not found")
+    js = js.replace(old_save, new_save, 1)
+    return js
+
 def _verify_digest(data: bytes, expected: str, label: str) -> None:
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected:
@@ -1145,6 +1198,7 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_speed_tuning(patched)
     patched = patch_candidate_filter(patched)
     patched = patch_translation_quality(patched)
+    patched = patch_cache_memory(patched)
     return patched + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
 
 

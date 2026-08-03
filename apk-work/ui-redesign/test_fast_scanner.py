@@ -1331,6 +1331,100 @@ public final class CleanupHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_cleanup_storage_deletes_other_games_patch_by_package(self):
+        """Patch APKs whose package differs from the selected game are
+        deleted (their patches are already installed); the selected game's
+        own patch is kept."""
+        cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
+        source = cleanup.read_text("utf-8")
+        self.assertIn("packageName", source)
+        self.assertIn("packageNameOf", source)
+        harness = r"""
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.CleanupSupport;
+import java.io.File;
+
+public final class CleanupPackageHarness {
+    static final class FakeContext extends Context {
+        File external;
+        @Override public File getExternalFilesDir(String type) { return external; }
+    }
+    static final class CapturingCall extends PluginCall {
+        String keepUri, packageName;
+        String rejected;
+        @Override public String getString(String key) {
+            if ("keepUri".equals(key)) return keepUri;
+            if ("packageName".equals(key)) return packageName;
+            return null;
+        }
+        @Override public void resolve(JSObject value) {}
+        @Override public void reject(String message) { rejected = message; }
+    }
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File installed = new File(base, "installed-apks"); installed.mkdirs();
+        File keep = new File(installed, "keep.apk"); require(keep.createNewFile(), "create keep");
+        File output = new File(base, "SLG-Translator-Output"); output.mkdirs();
+        File patchOther = new File(output, "patch-other.apk");
+        writeManifest(patchOther, "com.other.game");
+        File patchCurrent = new File(output, "patch-current.apk");
+        writeManifest(patchCurrent, "com.current.game");
+        FakeContext context = new FakeContext();
+        context.external = base;
+        CapturingCall call = new CapturingCall();
+        call.keepUri = keep.toURI().toString();
+        call.packageName = "com.current.game";
+        CleanupSupport.cleanupStorage(context, call);
+        require(call.rejected == null, "cleanup must resolve: " + call.rejected);
+        require(!patchOther.exists(), "other game patch must be deleted");
+        require(patchCurrent.exists(), "current game patch must be kept");
+        require(keep.exists(), "current selection source must be kept");
+    }
+    static void writeManifest(File apk, String pkg) throws Exception {
+        java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(apk));
+        out.putNextEntry(new java.util.zip.ZipEntry("AndroidManifest.xml"));
+        byte[] pkgBytes = pkg.getBytes("UTF-16LE");
+        out.write(new byte[]{1, 0, 2, 0});
+        out.write(pkgBytes);
+        out.write(new byte[]{0, 0});
+        out.close();
+    }
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="cleanup-pkg-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CleanupPackageHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "CleanupPackageHarness", str(fixture)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+
     def test_cleanup_storage_removes_interrupted_partials_in_installed_apks(self):
         """Cleanup must remove .partial/.tmp leftovers inside installed-apks."""
         cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
