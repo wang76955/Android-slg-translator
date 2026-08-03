@@ -528,13 +528,24 @@ function setReactInputValue(input,value)""",
     mode_anchor = 'if(state==="ready"){card.append(textNode("p","workshop-state-copy","'
     # mode selector inserted right after the ready card opens (before ?????)
     mode_new = (
-        'if(state==="ready"){const modes=textNode("div","workshop-summary-list");'
-        '["' "\u7ee7\u7eed\u4e0a\u6b21" '","' "\u626b\u63cf\u65b0\u589e" '","' "\u5168\u90e8\u91cd\u8bd1" '"].forEach(label=>{modes.append(actionButton(label,()=>clickReact(label),true))});'
+        'if(state==="ready"){const modes=textNode("div","workshop-summary-list");const _pkg=window.__slgSelectionMeta?.packageName||"";if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(_pkg)){'
+        '["' "\u7ee7\u7eed\u4e0a\u6b21" '","' "\u626b\u63cf\u65b0\u589e" '","' "\u5168\u90e8\u91cd\u8bd1" '"].forEach(label=>{modes.append(actionButton(label,()=>clickReact(label),true))});}'
         'card.append(modes);card.append(textNode("p","workshop-state-copy","'
     )
     if runtime.count(mode_anchor) != 1:
         raise ValueError("Ready mode selector signature not found")
     runtime = runtime.replace(mode_anchor, mode_new, 1)
+
+    runtime = runtime.replace(
+        "card.append(textNode(\"p\",\"workshop-settings-status\",\"提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。\"));",
+        "if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(window.__slgSelectionMeta?.packageName||\"\"))card.append(textNode(\"p\",\"workshop-settings-status\",\"提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。\"));",
+        1,
+    )
+    runtime = runtime.replace(
+        "window.__slgHandleAndroidBack=()=>{",
+        "globalThis.__slgSrcLang??=`en`;globalThis.__slgDstLang??=`zh`;window.__slgHandleAndroidBack=()=>{",
+        1,
+    )
 
     return runtime
 
@@ -543,7 +554,7 @@ function setReactInputValue(input,value)""",
 
 def patch_translation_cache(js: str) -> str:
     old_state = 'var _o=`slg-translator-cache:`,vo={},yo=!1,bo=!1,bp=Promise.resolve();'
-    new_state = 'var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();'
+    new_state = 'var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();globalThis.__slgHasHistory=function(pkg){if(!pkg)return false;try{for(const[_k,_v]of Object.entries(vo)){if(_k.startsWith(`slg-file-v1:`)&&_v&&_v.pkg===pkg)return true}return false}catch{return false}};'
     if js.count(old_state) != 1:
         raise ValueError("Translation cache state signature not found")
     js = js.replace(old_state, new_state, 1)
@@ -742,7 +753,7 @@ async function Lo(e){'''
         "let _outs=[rs(o,l,_map,`None`),rs(o,l,_map,g)],_uniq=new Map;oe||_outs.unshift(rs(o,l,_map,y));"
         "for(let e of _outs)_uniq.set(e.outputPath,e);"
         "for(let e of _uniq.values())await Ne(e.outputPath,e.content),a.push({path:e.outputPath,content:e.content});"
-        "vo[_fk]={texts:l,translations:Array.from(_map.entries()),count:l.length,updatedAt:Date.now()},bo=!0,await wo(),delete vo[_fk];"
+        "vo[_fk]={texts:l,translations:Array.from(_map.entries()),count:l.length,updatedAt:Date.now(),pkg:window.__slgSelectionMeta?.packageName||``},bo=!0,await wo(),delete vo[_fk];"
         "t+=l.length,O(`  \u5df2\u5b8c\u6210\u6587\u4ef6\uff0c\u590d\u7528 ${l.length} \u6761\u8bd1\u6587`,`success`),ue({current:c+1,total:ae.length});return}"
     )
     if js.count(old_resume) != 1:
@@ -751,7 +762,7 @@ async function Lo(e){'''
 
     # Cache the raw translations + texts so resume can rebuild outputs.
     old_cache = "vo[_fk]={outputs:_fo,count:p,updatedAt:Date.now()}"
-    new_cache = "vo[_fk]={texts:l,translations:Array.from(f.entries()),count:p,updatedAt:Date.now()}"
+    new_cache = "vo[_fk]={texts:l,translations:Array.from(f.entries()),count:p,updatedAt:Date.now(),pkg:window.__slgSelectionMeta?.packageName||``}"
     if js.count(old_cache) != 1:
         raise ValueError("File cache write signature not found")
     js = js.replace(old_cache, new_cache, 1)
@@ -980,7 +991,7 @@ def patch_candidate_filter(js: str) -> str:
     js = js.replace(old_jo, new_jo, 1)
 
     old_yb = "{let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:Zo(r,n)}"
-    new_yb = "{let q=Qo(r);if(q!=null){let l=es(q);return l===`slgtranslated`||l===`none`?!1:!0}let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
+    new_yb = "{let q=Qo(r);if(q!=null){let l=es(q);if(l===`slgtranslated`)return!1;if(l===`none`)return!0;let _s=globalThis.__slgSrcLang||`en`,_d=globalThis.__slgDstLang||`zh`;return $o(_s).has(l)||$o(_d).has(l)?!0:!1}let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
     if js.count(old_yb) != 1:
         raise ValueError("Candidate filter Yo branch signature not found")
     js = js.replace(old_yb, new_yb, 1)

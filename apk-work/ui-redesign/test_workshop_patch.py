@@ -109,12 +109,17 @@ class WorkshopPatchContractTest(unittest.TestCase):
         candidate_filter = js[filter_start:filter_end]
         self.assertIn("slgtranslated", candidate_filter)
         self.assertIn("es(q)", candidate_filter)
+        self.assertIn("$o(_d).has(l)", candidate_filter)
+        self.assertIn("__slgDstLang", candidate_filter)
 
         contract = r"""
 function check(condition,label){if(!condition)throw new Error(label)}
 var qo=new Set(['png','jpg','jpeg','gif','webp','bmp','ico','mp3','wav','ogg','aac','flac','m4a','mp4','webm','avi','mkv','mov','ttf','otf','woff','woff2']);
+globalThis.__slgSrcLang='en';globalThis.__slgDstLang='zh';
 check(Yo({name:'assets/x-game/x-tl/x-chinese/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'chinese tl bucket must be a candidate');
-check(Yo({name:'assets/x-game/x-tl/x-german/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'german tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-english/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'english tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-german/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated german tl bucket must be excluded');
+check(Yo({name:'assets/x-game/x-tl/x-bosnian/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated bosnian tl bucket must be excluded');
 check(Yo({name:'assets/x-game/x-tl/x-slgtranslated/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'slgtranslated bucket must be excluded');
 check(Yo({name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},'auto','zh')===true,'story script must stay a candidate');
 """
@@ -125,6 +130,39 @@ check(Yo({name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},'auto','zh')===tru
             encoding="utf-8",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_recovery_modes_hidden_for_game_without_history(self):
+        """New games with no translation history must not show 继续上次/扫描新增
+        recovery modes; the ready state should only offer a fresh start."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        # The cache module must expose a history helper that reads per-file pkg.
+        self.assertIn("globalThis.__slgHasHistory", js)
+        self.assertIn("_v.pkg===pkg", js)
+        # Per-file cache writes must record the package for history detection.
+        self.assertIn("pkg:window.__slgSelectionMeta?.packageName", js)
+        # Ready state must guard the recovery mode buttons behind history.
+        self.assertIn("if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(_pkg))", js)
+
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();
+globalThis.__slgHasHistory=function(pkg){if(!pkg)return false;
+try{for(const[_k,_v]of Object.entries(vo)){
+if(_k.startsWith(`slg-file-v1:`)&&_v&&_v.pkg===pkg)return true}return false}catch{return false}};
+check(globalThis.__slgHasHistory('zitao.mbml')===false,'no history initially');
+vo['slg-file-v1:abc']={pkg:'zitao.mbml',texts:[],translations:[],count:0};
+check(globalThis.__slgHasHistory('zitao.mbml')===true,'history detected after file processed');
+check(globalThis.__slgHasHistory('other.pkg')===false,'other game still no history');
+"""
+        result = subprocess.run(
+            ["node", "-e", contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
     def test_build_files_filter_keeps_translation_buckets_except_slgtranslated(self):
         module = self.load_patch()
@@ -1474,6 +1512,8 @@ globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.option
 function findButton(label){clicked.push(label);return{dispatchEvent(){}}}
 function clickReact(label){const b=findButton(label);if(b){b.dispatchEvent(new MouseEvent(`click`,{bubbles:true,cancelable:true,view:window}));return true}return false}
 
+globalThis.__slgHasHistory=()=>true;
+window.__slgSelectionMeta={packageName:`zitao.mbml`};
 const readyBody=renderStateBody(`ready`,{fileName:`Game.apk`,count:`12`,sessionRestoredAt:0});
 const readyButtons=[];
 function visit(node){if(!node)return;if(node.tag===`button`)readyButtons.push(node);for(const child of node.children||[])visit(child)}
@@ -1573,6 +1613,7 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
             "  {name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-ch1ep1.rpy',fileType:'rpy'},\n"
             "  {name:'assets/x-game/x-tl/x-chinese/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-tl/x-english/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-tl/x-german/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-tl/x-slgtranslated/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-gui.rpyc',fileType:'rpyc'},\n"
@@ -1585,7 +1626,8 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
             "check(result.some(e=>e.name.includes(`x-00gamemenu.rpyc`)),`engine common kept`);\n"
             "check(result.every(e=>e.fileType===`rpyc`),`compiled variant wins`);\n"
             "check(result.some(e=>e.name.includes(`x-tl/x-chinese/x-ch1ep1.rpyc`)),`chinese tl bucket kept as corpus`);\n"
-            "check(result.some(e=>e.name.includes(`x-tl/x-german/x-ch1ep1.rpyc`)),`german tl bucket kept as corpus`);\n"
+            "check(result.some(e=>e.name.includes(`x-tl/x-english/x-ch1ep1.rpyc`)),`english tl bucket kept as corpus`);\n"
+            "check(result.every(e=>!e.name.includes(`x-tl/x-german`)),`unrelated german tl bucket excluded`);\n"
             "check(result.every(e=>!e.name.includes(`x-slgtranslated`)),`slgtranslated bucket excluded`);\n"
             "check(result.some(e=>e.name.includes(`x-ch1ep1.rpyc`)),`story kept`);\n"
             "check(result.some(e=>e.name.includes(`x-special.rpyc`)),`special kept`)\n"
