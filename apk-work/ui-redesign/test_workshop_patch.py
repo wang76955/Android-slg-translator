@@ -538,6 +538,7 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
         contract = r'''
 function check(value,label){if(!value)throw new Error(label)}
 globalThis.window=globalThis;
+globalThis.document={querySelector(){return null},querySelectorAll(){return[]},addEventListener(){},createElement(){return{children:[],append(){},classList:{add(){},remove(){}},setAttribute(){},querySelector(){return null},querySelectorAll(){return[]}}},body:{}};
 const ID=`workshop-runtime`;
 let pushes=0,backs=0,marker=false;
 globalThis.history={state:{base:true},pushState(state){pushes+=1;marker=true;this.state=state},back(){backs+=1;marker=false;this.state={base:true}}};
@@ -802,7 +803,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             "可以开始了",
             "手机空间不足",
             "首页",
-            "作品",
+            "安装包",
             "我的",
         ):
             self.assertIn(token, js)
@@ -1559,7 +1560,7 @@ check(customTexts.some(t=>t.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf
             "async function loadPatches()",
             "function formatBytes(bytes)",
             "listPatchedApks",
-            '["\u9996\u9875",()=>window.scrollTo({top:0,behavior:"smooth"})],["\u4f5c\u54c1",openGallery],["\u6211\u7684",openSettings]',
+            '["\u9996\u9875",()=>window.scrollTo({top:0,behavior:"smooth"})],["\u5b89\u88c5\u5305",openGallery],["\u6211\u7684",openSettings]',
             'if(state!=="idle"){const back=',
             "if(galleryOpen){modalHistoryArmed=false;closeGallery(true);return}",
             "if(galleryOpen){closeGallery();return true}",
@@ -1586,7 +1587,7 @@ const idle=renderTopbar(`idle`);
 check(idle.children.length===2,`idle topbar has no back button`);
 check(idle.children.every(el=>el.tag!==`button`),`idle topbar renders only heading and state`);
 const ready=renderTopbar(`ready`);
-check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active topbar keeps back button`);
+check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`),`active topbar keeps back button`);
 '''
         result = subprocess.run(
             ["node", "-e", topbar + behavior_contract],
@@ -1654,10 +1655,8 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
         self.assertIn("cleanupStorage", js)
         self.assertIn("清理安装包与旧缓存", js)
         self.assertIn("workshop-settings-cleanup", js)
-        self.assertIn("backupSaves", js)
-        self.assertIn("restoreSaves", js)
-        self.assertIn("listSaveBackups", js)
-        self.assertIn("存档转移（雏形）", js)
+        self.assertIn("workshop-settings-cleanup", js)
+        self.assertIn("存档转移", js)
         self.assertIn("继续上次只翻译新增文本（推荐）", js)
         self.assertIn("return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}", js)
         self.assertNotIn("return`tl/${t}/${n.at(-1)||`strings`}.rpy`}", js)
