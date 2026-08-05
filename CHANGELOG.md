@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.5] - 2026-08-05
+
+### Added
+
+- Save transfer and save import are now separate settings pages with independent game selectors
+- Save the selected game's current save and share it as a downloadable archive
+- Import shared save ZIP archives from the Downloads directory
+- Delete save backups and imported ZIP archives from the UI
+- Custom launcher icon set for the workshop APK
+
+### Changed
+
+- Removed the redundant backup-current-save button to simplify the save transfer page
+
+### Fixed
+
+- Old UI flash and automatic ready-state after clearing the app from the background
+- Archive list now reflects all discovered save ZIP files
+
 ## [1.0.4] - 2026-08-04
 
 ### Fixed
