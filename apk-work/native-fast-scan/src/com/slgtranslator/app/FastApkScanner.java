@@ -91,10 +91,19 @@ public final class FastApkScanner {
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
                     StringBuilder out = new StringBuilder();
-                    for (String text : RpycTextExtractor.extractTexts(bytes)) {
+                    boolean translationBucket = entryName.contains("/x-tl/")
+                            || entryName.contains("/tl/");
+                    List<String> texts = translationBucket
+                            ? RpycTextExtractor.extractTexts(bytes, true)
+                            : RpycTextExtractor.extractTexts(bytes);
+                    for (String text : texts) {
                         // The line protocol splits on newlines, so embedded
                         // control characters are escaped and unescaped in JS.
-                        String escaped = text.replace("\n", "\\n")
+                        // Escape backslashes first so a literal "\n" in the
+                        // original string stays distinguishable from a real
+                        // newline after the JS side unescapes the protocol.
+                        String escaped = text.replace("\\", "\\\\")
+                                .replace("\n", "\\n")
                                 .replace("\r", "\\r")
                                 .replace("\t", "\\t");
                         out.append("RPYC_STRING\t").append(escaped).append('\n');

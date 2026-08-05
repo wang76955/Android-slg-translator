@@ -347,19 +347,20 @@ public final class TranslationCompiler {
         p.write(0x28); // MARK
         writeShort(p, "linenumber");
         writeInt(p, 1);
-        writeShort(p, "col_offset");
-        writeInt(p, 0);
         writeShort(p, "filename");
         writeString(p, filename);
-        writeShort(p, "name_version");
-        writeInt(p, 5221736);
-        writeShort(p, "name_serial");
-        writeInt(p, 1417);
+        writeShort(p, "name");
+        writeString(p, filename);
+        writeInt(p, 1784316460);
+        writeInt(p, 1416);
+        p.write(0x87); // TUPLE3 (name)
+        writeShort(p, "next");
+        p.write(0x4e); // NONE
         writeShort(p, "block");
         p.write(0x5d); // EMPTY_LIST
         p.write(0x28); // MARK
         int line = 3;
-        int serial = 206;
+        int serial = 1417;
         for (String[] pair : pairs) {
             writeGlobal(p, "renpy.ast", "TranslateString");
             p.write(0x29);
@@ -369,14 +370,15 @@ public final class TranslationCompiler {
             p.write(0x28);
             writeShort(p, "linenumber");
             writeInt(p, line);
-            writeShort(p, "col_offset");
-            writeInt(p, 0);
             writeShort(p, "filename");
             writeString(p, filename);
-            writeShort(p, "name_version");
-            writeInt(p, 317776055);
-            writeShort(p, "name_serial");
+            writeShort(p, "name");
+            writeString(p, filename);
+            writeInt(p, 1784316460);
             writeInt(p, serial++);
+            p.write(0x87); // TUPLE3 (name)
+            writeShort(p, "next");
+            p.write(0x4e); // NONE
             writeShort(p, "language");
             writeString(p, language);
             writeShort(p, "old");
@@ -408,14 +410,17 @@ public final class TranslationCompiler {
         p.write(0x28);
         writeShort(p, "linenumber");
         writeInt(p, line);
-        writeShort(p, "col_offset");
-        writeInt(p, 0);
         writeShort(p, "filename");
         writeString(p, filename);
-        writeShort(p, "name_version");
-        writeInt(p, 5221736);
-        writeShort(p, "name_serial");
+        writeShort(p, "expression");
+        p.write(0x4e); // NONE
+        writeShort(p, "name");
+        writeString(p, filename);
+        writeInt(p, 1784316460);
         writeInt(p, serial);
+        p.write(0x87); // TUPLE3 (name)
+        writeShort(p, "next");
+        p.write(0x4e); // NONE
         p.write(0x75); // SETITEMS
         p.write(0x86); // TUPLE2
         p.write(0x62); // BUILD

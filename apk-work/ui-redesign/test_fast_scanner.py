@@ -5,6 +5,8 @@ import tempfile
 import unittest
 import struct
 from pathlib import Path
+import io
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +21,35 @@ CAPACITOR_DEX = ROOT / "apk-work" / "extracted" / "classes3.dex"
 JAVA_HOME = ROOT / ".tools" / "jdk-17" / "jdk-17.0.19+10"
 JAVA = JAVA_HOME / "bin" / "java.exe"
 JAVAC = JAVA_HOME / "bin" / "javac.exe"
+
+THIRD_PARTY = FAST_SCAN / "third-party"
+
+_THIRD_PARTY_CLASSPATH = None
+
+def third_party_classpath() -> str:
+    """Return a javac classpath mirroring build_fast_scanner.py."""
+    global _THIRD_PARTY_CLASSPATH
+    if _THIRD_PARTY_CLASSPATH:
+        return _THIRD_PARTY_CLASSPATH
+    root = Path(tempfile.mkdtemp(prefix="slg-third-party-classpath-"))
+    entries = []
+    for aar in sorted(THIRD_PARTY.glob("*.aar")):
+        out = root / aar.stem
+        out.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(aar) as archive:
+            if "classes.jar" not in archive.namelist():
+                continue
+            with zipfile.ZipFile(io.BytesIO(archive.read("classes.jar"))) as jar:
+                for name in jar.namelist():
+                    if name.endswith(".class") and not name.startswith(("kotlin/", "kotlinx/", "META-INF/")):
+                        target = out / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(jar.read(name))
+        if any(out.rglob("*.class")):
+            entries.append(str(out))
+    entries.extend(str(jar) for jar in sorted(THIRD_PARTY.glob("*.jar")))
+    _THIRD_PARTY_CLASSPATH = os.pathsep.join(entries)
+    return _THIRD_PARTY_CLASSPATH
 
 RPC2_MAGIC = b"RENPY RPC2"
 
@@ -72,6 +103,119 @@ def build_menu_fixture_rpyc() -> bytes:
     table += struct.pack("<III", 0, 0, 0)
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
+
+
+def build_source_call_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle embeds source strings containing
+    message-style and Ren'Py preference-style function calls. The extractor
+    must pull the string-literal arguments (phone message text, preference
+    labels) while ignoring variable arguments, empty strings and paths."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Menu") + b"\x93"  # STACK_GLOBAL
+    p += b"\x29\x81\x4e\x7d\x28"  # EMPTY_TUPLE NEWOBJ NONE EMPTY_DICT MARK
+    p += pickle_short("linenumber") + pickle_int1(1)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what") + pickle_short("Hello, world!")
+    # Source payloads: message-style calls (phone) and Ren'Py preference calls.
+    p += pickle_short('send_phone_message("Aine", "Hello there.", "aine_dm")')
+    p += pickle_short('send_phone_message(sender, message_text, channel_name)')
+    p += pickle_short('send_phone_message("Aine", "images/ch2ep1_1042.jpg", "aine_dm", 2)')
+    p += pickle_short("_VolumePreference(u\"Music Volume\", 'music', 'config.has_music')")
+    p += pickle_short("_SliderPreference(u'Auto-Forward Time', \"afm_time\", 40, 'config.has_afm')")
+    p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
+
+def build_markup_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle contains Say nodes whose `what`
+    values include Ren'Py markup tags with '/' characters ({/i}, {/b}).
+    The extractor must NOT treat these as file paths."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Say") + b"\x93"  # STACK_GLOBAL
+    p += b"\x29\x81\x4e\x7d\x28"  # EMPTY_TUPLE NEWOBJ NONE EMPTY_DICT MARK
+    p += pickle_short("linenumber") + pickle_int1(1)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what")
+    p += pickle_short("I like you a lot. You are good at causing some {i}activity{/i} inside me.")
+    p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
+    # Second Say with bold markup and a closing slash
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Say") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("linenumber") + pickle_int1(2)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what")
+    p += pickle_short("No, {b}kill{/b} her...")
+    p += b"\x75\x86\x62"
+    # Third Say with a real path (must be filtered)
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Say") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("linenumber") + pickle_int1(3)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what")
+    p += pickle_short("images/scenes/ch1ep1_001.png")
+    p += b"\x75\x86\x62"
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    pickle_bytes = bytes(p)
+    import zlib
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+def build_translate_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle contains a TranslateString node with
+    old/new keys plus a Say node with a translated what. The old-only extractor
+    must return only the English old key, never the translated what/new."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Menu") + b"\x93"  # STACK_GLOBAL
+    p += b"\x29\x81\x4e\x7d\x28"  # EMPTY_TUPLE NEWOBJ NONE EMPTY_DICT MARK
+    p += pickle_short("linenumber") + pickle_int1(1)
+    p += pickle_short("filename") + pickle_short("game/tl/chinese/fixture.rpy")
+    p += pickle_short("what") + pickle_short("English dialogue")
+    p += pickle_short("old") + pickle_short("English original")
+    p += pickle_short("new") + pickle_short("\u4e2d\u6587\u539f\u6587")
+    p += pickle_short("text") + pickle_short("English screen text")
+    p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
 
 def java_block_after(source, marker):
@@ -279,10 +423,12 @@ public final class RenPyExtensionHarness {
             harness_path.write_text(harness, "utf-8")
             classes.mkdir()
             subprocess.run(
-                [
-                    str(JAVAC),
-                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
-                    "-d", str(classes),
+               [
+                   str(JAVAC),
+                   "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                   "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
                     str(harness_path),
@@ -496,6 +642,8 @@ public final class WorkshopBackHandlerHarness {
                     str(JAVAC),
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     str(handler),
                     str(harness_path),
@@ -565,6 +713,8 @@ public final class WorkshopBackHandlerHarness {
             "InstalledAppSource;->listInstalledApps",
             "selectInstalledApp",
             "InstalledAppSource;->selectInstalledApp",
+            "listSaveGameApps",
+            "InstalledAppSource;->listSaveGameApps",
         ):
             self.assertIn(token, builder)
         self.assertIn("bridge_counts == [0] * len(INSTALLED_APP_METHODS)", builder)
@@ -573,6 +723,21 @@ public final class WorkshopBackHandlerHarness {
         self.assertIn("Expected exactly one listApkEntries method", builder)
         self.assertEqual(builder.count('".method public final listInstalledApps('), 2)
         self.assertEqual(builder.count('".method public final selectInstalledApp('), 2)
+        self.assertEqual(builder.count('".method public final listSaveGameApps('), 2)
+
+    def test_save_game_list_scans_renpy_save_dirs_without_all_apps(self):
+        source = INSTALLED_APPS.read_text("utf-8")
+        self.assertIn("public static void listSaveGameApps(", source)
+        listing = java_block_after(source, "private static void listSaveGameAppsOnWorker(")
+        self.assertIn('new File(android.os.Environment.getExternalStorageDirectory(), "Documents")', listing)
+        self.assertIn('new File(documents, "RenPy_Saves")', listing)
+        self.assertIn('packageName.contains(".")', listing)
+        self.assertNotIn("queryLauncherApps", listing)
+        self.assertNotIn("queryIntentActivities", listing)
+        self.assertNotIn("QUERY_ALL_PACKAGES", source)
+        builder = BUILDER.read_text("utf-8")
+        self.assertIn(".method public final listSaveGameApps(Lcom/getcapacitor/PluginCall;)V", builder)
+        self.assertIn("Lcom/slgtranslator/app/InstalledAppSource;->listSaveGameApps", builder)
 
     def test_installed_app_contract_detects_copy_buffer_regression(self):
         source = INSTALLED_APPS.read_text("utf-8")
@@ -688,6 +853,8 @@ public final class CacheOwnershipHarness {
                     str(JAVAC),
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     str(INSTALLED_APPS),
                     str(harness_path),
@@ -747,7 +914,10 @@ public final class CacheOwnershipHarness {
         helper_code = re.sub(r"\s+", "", dump(classes7, disassemble=True))
         self.assertEqual(plugin_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'selectInstalledApp'"), 1)
+        self.assertEqual(plugin_dump.count("name          : 'listSaveGameApps'"), 1)
         self.assertEqual(plugin_dump.count("name          : 'enableWorkshopBackHandling'"), 1)
+        self.assertEqual(plugin_dump.count("name          : 'listSaveArchives'"), 1)
+        self.assertEqual(plugin_dump.count("name          : 'importSaveBackup'"), 1)
         self.assertIn(
             "Lcom/getcapacitor/Plugin;.getActivity:()"
             "Landroidx/appcompat/app/AppCompatActivity;",
@@ -763,6 +933,7 @@ public final class CacheOwnershipHarness {
         )
         self.assertEqual(helper_dump.count("name          : 'listInstalledApps'"), 1)
         self.assertEqual(helper_dump.count("name          : 'selectInstalledApp'"), 1)
+        self.assertEqual(helper_dump.count("name          : 'listSaveGameApps'"), 1)
         self.assertEqual(
             helper_dump.count("Class descriptor  : 'Lcom/slgtranslator/app/WorkshopBackHandler;'"),
             1,
@@ -933,6 +1104,8 @@ public final class MenuExtractorHarness {
                     str(JAVAC),
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
                     str(harness_path),
@@ -947,6 +1120,197 @@ public final class MenuExtractorHarness {
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+
+    def test_rpyc_extractor_extracts_source_call_argument_texts(self):
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        self.assertIn("collectSourceCallTexts", source)
+
+        fixture = build_source_call_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class SourceCallHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("Hello, world!"), "dialogue must still be extracted");
+        require(set.contains("Hello there."), "phone message text must be extracted");
+        require(set.contains("Music Volume"), "preference label must be extracted");
+        require(set.contains("Auto-Forward Time"), "slider preference label must be extracted");
+        require(!set.contains("sender"), "variable argument must not be extracted");
+        require(!set.contains("message_text"), "variable argument must not be extracted");
+        require(!set.contains("images/ch2ep1_1042.jpg"), "path argument must not be extracted");
+        require(!set.contains("aine_dm"), "channel argument must not be extracted");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="source-call-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "SourceCallHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SourceCallHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_extractor_old_only_mode_skips_translated_what_and_new(self):
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        self.assertIn("onlyOld", source)
+
+        fixture = build_translate_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class OldOnlyHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<String> texts = RpycTextExtractor.extractTexts(bytes, true);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("English original"), "old key must be extracted");
+        require(!set.contains("English dialogue"), "translated what must not be extracted");
+        require(!set.contains("English screen text"), "screen text must not be extracted");
+        require(!set.contains("\u4e2d\u6587\u539f\u6587"), "new value must not be extracted");
+        // Full mode keeps dialogue and screen text as before.
+        List<String> full = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> fullSet = new java.util.HashSet<>(full);
+        require(fullSet.contains("English dialogue"), "full mode keeps dialogue");
+        require(fullSet.contains("English screen text"), "full mode keeps screen text");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="old-only-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "OldOnlyHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "OldOnlyHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    
+    def test_rpyc_extractor_keeps_renpy_markup_dialogue(self):
+        """Dialogue containing Ren'Py markup tags like {/i} and {/b} must
+        not be rejected as file paths.  The '/' inside markup tags is not
+        a path separator."""
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        self.assertIn("pathCheck", source, "isUserText must strip markup before path check")
+
+        fixture = build_markup_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class MarkupExtractorHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("I like you a lot. You are good at causing some {i}activity{/i} inside me."),
+                "italic markup dialogue must be extracted");
+        require(set.contains("No, {b}kill{/b} her..."),
+                "bold markup dialogue must be extracted");
+        require(!set.contains("images/scenes/ch1ep1_001.png"),
+                "real file path must still be filtered");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="markup-extractor-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "MarkupExtractorHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "MarkupExtractorHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_fast_scanner_reads_translation_entries_in_old_only_mode(self):
+        scanner = SCANNER.read_text("utf-8")
+        self.assertIn("extractTexts(bytes, true)", scanner)
+        self.assertIn("x-tl", scanner)
 
     def test_cleanup_storage_keeps_newest_patch_and_selection_source(self):
         cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
@@ -1018,6 +1382,8 @@ public final class CleanupHarness {
                     str(JAVAC),
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
                     str(harness_path),
@@ -1032,6 +1398,301 @@ public final class CleanupHarness {
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+
+    def test_cleanup_storage_deletes_other_games_patch_by_package(self):
+        """Patch APKs whose package differs from the selected game are
+        deleted (their patches are already installed); the selected game's
+        own patch is kept."""
+        cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
+        source = cleanup.read_text("utf-8")
+        self.assertIn("packageName", source)
+        self.assertIn("packageNameOf", source)
+        harness = r"""
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.CleanupSupport;
+import java.io.File;
+
+public final class CleanupPackageHarness {
+    static final class FakeContext extends Context {
+        File external;
+        @Override public File getExternalFilesDir(String type) { return external; }
+    }
+    static final class CapturingCall extends PluginCall {
+        String keepUri, packageName;
+        String rejected;
+        @Override public String getString(String key) {
+            if ("keepUri".equals(key)) return keepUri;
+            if ("packageName".equals(key)) return packageName;
+            return null;
+        }
+        @Override public void resolve(JSObject value) {}
+        @Override public void reject(String message) { rejected = message; }
+    }
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File installed = new File(base, "installed-apks"); installed.mkdirs();
+        File keep = new File(installed, "keep.apk"); require(keep.createNewFile(), "create keep");
+        File output = new File(base, "SLG-Translator-Output"); output.mkdirs();
+        File patchOther = new File(output, "patch-other.apk");
+        writeManifest(patchOther, "com.other.game");
+        File patchCurrent = new File(output, "patch-current.apk");
+        writeManifest(patchCurrent, "com.current.game");
+        FakeContext context = new FakeContext();
+        context.external = base;
+        CapturingCall call = new CapturingCall();
+        call.keepUri = keep.toURI().toString();
+        call.packageName = "com.current.game";
+        CleanupSupport.cleanupStorage(context, call);
+        require(call.rejected == null, "cleanup must resolve: " + call.rejected);
+        require(!patchOther.exists(), "other game patch must be deleted");
+        require(patchCurrent.exists(), "current game patch must be kept");
+        require(keep.exists(), "current selection source must be kept");
+    }
+    static void writeManifest(File apk, String pkg) throws Exception {
+        java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(apk));
+        out.putNextEntry(new java.util.zip.ZipEntry("AndroidManifest.xml"));
+        byte[] pkgBytes = pkg.getBytes("UTF-16LE");
+        out.write(new byte[]{1, 0, 2, 0});
+        out.write(pkgBytes);
+        out.write(new byte[]{0, 0});
+        out.close();
+    }
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="cleanup-pkg-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CleanupPackageHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "CleanupPackageHarness", str(fixture)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+
+    def test_cleanup_storage_removes_interrupted_partials_in_installed_apks(self):
+        """Cleanup must remove .partial/.tmp leftovers inside installed-apks."""
+        cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"
+        self.assertTrue(cleanup.exists(), "CleanupSupport.java must exist")
+        harness = r"""
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.CleanupSupport;
+import java.io.File;
+
+public final class CleanupPartialHarness {
+    static final class FakeContext extends Context {
+        File external;
+        @Override public File getExternalFilesDir(String type) { return external; }
+    }
+    static final class CapturingCall extends PluginCall {
+        String keepUri;
+        String rejected;
+        @Override public String getString(String key) {
+            return "keepUri".equals(key) ? keepUri : null;
+        }
+        @Override public void resolve(JSObject value) {}
+        @Override public void reject(String message) { rejected = message; }
+    }
+
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File installed = new File(base, "installed-apks"); installed.mkdirs();
+        File keep = new File(installed, "keep.apk"); require(keep.createNewFile(), "create keep");
+        File stalePartial = new File(installed, "keep.apk.uuid.partial"); require(stalePartial.createNewFile(), "create partial");
+        File staleTmp = new File(installed, "stale.tmp"); require(staleTmp.createNewFile(), "create tmp");
+        File output = new File(base, "SLG-Translator-Output"); output.mkdirs();
+        FakeContext context = new FakeContext();
+        context.external = base;
+        CapturingCall call = new CapturingCall();
+        call.keepUri = keep.toURI().toString();
+        CleanupSupport.cleanupStorage(context, call);
+        require(call.rejected == null, "cleanup must resolve: " + call.rejected);
+        require(keep.exists(), "current selection source must be kept");
+        require(!stalePartial.exists(), "interrupted partial copy must be removed");
+        require(!staleTmp.exists(), "interrupted tmp file must be removed");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="cleanup-partial-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CleanupPartialHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "CleanupPartialHarness", str(fixture)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_protocol_escapes_backslashes_before_newlines(self):
+        """The RPYC_STRING bridge must not conflate literal backslash-n with a real newline."""
+        scanner = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
+        source = scanner.read_text("utf-8")
+        escape_start = source.index("String escaped = text.replace")
+        escape_block = source[escape_start:escape_start + 500]
+        backslash_idx = escape_block.index('text.replace("\\\\", "\\\\\\\\")')
+        newline_idx = escape_block.index('.replace("\\n", "\\\\n")')
+        self.assertLess(backslash_idx, newline_idx, "backslash must be escaped before newline")
+
+    def test_save_patched_apk_failure_cleans_media_store_entry(self):
+        """A failed MediaStore copy must remove the half-written download row."""
+        install = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstallSupport.java"
+        self.assertTrue(install.exists(), "InstallSupport.java must exist")
+        harness = r"""
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
+import android.net.Uri;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.InstallSupport;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+
+public final class InstallSaveFailureHarness {
+    static final class FakeUri extends Uri {}
+    static final class FakeResolver extends ContentResolver {
+        int deleteCalls = 0;
+        @Override public Uri insert(Uri uri, ContentValues values) { return new FakeUri(); }
+        @Override public OutputStream openOutputStream(Uri uri) {
+            return new OutputStream() {
+                @Override public void write(int b) throws IOException { throw new IOException("disk full"); }
+            };
+        }
+        @Override public int delete(Uri uri, String selection, String[] selectionArgs) {
+            deleteCalls++;
+            return 1;
+        }
+    }
+    static final class FakeContext extends Context {
+        FakeResolver resolver;
+        @Override public ContentResolver getContentResolver() { return resolver; }
+    }
+    static final class CapturingCall extends PluginCall {
+        String rejected;
+        @Override public void resolve(JSObject value) {}
+        @Override public void reject(String message) { rejected = message; }
+        String requestedPath;
+        @Override public String getString(String key) {
+            return "path".equals(key) ? requestedPath : null;
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        File source = new File(args[0]);
+        try (FileOutputStream out = new FileOutputStream(source)) {
+            out.write(new byte[131072]);
+        }
+        FakeContext context = new FakeContext();
+        context.resolver = new FakeResolver();
+        CapturingCall call = new CapturingCall();
+        call.requestedPath = source.getAbsolutePath();
+        InstallSupport.savePatchedApkToDownloads(context, call);
+        require(call.rejected != null, "copy failure must reject the call");
+        require(context.resolver.deleteCalls >= 1, "failed media store copy must delete the inserted row");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="install-save-failure-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "InstallSaveFailureHarness.java"
+            classes = temporary_path / "classes"
+            source = temporary_path / "patch.apk"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "InstallSaveFailureHarness", str(source)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_package_installer_session_bridge_is_injected(self):
+        """installApk must delegate to PackageInstallerSupport.installViaSession
+        so multi-GB patched APKs install without OPPO FileProvider corruption."""
+        support = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "PackageInstallerSupport.java"
+        self.assertTrue(support.exists(), "PackageInstallerSupport.java must exist")
+        source = support.read_text("utf-8")
+        for token in ("installViaSession", "PackageInstaller.SessionParams", "MODE_FULL_INSTALL",
+                      "session.openWrite", "session.commit", "ACTION_PACKAGE_INSTALLED"):
+            self.assertIn(token, source)
+        builder = BUILDER.read_text("utf-8")
+        self.assertIn("INSTALL_APK_SIGNATURE", builder)
+        self.assertIn("INSTALL_APK_PATTERN", builder)
+        self.assertIn("PackageInstallerSupport;->installViaSession", builder)
+        self.assertIn("installViaSession(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V", builder)
+
 
     def test_save_transfer_copies_and_counts_files(self):
         transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
@@ -1084,6 +1745,8 @@ public final class SaveTransferHarness {
                     str(JAVAC),
                     "-source", "8", "-target", "8", "-encoding", "UTF-8",
                     "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
                     *map(str, stubs),
                     *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
                     str(harness_path),
@@ -1099,6 +1762,297 @@ public final class SaveTransferHarness {
                 stderr=subprocess.PIPE,
             )
 
+
+    def test_save_export_zips_directory_and_counts_files(self):
+        transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
+        self.assertTrue(transfer.exists(), "SaveTransfer.java must exist")
+        builder = BUILDER.read_text("utf-8")
+        for token in ("SAVE_EXPORT_SIGNATURE", "SaveTransfer;->exportSavesToDownloads"):
+            self.assertIn(token, builder)
+        harness = r"""
+import com.slgtranslator.app.SaveTransfer;
+import java.io.File;
+import java.lang.reflect.Method;
+import java.util.zip.ZipFile;
+
+public final class SaveExportHarness {
+    public static void main(String[] args) throws Exception {
+        File source = new File(args[0]);
+        File zip = new File(args[1]);
+        File nested = new File(source, "game"); nested.mkdirs();
+        File slot = new File(source, "auto-1.save"); require(slot.createNewFile(), "create save");
+        File inner = new File(nested, "meta.bin"); require(inner.createNewFile(), "create meta");
+        Method zipTree = SaveTransfer.class.getDeclaredMethod("zipDirectory", File.class, File.class);
+        zipTree.setAccessible(true);
+        int zipped = (Integer) zipTree.invoke(null, source, zip);
+        require(zipped == 2, "two files must be zipped: " + zipped);
+        try (ZipFile archive = new ZipFile(zip)) {
+            require(archive.getEntry("auto-1.save") != null, "save slot zipped");
+            require(archive.getEntry("game/meta.bin") != null, "nested file zipped");
+        }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="save-export-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "SaveExportHarness.java"
+            classes = temporary_path / "classes"
+            source_dir = temporary_path / "source"
+            zip_file = temporary_path / "backup.zip"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            source_dir.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SaveExportHarness", str(source_dir), str(zip_file)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_save_share_backup_bridge_contract(self):
+        transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
+        self.assertTrue(transfer.exists(), "SaveTransfer.java must exist")
+        builder = BUILDER.read_text("utf-8")
+        for token in ("SAVE_SHARE_SIGNATURE", "SaveTransfer;->shareSaveBackup"):
+            self.assertIn(token, builder)
+        harness = r"""
+import com.slgtranslator.app.SaveTransfer;
+import android.content.Context;
+import com.getcapacitor.PluginCall;
+import java.lang.reflect.Method;
+
+public final class SaveShareHarness {
+    public static void main(String[] args) throws Exception {
+        Method share = SaveTransfer.class.getDeclaredMethod("shareSaveBackup", Context.class, PluginCall.class);
+        require(share != null, "shareSaveBackup bridge method must exist");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="save-share-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "SaveShareHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SaveShareHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_save_import_extracts_shared_archive_safely(self):
+        transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
+        self.assertTrue(transfer.exists(), "SaveTransfer.java must exist")
+        source = transfer.read_text("utf-8")
+        for token in (
+            "listSaveArchives", "importSaveBackup", "collectArchives", "extractZip",
+            "packageFromName", "Environment.getExternalStoragePublicDirectory",
+            "name.contains(\"..\")", "canonicalTarget.getPath().startsWith(rootPrefix)",
+            "deleteSaveArchive", "invalid save archive path",
+        ):
+            self.assertIn(token, source)
+        builder = BUILDER.read_text("utf-8")
+        for token in (
+            "SAVE_ARCHIVES_SIGNATURE", "SAVE_IMPORT_SIGNATURE",
+            "SaveTransfer;->listSaveArchives", "SaveTransfer;->importSaveBackup",
+            "SAVE_ARCHIVE_DELETE_SIGNATURE", "SaveTransfer;->deleteSaveArchive",
+        ):
+            self.assertIn(token, builder)
+        harness = r"""
+import com.slgtranslator.app.SaveTransfer;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+public final class SaveImportHarness {
+    public static void main(String[] args) throws Exception {
+        File zipFile = new File(args[0]);
+        File dest = new File(args[1]);
+        File unsafeZip = new File(args[2]);
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(zipFile))) {
+            write(zip, "com.example.game/auto-1.save", "slot");
+            write(zip, "com.example.game/game/meta.bin", "meta");
+        }
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(unsafeZip))) {
+            write(zip, "../evil.txt", "bad");
+        }
+        Method extract = SaveTransfer.class.getDeclaredMethod("extractZip", File.class, File.class);
+        extract.setAccessible(true);
+        int count = (Integer) extract.invoke(null, zipFile, dest);
+        require(count == 2, "extracted file count");
+        require(new File(dest, "auto-1.save").isFile(), "root stripped");
+        require(new File(dest, "game/meta.bin").isFile(), "nested preserved");
+        File unsafeDest = new File(dest, "unsafe");
+        try {
+            extract.invoke(null, unsafeZip, unsafeDest);
+            require(false, "unsafe zip must be rejected");
+        } catch (InvocationTargetException error) {
+            require(error.getCause() instanceof IOException, "unsafe zip rejection reason");
+        }
+        Method packageName = SaveTransfer.class.getDeclaredMethod("packageFromName", String.class);
+        packageName.setAccessible(true);
+        Object parsed = packageName.invoke(null, "com.example.game-20260805-120000.zip");
+        require("com.example.game".equals(parsed), "package parsed from shared archive name");
+        Object shared = packageName.invoke(null, "com.example.game-20260805-120000-20260806-130000.zip");
+        require("com.example.game".equals(shared), "package parsed from shared backup name with two stamps");
+        Object renamed = packageName.invoke(null, "renamed.zip");
+        require(renamed == null, "renamed archive falls back to manual game selection");
+    }
+
+    private static void write(ZipOutputStream zip, String name, String content) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(content.getBytes("UTF-8"));
+        zip.closeEntry();
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="save-import-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "SaveImportHarness.java"
+            classes = temporary_path / "classes"
+            zip_file = temporary_path / "shared.zip"
+            dest_dir = temporary_path / "dest"
+            unsafe_zip = temporary_path / "unsafe.zip"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SaveImportHarness", str(zip_file), str(dest_dir), str(unsafe_zip)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+
+    def test_delete_backup_removes_directory_tree(self):
+        transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"
+        self.assertTrue(transfer.exists(), "SaveTransfer.java must exist")
+        builder = BUILDER.read_text("utf-8")
+        for token in ("SAVE_DELETE_SIGNATURE", "SaveTransfer;->deleteBackup"):
+            self.assertIn(token, builder)
+        harness = r"""
+import com.slgtranslator.app.SaveTransfer;
+import android.content.Context;
+import com.getcapacitor.PluginCall;
+import java.io.File;
+import java.lang.reflect.Method;
+
+public final class SaveDeleteHarness {
+    public static void main(String[] args) throws Exception {
+        File source = new File(args[0]);
+        File dest = new File(args[1]);
+        File nested = new File(source, "game"); nested.mkdirs();
+        File slot = new File(source, "auto-1.save"); require(slot.createNewFile(), "create save");
+        File inner = new File(nested, "meta.bin"); require(inner.createNewFile(), "create meta");
+        Method copyTree = SaveTransfer.class.getDeclaredMethod("copyTree", File.class, File.class);
+        copyTree.setAccessible(true);
+        Method deleteTree = SaveTransfer.class.getDeclaredMethod("deleteTree", File.class);
+        deleteTree.setAccessible(true);
+        require(SaveTransfer.class.getDeclaredMethod("deleteBackup", Context.class, PluginCall.class) != null,
+            "deleteBackup bridge method must exist");
+        int copied = (Integer) copyTree.invoke(null, source, dest);
+        require(copied == 2, "two files must be copied: " + copied);
+        int deleted = (Integer) deleteTree.invoke(null, dest);
+        require(deleted == 2, "two files must be deleted: " + deleted);
+        require(!dest.exists(), "backup directory must be removed");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="save-delete-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "SaveDeleteHarness.java"
+            classes = temporary_path / "classes"
+            source_dir = temporary_path / "source"
+            dest_dir = temporary_path / "dest"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            source_dir.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SaveDeleteHarness", str(source_dir), str(dest_dir)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
 
 if __name__ == "__main__":

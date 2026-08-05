@@ -4,6 +4,9 @@ import hashlib
 from pathlib import Path
 import re
 
+from patch_local_ui import enhance_local_runtime
+from scan_flow_constants import SCAN_FLOW
+
 
 ROOT = Path(__file__).parent
 # These hashes pin the RPYC-revised canonical extraction used as the patching
@@ -22,41 +25,50 @@ WORKSHOP_COPY = (
     "保存 APK",
 )
 
-WORKSHOP_CSS = r"""
-:root{--workshop-bg:oklch(1 0 0);--workshop-surface:oklch(.965 .004 95);--workshop-ink:oklch(.22 .018 112);--workshop-muted:oklch(.46 .025 108);--workshop-primary:oklch(.36 .082 120);--workshop-on-primary:oklch(.98 .004 95);--workshop-accent:oklch(.84 .145 84);--workshop-on-accent:oklch(.24 .035 84);--workshop-error:oklch(.56 .17 28);color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--workshop-bg:oklch(.11 0 0);--workshop-surface:oklch(.17 .012 112);--workshop-ink:oklch(.94 .008 95);--workshop-muted:oklch(.72 .018 105);--workshop-primary:oklch(.72 .10 120);--workshop-on-primary:oklch(.14 .025 120);--workshop-accent:oklch(.78 .13 84);--workshop-on-accent:oklch(.16 .025 84);--workshop-error:oklch(.72 .15 28)}}
+WORKSHOP_CSS = r""":root{--workshop-bg:oklch(.985 .006 110);--workshop-surface:oklch(.972 .009 105);--workshop-surface-2:oklch(.955 .012 100);--workshop-ink:oklch(.26 .026 140);--workshop-muted:oklch(.52 .032 132);--workshop-primary:oklch(.43 .095 148);--workshop-on-primary:oklch(.99 .004 105);--workshop-primary-soft:oklch(.94 .025 145);--workshop-accent:oklch(.70 .135 72);--workshop-on-accent:oklch(.22 .04 72);--workshop-accent-soft:oklch(.95 .04 85);--workshop-error:oklch(.56 .19 25);--workshop-success:oklch(.52 .12 150);--workshop-warning:oklch(.66 .13 75);--workshop-info:oklch(.55 .10 240);--workshop-border:color-mix(in oklch,var(--workshop-ink) 12%,transparent);--workshop-shadow-sm:0 1px 2px color-mix(in oklch,var(--workshop-ink) 6%,transparent);--workshop-shadow-md:0 8px 24px color-mix(in oklch,var(--workshop-ink) 10%,transparent);--workshop-shadow-lg:0 18px 48px color-mix(in oklch,var(--workshop-ink) 18%,transparent);--workshop-radius-sm:12px;--workshop-radius-md:16px;--workshop-radius-lg:22px;--workshop-radius-xl:28px;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--workshop-bg:oklch(.125 .014 135);--workshop-surface:oklch(.17 .017 140);--workshop-surface-2:oklch(.21 .02 145);--workshop-ink:oklch(.94 .008 100);--workshop-muted:oklch(.74 .015 110);--workshop-primary:oklch(.74 .105 152);--workshop-on-primary:oklch(.14 .03 145);--workshop-primary-soft:oklch(.26 .05 150);--workshop-accent:oklch(.78 .12 80);--workshop-on-accent:oklch(.18 .03 75);--workshop-accent-soft:oklch(.30 .06 85);--workshop-error:oklch(.70 .16 25);--workshop-success:oklch(.74 .12 152);--workshop-warning:oklch(.80 .12 80);--workshop-info:oklch(.72 .09 240);--workshop-border:color-mix(in oklch,var(--workshop-ink) 16%,transparent);--workshop-shadow-sm:0 1px 2px rgb(0 0 0 / .18);--workshop-shadow-md:0 8px 24px rgb(0 0 0 / .28);--workshop-shadow-lg:0 18px 48px rgb(0 0 0 / .40)}}
 .workshop-touch{min-width:48px;min-height:48px}
-.workshop-runtime{min-height:100dvh;padding-top:env(safe-area-inset-top);background:var(--workshop-bg);color:var(--workshop-ink)}
+.workshop-runtime{min-height:100dvh;padding-top:env(safe-area-inset-top);background:var(--workshop-bg);color:var(--workshop-ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:.01em}
 .workshop-runtime>header,.workshop-runtime>nav,.workshop-runtime>footer{display:none!important}
 .workshop-runtime[data-workshop-task="idle"] .workshop-bottom-nav{display:grid!important}
-.workshop-hero{margin:18px 16px 4px;padding:22px 20px;border-radius:24px;background:var(--workshop-primary);color:var(--workshop-on-primary);box-shadow:0 16px 36px color-mix(in oklch,var(--workshop-primary) 20%,transparent)}
-.workshop-hero small{display:block;font-size:13px;opacity:.8}.workshop-hero h1{margin:7px 0 18px;font-size:26px;line-height:1.18;font-weight:750;letter-spacing:-.02em}
-.workshop-runtime main{display:none!important;padding:16px 16px 104px!important;background:var(--workshop-bg)!important}.workshop-runtime main>div,.workshop-runtime main>section,.workshop-runtime main details{border-color:color-mix(in oklch,var(--workshop-ink) 12%,transparent)!important;background:var(--workshop-surface)!important;border-radius:18px!important;box-shadow:none!important}.workshop-runtime button[class*="bg-blue"]{min-height:48px;background:var(--workshop-primary)!important;color:var(--workshop-on-primary)!important;border-radius:16px!important}.workshop-runtime [class*="text-blue"]{color:var(--workshop-primary)!important}
+.workshop-hero{margin:18px 16px 4px;padding:24px 22px 26px;border-radius:var(--workshop-radius-xl);background:linear-gradient(145deg,var(--workshop-primary),color-mix(in oklch,var(--workshop-primary) 78%,var(--workshop-accent)));color:var(--workshop-on-primary);box-shadow:var(--workshop-shadow-md);position:relative;overflow:hidden}
+.workshop-hero::before{content:"";position:absolute;top:-40%;right:-15%;width:70%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,color-mix(in oklch,var(--workshop-accent) 34%,transparent),transparent 68%)}
+.workshop-hero::after{content:"◈";position:absolute;right:18px;bottom:-8px;font-size:96px;line-height:1;opacity:.12;transform:rotate(12deg)}
+.workshop-hero small{position:relative;display:block;font-size:13px;opacity:.88;letter-spacing:.06em;text-transform:uppercase}
+.workshop-hero h1{position:relative;margin:8px 0 14px;font-size:28px;line-height:1.16;font-weight:800;letter-spacing:-.025em;text-wrap:balance;max-width:22ch}
+.workshop-runtime main{display:none!important;padding:16px 16px 104px!important;background:var(--workshop-bg)!important}.workshop-runtime main>div,.workshop-runtime main>section,.workshop-runtime main details{border-color:var(--workshop-border)!important;background:var(--workshop-surface)!important;border-radius:var(--workshop-radius-lg)!important;box-shadow:var(--workshop-shadow-sm)!important}.workshop-runtime button[class*="bg-blue"]{min-height:48px;background:var(--workshop-primary)!important;color:var(--workshop-on-primary)!important;border-radius:var(--workshop-radius-md)!important}.workshop-runtime [class*="text-blue"]{color:var(--workshop-primary)!important}
 .workshop-picker-source>h2,.workshop-picker-source>button{display:none!important}
 .workshop-task-shell{position:relative;display:flex;flex-direction:column;gap:16px;min-height:calc(100dvh - 24px);padding:20px 16px 112px;background:var(--workshop-bg);color:var(--workshop-ink)}
-.workshop-task-topbar{display:flex;align-items:center;justify-content:space-between;min-height:48px}
-.workshop-task-topbar h1{margin:0;font-size:20px;line-height:1.25;font-weight:700;letter-spacing:-.01em}
-.workshop-task-back{min-width:48px;min-height:48px;border:0;border-radius:14px;background:transparent;color:var(--workshop-ink);font-size:22px}
-.workshop-brand-panel{padding:18px 18px 20px;border-radius:20px;background:var(--workshop-primary);color:var(--workshop-on-primary)}
-.workshop-brand-panel p{margin:0;font-size:14px;line-height:1.45;opacity:.86}
-.workshop-brand-panel h2{margin:4px 0 0;font-size:25px;line-height:1.2;font-weight:750;letter-spacing:-.02em}
-.workshop-task-card{padding:18px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:18px;background:var(--workshop-surface);box-shadow:none}
+.workshop-task-topbar{display:flex;align-items:center;justify-content:space-between;min-height:48px;margin-bottom:-4px}
+.workshop-task-topbar h1{margin:0;font-size:20px;line-height:1.25;font-weight:750;letter-spacing:-.01em}
+.workshop-task-back{display:flex;align-items:center;gap:3px;min-width:64px;min-height:44px;padding:0 14px 0 10px;border:1px solid var(--workshop-border);border-radius:999px;background:var(--workshop-surface);color:var(--workshop-ink);font-size:15px;font-weight:650;box-shadow:var(--workshop-shadow-sm);transition:background-color 160ms ease-out,transform 120ms ease-out}.workshop-task-back:active{transform:scale(.97);background:var(--workshop-surface-2)}
+.workshop-task-back:active{background:var(--workshop-surface-2)}
+.workshop-brand-panel{padding:22px 20px 24px;border-radius:var(--workshop-radius-xl);background:linear-gradient(150deg,var(--workshop-primary),color-mix(in oklch,var(--workshop-primary) 80%,var(--workshop-accent)));color:var(--workshop-on-primary);box-shadow:var(--workshop-shadow-md);position:relative;overflow:hidden}
+.workshop-brand-panel::before{content:"";position:absolute;top:-45%;left:-10%;width:75%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,color-mix(in oklch,var(--workshop-accent) 30%,transparent),transparent 70%)}
+.workshop-brand-panel::after{content:"译";position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:88px;font-weight:900;opacity:.10;letter-spacing:0}
+.workshop-brand-panel p,.workshop-brand-panel h2{position:relative}
+.workshop-brand-panel p{margin:0;font-size:14px;line-height:1.5;opacity:.9;max-width:32ch}
+.workshop-brand-panel h2{margin:6px 0 0;font-size:27px;line-height:1.18;font-weight:800;letter-spacing:-.025em;text-wrap:balance}
+.workshop-task-card{padding:18px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}
 .workshop-file-row{display:flex;align-items:center;gap:12px;min-height:56px}
-.workshop-file-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:color-mix(in oklch,var(--workshop-primary) 12%,var(--workshop-surface));color:var(--workshop-primary);font-weight:800}
+.workshop-file-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary-soft);color:var(--workshop-primary);font-weight:800;font-size:15px}
 .workshop-file-name{min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workshop-file-meta{margin-top:3px;color:var(--workshop-muted);font-size:13px}
-.workshop-state-copy{margin:12px 0 0;color:var(--workshop-muted);line-height:1.45}
-.workshop-scan-elapsed{display:block;margin-top:6px;color:var(--workshop-muted);font-size:13px;font-variant-numeric:tabular-nums}
-.workshop-progress{height:4px;margin-top:14px;border-radius:999px;background:color-mix(in oklch,var(--workshop-primary) 14%,transparent);overflow:hidden}
-.workshop-progress>i{display:block;width:38%;height:100%;border-radius:inherit;background:var(--workshop-primary);transition:width 220ms ease-out}
+.workshop-state-copy{margin:12px 0 0;color:var(--workshop-muted);line-height:1.5;font-size:14px}
+.workshop-state-copy.workshop-scan-elapsed{display:block;margin-top:6px;color:var(--workshop-muted);font-size:13px;font-variant-numeric:tabular-nums}
+.workshop-progress{height:6px;margin-top:16px;border-radius:999px;background:color-mix(in oklch,var(--workshop-primary) 16%,transparent);overflow:hidden;position:relative}
+.workshop-progress>i{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--workshop-primary),color-mix(in oklch,var(--workshop-primary) 55%,var(--workshop-accent)));transition:width 240ms cubic-bezier(.33,1,.68,1)}
+.workshop-progress>i::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,transparent,color-mix(in oklch,var(--workshop-accent) 45%,transparent),transparent);background-size:200% 100%;animation:workshopShimmer 1.8s linear infinite}
+@keyframes workshopShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 .workshop-summary-list{display:grid;gap:10px;margin:16px 0 0;padding:0;list-style:none}
-.workshop-summary-row{display:flex;justify-content:space-between;gap:16px;font-size:14px}
+.workshop-summary-row{display:flex;justify-content:space-between;gap:16px;font-size:14px;line-height:1.45}
 .workshop-summary-row span:first-child{color:var(--workshop-muted)}
-.workshop-summary-row span:last-child{text-align:right;font-weight:700}
-.workshop-detail-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;margin-top:12px;padding:0;border:0;background:transparent;color:var(--workshop-primary);font-weight:700;text-align:left}
-.workshop-detail-body{display:none;max-height:240px;margin-top:8px;padding:12px;border-radius:12px;background:color-mix(in oklch,var(--workshop-ink) 5%,var(--workshop-surface));color:var(--workshop-muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere}
+.workshop-summary-row span:last-child{text-align:right;font-weight:750;font-variant-numeric:tabular-nums}
+.workshop-detail-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;margin-top:12px;padding:0 4px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700;text-align:left;border-radius:var(--workshop-radius-sm);transition:background-color 160ms ease-out}
+.workshop-detail-toggle:active{background:var(--workshop-primary-soft)}
+.workshop-detail-body{display:none;max-height:240px;margin-top:8px;padding:12px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface-2);color:var(--workshop-muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere}
 .workshop-detail-body[data-open="true"]{display:block}
-.workshop-live-line{margin:12px 0 0;padding:10px 12px;border-radius:12px;background:color-mix(in oklch,var(--workshop-primary) 8%,var(--workshop-surface));color:var(--workshop-muted);font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.workshop-live-line{margin:12px 0 0;padding:10px 12px;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary-soft);color:var(--workshop-muted);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
 .workshop-task-shell[data-workshop-state="idle"] .workshop-progress{display:none}
 .workshop-task-shell[data-workshop-state="scanning"] .workshop-progress{display:block}
 .workshop-task-shell[data-workshop-state="ready"] .workshop-progress{display:none}
@@ -66,11 +78,12 @@ WORKSHOP_CSS = r"""
 .workshop-task-shell[data-workshop-state="failed"] .workshop-progress{display:none}
 .workshop-settings-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}
 .workshop-settings-shell[hidden]{display:none!important}
-.workshop-settings-card{padding:20px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:20px;background:var(--workshop-surface)}
+.workshop-settings-card{padding:20px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}
 .workshop-settings-card label{display:block;margin-bottom:8px;font-size:14px;font-weight:700}
-.workshop-settings-input{box-sizing:border-box;width:100%;min-height:52px;padding:12px 14px;border:1px solid color-mix(in oklch,var(--workshop-ink) 20%,transparent);border-radius:14px;background:var(--workshop-bg);color:var(--workshop-ink);font-size:16px}
-.workshop-settings-input:focus{outline:3px solid color-mix(in oklch,var(--workshop-primary) 28%,transparent);outline-offset:2px;border-color:var(--workshop-primary)}
-.workshop-settings-save{width:100%;min-width:48px;min-height:52px;margin-top:16px;border:0;border-radius:16px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px}
+.workshop-settings-input{box-sizing:border-box;width:100%;min-height:52px;padding:12px 14px;border:1px solid color-mix(in oklch,var(--workshop-ink) 20%,transparent);border-radius:var(--workshop-radius-sm);background:var(--workshop-bg);color:var(--workshop-ink);font-size:16px;transition:border-color 160ms ease-out,box-shadow 160ms ease-out}
+.workshop-settings-input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in oklch,var(--workshop-primary) 26%,transparent);border-color:var(--workshop-primary)}
+.workshop-settings-save{width:100%;min-width:48px;min-height:52px;margin-top:16px;border:0;border-radius:var(--workshop-radius-md);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px;box-shadow:var(--workshop-shadow-sm);transition:transform 120ms ease-out,filter 160ms ease-out}
+.workshop-settings-save:active{transform:scale(.98)}
 .workshop-settings-helper{margin:12px 0 0;color:var(--workshop-muted);font-size:13px;line-height:1.5}
 .workshop-settings-title{margin:0 0 16px;font-size:18px;line-height:1.3;font-weight:750}
 .workshop-settings-field{display:block;margin-top:14px}
@@ -79,28 +92,47 @@ WORKSHOP_CSS = r"""
 .workshop-settings-conditional[hidden]{display:none!important}
 .workshop-settings-error{margin:6px 0 0;color:var(--workshop-error);font-size:13px;line-height:1.4}
 .workshop-settings-status{margin:10px 0 0;color:var(--workshop-muted);font-size:13px;line-height:1.45}
-.workshop-primary-action{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;margin-top:auto;border:0;border-radius:16px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px}
-.workshop-secondary-action{min-width:48px;min-height:48px;margin-top:8px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}
-.workshop-error-card{border-color:color-mix(in oklch,var(--workshop-error) 30%,transparent);background:color-mix(in oklch,var(--workshop-error) 7%,var(--workshop-surface))}
+.workshop-settings-save:disabled{opacity:.55}
+.workshop-save-more{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:10px;padding:0 12px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-sm);background:var(--workshop-surface);color:var(--workshop-primary);font-weight:700;transition:background-color 160ms ease-out}
+.workshop-save-more:active{background:var(--workshop-primary-soft)}
+.workshop-save-manage{display:grid;gap:10px;margin-top:8px;padding-top:10px;border-top:1px solid var(--workshop-border)}
+.workshop-save-manage[hidden]{display:none!important}
+.workshop-save-manage .workshop-settings-save{margin-top:0}
+.workshop-saves-list{display:grid;gap:10px;margin-top:14px}
+.workshop-archive-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--workshop-border);display:grid;gap:10px}
+.workshop-archive-section[hidden]{display:none!important}
+.workshop-archive-title{margin:0;font-size:14px;font-weight:750;color:var(--workshop-muted)}
+.workshop-save-row > .workshop-save-restore{min-width:72px;min-height:44px;padding:0 12px;border:0;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:700}
+.workshop-save-row > .workshop-save-delete{min-width:48px;min-height:44px;padding:0 8px;border:0;border-radius:var(--workshop-radius-sm);background:transparent;color:var(--workshop-error);font-weight:700}
+.workshop-save-row > button:disabled{opacity:.55}
+.workshop-saves-empty{margin:0;padding:16px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface-2);color:var(--workshop-muted);line-height:1.5}
+.workshop-save-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 12px;padding:14px 16px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-md);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}
+.workshop-save-name{flex:1 1 180px;font-weight:720;overflow-wrap:anywhere}.workshop-save-meta{flex:1 1 180px;color:var(--workshop-muted);font-size:13px;line-height:1.5}
+.workshop-save-actions{display:flex;gap:8px;margin-left:auto}.workshop-save-actions button{min-width:68px;min-height:44px;padding:0 12px;border:0;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:700}.workshop-save-actions button:disabled{opacity:.55}.workshop-save-actions .workshop-save-restore{min-width:92px}.workshop-save-actions .workshop-save-share{background:transparent;color:var(--workshop-primary)}.workshop-save-actions .workshop-save-delete{background:transparent;color:var(--workshop-error)}.workshop-save-actions .workshop-save-share,.workshop-save-actions .workshop-save-delete{min-width:48px;width:48px;padding:0 4px}
+.workshop-primary-action{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;margin-top:auto;border:0;border-radius:var(--workshop-radius-md);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:750;font-size:15px;box-shadow:var(--workshop-shadow-sm);transition:transform 120ms ease-out,box-shadow 160ms ease-out,filter 160ms ease-out}
+.workshop-primary-action:active{transform:scale(.98);filter:brightness(.96)}
+.workshop-secondary-action{min-width:48px;min-height:48px;margin-top:8px;padding:0 8px;border:0;border-radius:var(--workshop-radius-sm);background:transparent;color:var(--workshop-primary);font-weight:700;transition:background-color 160ms ease-out}
+.workshop-secondary-action:active{background:var(--workshop-primary-soft)}
+.workshop-error-card{border-color:color-mix(in oklch,var(--workshop-error) 32%,transparent);background:color-mix(in oklch,var(--workshop-error) 7%,var(--workshop-surface))}
 .workshop-error-title{margin:0;color:var(--workshop-error);font-size:18px;font-weight:750}
-.workshop-source-dialog{position:fixed;z-index:50;inset:0;box-sizing:border-box;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklch,var(--workshop-ink) 42%,transparent);overflow:auto}
-.workshop-installed-dialog{position:fixed;z-index:50;inset:0;box-sizing:border-box;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklch,var(--workshop-ink) 42%,transparent);overflow:auto}
+.workshop-source-dialog{position:fixed;z-index:50;inset:0;box-sizing:border-box;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklch,var(--workshop-ink) 44%,transparent);overflow:auto}.workshop-installed-dialog{position:fixed;z-index:50;inset:0;box-sizing:border-box;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklch,var(--workshop-ink) 44%,transparent);overflow:auto}
 .workshop-source-dialog[hidden],.workshop-installed-dialog[hidden]{display:none!important}
-.workshop-modal-panel{box-sizing:border-box;width:min(100%,560px);max-height:min(82dvh,720px);padding:20px;border:1px solid color-mix(in oklch,var(--workshop-ink) 14%,transparent);border-radius:24px;background:var(--workshop-bg);color:var(--workshop-ink);box-shadow:0 20px 60px color-mix(in oklch,var(--workshop-ink) 28%,transparent);overflow:auto}
+.workshop-modal-panel{box-sizing:border-box;width:min(100%,560px);max-height:min(82dvh,720px);padding:22px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-xl);background:var(--workshop-bg);color:var(--workshop-ink);box-shadow:var(--workshop-shadow-lg);overflow:auto;animation:workshopSheetIn 220ms cubic-bezier(.33,1,.68,1)}
+@keyframes workshopSheetIn{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
 .workshop-modal-title{margin:0 0 6px;font-size:20px;line-height:1.3;font-weight:750}.workshop-modal-copy{margin:0 0 16px;color:var(--workshop-muted);font-size:14px;line-height:1.5}
-.workshop-source-option,.workshop-modal-action,.workshop-app-row{box-sizing:border-box;width:100%;min-height:52px;border:0;border-radius:16px;font:inherit}
-.workshop-source-option{display:flex;align-items:center;padding:0 16px;margin-top:8px;background:var(--workshop-surface);color:var(--workshop-ink);font-weight:700;text-align:left}.workshop-source-option:first-of-type{background:var(--workshop-primary);color:var(--workshop-on-primary)}
+.workshop-source-option,.workshop-modal-action,.workshop-app-row{box-sizing:border-box;width:100%;min-height:52px;border:0;border-radius:var(--workshop-radius-md);font:inherit}
+.workshop-source-option{display:flex;align-items:center;padding:0 16px;margin-top:8px;background:var(--workshop-surface);color:var(--workshop-ink);font-weight:700;text-align:left;transition:background-color 160ms ease-out}.workshop-source-option:active{background:var(--workshop-surface-2)}.workshop-source-option:first-of-type{background:var(--workshop-primary);color:var(--workshop-on-primary);box-shadow:var(--workshop-shadow-sm)}
 .workshop-modal-action{margin-top:8px;background:transparent;color:var(--workshop-primary);font-weight:700}.workshop-source-option:focus-visible,.workshop-modal-action:focus-visible,.workshop-app-row:focus-visible{outline:3px solid color-mix(in oklch,var(--workshop-primary) 32%,transparent);outline-offset:2px}
-.workshop-installed-search{box-sizing:border-box;width:100%;min-height:52px;margin:12px 0;padding:0 14px;border:1px solid color-mix(in oklch,var(--workshop-ink) 20%,transparent);border-radius:14px;background:var(--workshop-surface);color:var(--workshop-ink);font-size:16px}.workshop-installed-search:focus{outline:3px solid color-mix(in oklch,var(--workshop-primary) 28%,transparent);outline-offset:2px;border-color:var(--workshop-primary)}
-.workshop-app-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.workshop-app-row{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:8px 14px;background:var(--workshop-surface);color:var(--workshop-ink);text-align:left}.workshop-app-label{font-weight:720}.workshop-app-package{margin-top:2px;color:var(--workshop-muted);font-size:12px;overflow-wrap:anywhere}.workshop-installed-status{margin:12px 0;padding:16px;border-radius:14px;background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-installed-error{color:var(--workshop-error)}
-@media(min-width:600px){.workshop-source-dialog,.workshop-installed-dialog{align-items:center}.workshop-modal-panel{border-radius:24px}}
+.workshop-installed-search{box-sizing:border-box;width:100%;min-height:52px;margin:12px 0;padding:0 14px;border:1px solid color-mix(in oklch,var(--workshop-ink) 20%,transparent);border-radius:var(--workshop-radius-sm);background:var(--workshop-surface);color:var(--workshop-ink);font-size:16px;transition:border-color 160ms ease-out,box-shadow 160ms ease-out}.workshop-installed-search:focus{outline:none;box-shadow:0 0 0 3px color-mix(in oklch,var(--workshop-primary) 26%,transparent);border-color:var(--workshop-primary)}
+.workshop-app-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.workshop-app-row{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:8px 14px;background:var(--workshop-surface);color:var(--workshop-ink);text-align:left;transition:background-color 160ms ease-out}.workshop-app-row:active{background:var(--workshop-surface-2)}.workshop-app-label{font-weight:720}.workshop-app-package{margin-top:2px;color:var(--workshop-muted);font-size:12px;overflow-wrap:anywhere}.workshop-installed-status{margin:12px 0;padding:16px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-installed-error{color:var(--workshop-error)}
+@media(min-width:600px){.workshop-source-dialog,.workshop-installed-dialog{align-items:center}.workshop-modal-panel{border-radius:var(--workshop-radius-xl)}}
 .workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav{display:none!important}
 .workshop-runtime[data-workshop-task="active"] main{display:none!important}
 body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{display:none!important}
-.workshop-bottom-nav{position:fixed;z-index:30;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,1fr);padding:6px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:22px;background:color-mix(in oklch,var(--workshop-bg) 94%,transparent);box-shadow:0 10px 35px color-mix(in oklch,var(--workshop-ink) 16%,transparent)}
-.workshop-bottom-nav button{min-height:52px;border:0;border-radius:16px;background:transparent;color:var(--workshop-muted);font-size:13px;font-weight:650}.workshop-bottom-nav button[aria-current="page"]{background:var(--workshop-surface);color:var(--workshop-primary)}
-.workshop-gallery-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}.workshop-gallery-shell[hidden]{display:none!important}.workshop-gallery-content{display:grid;gap:10px}.workshop-gallery-status{margin:0;padding:16px;border-radius:14px;background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-gallery-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.workshop-patch-row{padding:14px 16px;border:1px solid color-mix(in oklch,var(--workshop-ink) 12%,transparent);border-radius:16px;background:var(--workshop-surface)}.workshop-patch-name{font-weight:720;overflow-wrap:anywhere}.workshop-patch-meta{margin-top:4px;color:var(--workshop-muted);font-size:13px}.workshop-patch-save{min-height:44px;margin-top:10px;padding:0 16px;border:0;border-radius:12px;background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:700}.workshop-gallery-shell .workshop-secondary-action{align-self:flex-start;min-height:48px;padding:0 12px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-"""
+.workshop-bottom-nav{position:fixed;z-index:30;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,1fr);padding:6px;border:1px solid var(--workshop-border);border-radius:26px;background:color-mix(in oklch,var(--workshop-bg) 92%,transparent);box-shadow:var(--workshop-shadow-md);backdrop-filter:blur(10px)}
+.workshop-bottom-nav button{min-height:52px;border:0;border-radius:20px;background:transparent;color:var(--workshop-muted);font-size:13px;font-weight:650;transition:color 160ms ease-out,background-color 160ms ease-out,transform 120ms ease-out}.workshop-bottom-nav button:active{transform:scale(.96)}.workshop-bottom-nav button[aria-current="page"]{background:var(--workshop-primary);color:var(--workshop-on-primary);box-shadow:var(--workshop-shadow-sm)}
+.workshop-gallery-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}.workshop-gallery-shell[hidden]{display:none!important}.workshop-gallery-content{display:grid;gap:10px}.workshop-gallery-status{margin:0;padding:16px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-gallery-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.workshop-patch-row{padding:14px 16px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-md);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}.workshop-patch-name{font-weight:720;overflow-wrap:anywhere}.workshop-patch-meta{margin-top:4px;color:var(--workshop-muted);font-size:13px}.workshop-patch-save{min-height:44px;margin-top:10px;padding:0 16px;border:0;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:700;transition:transform 120ms ease-out,filter 160ms ease-out}.workshop-patch-save:active{transform:scale(.98)}.workshop-gallery-shell .workshop-secondary-action{align-self:flex-start;min-height:48px;padding:0 12px;border:0;background:transparent;color:var(--workshop-primary);font-weight:700}
+.workshop-settings-menu{display:grid;gap:10px;margin-top:4px}.workshop-menu-item{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:2px 12px;width:100%;min-height:60px;padding:10px 16px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-md);background:var(--workshop-surface);color:var(--workshop-ink);text-align:left;box-shadow:var(--workshop-shadow-sm);transition:transform 120ms ease-out,background-color 160ms ease-out,border-color 160ms ease-out}.workshop-menu-item:active{transform:scale(.985);background:var(--workshop-surface-2)}.workshop-menu-item:disabled{opacity:.6}.workshop-menu-item-label{font-weight:750;font-size:15px}.workshop-menu-item-desc{width:100%;margin-top:2px;color:var(--workshop-muted);font-size:12px;line-height:1.4}.workshop-menu-item-arrow{margin-left:auto;color:var(--workshop-muted);font-size:20px;font-weight:500}.workshop-menu-item.workshop-menu-active{border-color:var(--workshop-primary);background:var(--workshop-primary-soft)}.workshop-menu-item.workshop-menu-active .workshop-menu-item-arrow{color:var(--workshop-primary);transform:rotate(90deg)}.workshop-menu-item.workshop-menu-active .workshop-menu-item-label{color:var(--workshop-primary)}.workshop-settings-menu-hint{margin:2px 4px 0;padding:10px 12px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface-2);color:var(--workshop-muted);font-size:13px;line-height:1.5}.workshop-settings-menu-hint[hidden]{display:none!important}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}"""
 
 # Task shell runtime: source React controls stay mounted and are activated via
 # bubbling events. The runtime owns only the visible state-driven shell.
@@ -195,15 +227,40 @@ function replaceSelectOptions(select,options,value){
   }
   select.value=options.some(([id])=>id===value)?value:options[0]?.[0]||"";
 }
-function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false;lastSnapshot="";if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;if(!preserveHistory)releaseModalHistory();refresh()}
-function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回任务");back.onclick=closeSettings;top.append(back,textNode("h1","","我的设置"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`;};const cleanup=textNode("button","workshop-settings-save workshop-settings-cleanup","清理安装包与旧缓存");cleanup.type="button";const cleanupStatus=textNode("p","workshop-settings-status","");cleanup.onclick=async()=>{cleanup.disabled=true;cleanupStatus.textContent="正在清理…";try{const r=await window.Capacitor.Plugins.FileManager.cleanupStorage({keepUri:(window.__slgSelectionMeta?.uri)||""});cleanupStatus.textContent=`已清理 ${formatBytes(r&&r.freedBytes)} ，删除 ${(r&&r.deletedCount)||0} 个文件`}catch(e){cleanupStatus.textContent="清理失败："+(e&&e.message||String(e))}finally{cleanup.disabled=false}};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper,cleanup,cleanupStatus);settingsShell.append(top,card);runtimeRoot?.append(settingsShell)}settingsShell.hidden=false;if(shell)shell.hidden=true}
-function armModalHistory(){if(modalHistoryClosing){modalHistoryRearm=true;return}if(modalHistoryArmed)return;history.pushState({...history.state,__slgSourceModal:ID},"");modalHistoryArmed=true}
+function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false;lastSnapshot="";if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes(settingsPrevNav||"首页"))?.setAttribute("aria-current","page")}if(!preserveHistory)releaseModalHistory();refresh()}
+function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsPrevNav){const nav=document.querySelector(".workshop-bottom-nav");settingsPrevNav=nav?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("我的"))?.setAttribute("aria-current","page")}let menuView=null,serviceView=null,savesView=null,cleanupView=null,aboutView=null;const showMenu=()=>{if(menuView)menuView.hidden=false;if(serviceView)serviceView.hidden=true;if(savesView)savesView.hidden=true;if(cleanupView)cleanupView.hidden=true;if(aboutView)aboutView.hidden=true};const showView=(v)=>{if(!menuView)return;menuView.hidden=true;serviceView.hidden=v!==serviceView;savesView.hidden=v!==savesView;cleanupView.hidden=v!==cleanupView;aboutView.hidden=v!==aboutView};if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");function makeView(){const v=textNode("section","workshop-settings-view");v.hidden=true;return v}function viewBack(label,handler){const b=textNode("button","workshop-task-back","‹ 返回");b.type="button";b.setAttribute("aria-label",label);b.onclick=handler;return b}menuView=makeView();serviceView=makeView();savesView=makeView();cleanupView=makeView();aboutView=makeView();const menuTop=textNode("header","workshop-task-topbar");const back=viewBack("返回任务",closeSettings);menuTop.append(back,textNode("h1","","我的设置"));const menu=textNode("div","workshop-settings-menu");function makeMenuItem(label,desc){const row=textNode("button","workshop-menu-item");row.type="button";const name=textNode("span","workshop-menu-item-label",label);const note=textNode("span","workshop-menu-item-desc",desc||"");const arrow=textNode("span","workshop-menu-item-arrow","›");row.append(name,note,arrow);return row}const service=makeMenuItem("翻译服务","配置 AI 供应商与 API Key");const saves=makeMenuItem("存档转移","备份与恢复游戏存档");const cleanup=makeMenuItem("清理安装包与旧缓存","释放手机存储空间");cleanup.classList.add("workshop-settings-cleanup");const about=makeMenuItem("关于","版本信息");menu.append(service,saves,cleanup,about);menuView.append(menuTop,menu);
+const serviceTop=textNode("header","workshop-task-topbar");const serviceBack=viewBack("返回菜单",showMenu);serviceTop.append(serviceBack,textNode("h1","","翻译服务"));const card=textNode("section","workshop-settings-card");const prefs=readSettingsPrefs();const title=textNode("h2","workshop-settings-title","翻译服务");const provider=selectControl("settingsProvider","供应商",[["openai","OpenAI"],["deepseek","DeepSeek"],["custom","自定义接口"]],prefs.providerId);provider.id="settingsProvider";let option=provider.select.options[1];option.value="deepseek";option=provider.select.options[2];option.value="custom";const model=selectControl("settingsModel","模型",PROVIDERS[prefs.providerId].models,prefs.model);model.id="settingsModel";const customWrap=textNode("div","workshop-settings-conditional");const customBaseURL=inputControl("settingsCustomBaseURL","自定义 Base URL","url",prefs.customBaseURL,"https://your-api.com/v1");customBaseURL.id="settingsCustomBaseURL";const customModel=inputControl("settingsCustomModel","自定义模型名","text",prefs.customModel,"例如：qwen-plus");customModel.id="settingsCustomModel";customWrap.append(customBaseURL.field,customModel.field);const api=inputControl("settingsApiKey","API Key","password",reactApiInput?.value??pendingApiKey??"","");const label=api.field;label.htmlFor="settingsApiKey";const input=api.input;input.id="settingsApiKey";const error=textNode("p","workshop-settings-error");error.hidden=true;const save=textNode("button","workshop-settings-save","保存");save.type="button";const helper=textNode("p","workshop-settings-status workshop-settings-helper","API Key 仅保存在本机。");const updateProvider=()=>{const providerId=provider.select.value;replaceSelectOptions(model.select,PROVIDERS[providerId].models,providerId===prefs.providerId?prefs.model:"");customWrap.hidden=providerId!=="custom";error.hidden=true};provider.select.onchange=updateProvider;customWrap.hidden=prefs.providerId!=="custom";save.onclick=()=>{const next={providerId:provider.select.value,model:model.select.value,customBaseURL:customBaseURL.input.value.trim(),customModel:customModel.input.value.trim()};if(next.providerId==="custom"&&(!next.customBaseURL||!next.customModel)){error.textContent="请填写自定义 Base URL 和模型名";error.hidden=false;return}error.hidden=true;pendingApiKey=input.value;saveSettingsPrefs(next);applySettingsToReact(next);helper.textContent=`已保存：${PROVIDERS[next.providerId].label} · ${next.providerId==="custom"?next.customModel:next.model}`};card.append(title,provider.field,model.field,customWrap,api.field,error,save,helper);serviceView.append(serviceTop,card);
+const savesTop=textNode("header","workshop-task-topbar");
+const savesBack=viewBack("返回菜单",showMenu);
+savesTop.append(savesBack,textNode("h1","","存档转移"));
+const savesCard=textNode("section","workshop-settings-card");
+savesCard.append(textNode("h2","workshop-settings-title","存档转移"));
+const plugin=window.Capacitor?.Plugins?.FileManager;
+const savesStatus=textNode("p","workshop-settings-status");
+const permissionNote=textNode("p","workshop-settings-helper");
+const backupHint=textNode("p","workshop-settings-helper","请先选择游戏。");
+const backupBtn=textNode("button","workshop-settings-save","备份当前存档");
+backupBtn.type="button";
+const savesList=textNode("div","workshop-saves-list");
+const savesEmpty=textNode("p","workshop-saves-empty","暂无备份。");
+savesList.append(savesEmpty);
+const updateSavesState=()=>{const pkg=window.__slgSelectionMeta?.packageName||"";const ready=!!pkg&&!!plugin;backupBtn.disabled=!ready;backupHint.textContent=!pkg?"请先选择游戏。":"备份保存到本机应用目录。";if(/Android\s+(1[1-9]|[2-9][0-9])/i.test(navigator.userAgent)){permissionNote.textContent="请在系统设置中授予“所有文件访问”权限后，再进行备份或恢复。"}else{permissionNote.hidden=true}};
+updateSavesState();
+async function refreshSaves(){if(!plugin){savesStatus.textContent="当前版本不支持存档转移。";return}savesStatus.textContent="正在读取备份…";try{const result=await plugin.listSaveBackups();savesList.replaceChildren();const backups=Array.isArray(result?.backups)?result.backups:[];if(!backups.length){savesList.append(savesEmpty);savesEmpty.textContent="暂无备份。";savesStatus.textContent="";return}backups.forEach(item=>{const row=textNode("article","workshop-save-row");const name=textNode("div","workshop-save-name",item.name||"未命名备份");const meta=textNode("div","workshop-save-meta",`${item.fileCount||0} 个文件 · ${new Date(item.modifiedAt||Date.now()).toLocaleString()}`);const actions=textNode("div","workshop-save-actions");const restore=textNode("button","workshop-save-restore","恢复");restore.type="button";const del=textNode("button","workshop-save-delete","删除");del.type="button";restore.onclick=async()=>{if(!confirm(`恢复 ${item.name||"该备份"} 会覆盖当前存档，确定继续？`))return;restore.disabled=true;restore.textContent="恢复中…";try{await plugin.restoreSaves({packageName:window.__slgSelectionMeta?.packageName||"",backupDir:item.path||item.name});savesStatus.textContent="恢复完成。"}catch(e){savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}};del.onclick=async()=>{if(!confirm(`确定删除备份 ${item.name||"该备份"}？`))return;del.disabled=true;del.textContent="删除中…";try{await plugin.deleteBackup({backupDir:item.path||item.name});savesStatus.textContent="已删除备份。";await refreshSaves()}catch(e){savesStatus.textContent="删除失败："+(e&&e.message||String(e));del.disabled=false;del.textContent="删除"}};actions.append(restore,del);row.append(name,meta,actions);savesList.append(row)});savesStatus.textContent=`共 ${backups.length} 个备份。`}catch(e){savesStatus.textContent="读取备份失败："+(e&&e.message||String(e))}}
+backupBtn.onclick=async()=>{const pkg=window.__slgSelectionMeta?.packageName||"";if(!pkg)return;backupBtn.disabled=true;backupBtn.textContent="正在备份…";try{await plugin.backupSaves({packageName:pkg});savesStatus.textContent="备份完成。";await refreshSaves()}catch(e){savesStatus.textContent="备份失败："+(e&&e.message||String(e))}finally{updateSavesState()}};
+savesCard.append(permissionNote,backupHint,backupBtn,savesStatus,savesList);
+const originalBackupClick=backupBtn.onclick;backupBtn.onclick=async()=>{try{return await originalBackupClick()}finally{backupBtn.textContent="\u5907\u4efd\u5f53\u524d\u5b58\u6863"}};
+savesView.append(savesTop,savesCard);
+const cleanupTop=textNode("header","workshop-task-topbar");const cleanupBack=viewBack("返回菜单",showMenu);cleanupTop.append(cleanupBack,textNode("h1","","清理安装包与旧缓存"));const cleanupCard=textNode("section","workshop-settings-card");const cleanupTitle=textNode("h2","workshop-settings-title","清理安装包与旧缓存");const cleanupStatus=textNode("p","workshop-settings-status","删除已生成的补丁 APK 与旧翻译缓存，释放手机存储空间。");const cleanupBtn=textNode("button","workshop-settings-save","立即清理");cleanupBtn.type="button";const cleanupResult=textNode("p","workshop-settings-status");cleanupBtn.onclick=async()=>{cleanupBtn.disabled=true;cleanupBtn.textContent="正在清理…";try{const r=await window.Capacitor.Plugins.FileManager.cleanupStorage({keepUri:(window.__slgSelectionMeta?.uri)||"",packageName:(window.__slgSelectionMeta?.packageName)||""});cleanupResult.textContent=`已清理 ${formatBytes(r&&r.freedBytes)} ，删除 ${(r&&r.deletedCount)||0} 个文件`}catch(e){cleanupResult.textContent="清理失败："+(e&&e.message||String(e))}finally{cleanupBtn.disabled=false;cleanupBtn.textContent="立即清理"}};cleanupCard.append(cleanupTitle,cleanupStatus,cleanupBtn,cleanupResult);cleanupView.append(cleanupTop,cleanupCard);
+const aboutTop=textNode("header","workshop-task-topbar");const aboutBack=viewBack("返回菜单",showMenu);aboutTop.append(aboutBack,textNode("h1","","关于"));const aboutCard=textNode("section","workshop-settings-card");aboutCard.append(textNode("h2","workshop-settings-title","SLG 翻译器"),textNode("p","workshop-settings-helper","版本：Android v1.0.2"),textNode("p","workshop-settings-helper","把喜欢的游戏，用中文继续。"));aboutView.append(aboutTop,aboutCard);
+service.onclick=()=>showView(serviceView);saves.onclick=()=>{showView(savesView);refreshSaves()};cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}
+function armModalHistory(){if(modalHistoryClosing){modalHistoryRearm=true;return}if(modalHistoryArmed)return;try{history.pushState({...history.state,__slgSourceModal:ID},"")}catch(e){}modalHistoryArmed=true}
 function releaseModalHistory(){if(!modalHistoryArmed)return;modalHistoryArmed=false;modalHistoryClosing=true;history.back()}
 function focusableIn(dialog){return[...dialog.querySelectorAll('button:not([disabled]),input:not([disabled])')].filter(el=>!el.hidden)}
 function trapModalFocus(event,dialog){if(event.key!=="Tab")return;const items=focusableIn(dialog);if(!items.length)return;const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
 function focusInstalledTarget(){window.requestAnimationFrame(()=>{if(!installedDialog||installedDialog.hidden)return;const search=installedDialog.querySelector(".workshop-installed-search"),first=installedDialog.querySelector(".workshop-installed-content button");(search||first)?.focus()})}
 function closeSourceChooser(preserveHistory=false){if(sourceDialog)sourceDialog.hidden=true;if(!preserveHistory)releaseModalHistory();previousSourceFocus?.focus()}
-function openSourceChooser(){previousSourceFocus=document.activeElement;armModalHistory();if(!sourceDialog){sourceDialog=textNode("section","workshop-source-dialog");sourceDialog.hidden=true;sourceDialog.setAttribute("role","dialog");sourceDialog.setAttribute("aria-modal","true");sourceDialog.setAttribute("aria-labelledby","workshop-source-title");const panel=textNode("div","workshop-modal-panel");const title=textNode("h2","workshop-modal-title","选择来源");title.id="workshop-source-title";const copy=textNode("p","workshop-modal-copy","可以从手机里的应用开始，也可以选择一个 APK 文件。");const installed=actionButton("从已安装应用选择",()=>{closeSourceChooser(true);openInstalledApps()});installed.className="workshop-source-option";const file=actionButton("从文件选择 APK",()=>{closeSourceChooser();triggerReactButton(sourceButton)});file.className="workshop-source-option";const cancel=actionButton("取消",closeSourceChooser,true);cancel.className="workshop-modal-action";panel.append(title,copy,installed,file,cancel);sourceDialog.append(panel);sourceDialog.onclick=event=>{if(event.target===sourceDialog)closeSourceChooser()};sourceDialog.onkeydown=event=>{if(event.key==="Escape"){event.preventDefault();closeSourceChooser()}else trapModalFocus(event,sourceDialog)};runtimeRoot?.append(sourceDialog)}sourceDialog.hidden=false;window.requestAnimationFrame(()=>focusableIn(sourceDialog)[0]?.focus())}
+function openSourceChooser(){manualIdle=false;lastSnapshot="";previousSourceFocus=document.activeElement;try{armModalHistory()}catch(e){}if(!sourceDialog){sourceDialog=textNode("section","workshop-source-dialog");sourceDialog.hidden=true;sourceDialog.setAttribute("role","dialog");sourceDialog.setAttribute("aria-modal","true");sourceDialog.setAttribute("aria-labelledby","workshop-source-title");const panel=textNode("div","workshop-modal-panel");const title=textNode("h2","workshop-modal-title","选择来源");title.id="workshop-source-title";const copy=textNode("p","workshop-modal-copy","可以从手机里的应用开始，也可以选择一个 APK 文件。");const installed=actionButton("从已安装应用选择",()=>{closeSourceChooser(true);openInstalledApps()});installed.className="workshop-source-option";const file=actionButton("从文件选择 APK",()=>{closeSourceChooser();triggerReactButton(sourceButton)});file.className="workshop-source-option";const cancel=actionButton("取消",closeSourceChooser,true);cancel.className="workshop-modal-action";panel.append(title,copy,installed,file,cancel);sourceDialog.append(panel);sourceDialog.onclick=event=>{if(event.target===sourceDialog)closeSourceChooser()};sourceDialog.onkeydown=event=>{if(event.key==="Escape"){event.preventDefault();closeSourceChooser()}else trapModalFocus(event,sourceDialog)};runtimeRoot?.append(sourceDialog)}sourceDialog.hidden=false;if(modalHistoryClosing){modalHistoryClosing=false;modalHistoryRearm=false}window.requestAnimationFrame(()=>{try{focusableIn(sourceDialog)[0]?.focus()}catch{}})}
 function filterInstalledApps(apps,query){const needle=(query||"").trim().toLocaleLowerCase();if(!needle)return apps;return apps.filter(app=>`${app.label||""}\n${app.packageName||""}`.toLocaleLowerCase().includes(needle))}
 function renderInstalledApps(){if(!installedDialog)return;installedDialog.setAttribute("aria-busy",String(installedLoading||installedBusy));const list=installedDialog.querySelector(".workshop-installed-content"),search=installedDialog.querySelector(".workshop-installed-search"),cancel=installedDialog.querySelector(".workshop-modal-panel > .workshop-modal-action");if(cancel)cancel.disabled=installedBusy;if(!list)return;list.replaceChildren();if(installedLoading){list.append(textNode("p","workshop-installed-status","正在读取应用列表"));focusInstalledTarget();return}if(installedError){const message=textNode("p","workshop-installed-status workshop-installed-error",`应用列表读取失败：${installedError}`);const retry=actionButton("重新加载",loadInstalledApps);retry.className="workshop-source-option";retry.disabled=installedBusy;const file=actionButton("从文件选择 APK",()=>{closeInstalledApps();triggerReactButton(sourceButton)},true);file.className="workshop-modal-action";file.disabled=installedBusy;list.append(message,retry,file);focusInstalledTarget();return}if(installedBusy)list.append(textNode("p","workshop-installed-status","正在读取应用安装包…"));const visible=filterInstalledApps(installedApps,search?.value||"");if(!visible.length){const empty=textNode("p","workshop-installed-status","没有找到可选择的已安装应用。你仍可从文件选择 APK。");const file=actionButton("从文件选择 APK",()=>{closeInstalledApps();triggerReactButton(sourceButton)},true);file.className="workshop-modal-action";file.disabled=installedBusy;list.append(empty,file);focusInstalledTarget();return}const rows=textNode("ul","workshop-app-list");for(const app of visible){const item=textNode("li","");const button=textNode("button","workshop-app-row");button.type="button";button.disabled=installedBusy;button.append(textNode("span","workshop-app-label",app.label||app.packageName),textNode("span","workshop-app-package",app.packageName));button.onclick=()=>chooseInstalledApp(app);item.append(button);rows.append(item)}list.append(rows);focusInstalledTarget()}
 async function loadInstalledApps(){const epoch=++installedListEpoch;installedLoading=true;installedError="";renderInstalledApps();try{const result=await window.Capacitor.Plugins.FileManager.listInstalledApps();if(epoch!==installedListEpoch||!installedDialog||installedDialog.hidden)return;installedApps=Array.isArray(result?.apps)?result.apps:[]}catch(error){if(epoch!==installedListEpoch||!installedDialog||installedDialog.hidden)return;installedError=error?.message||String(error)}finally{if(epoch===installedListEpoch&&installedDialog&&!installedDialog.hidden){installedLoading=false;renderInstalledApps()}}}
@@ -211,12 +268,12 @@ async function openInstalledApps(){previousSourceFocus=previousSourceFocus||docu
 async function chooseInstalledApp(app){const epoch=++sourceRequestEpoch;installedBusy=true;installedError="";renderInstalledApps();try{const selection=await window.Capacitor.Plugins.FileManager.selectInstalledApp({packageName:app.packageName});if(epoch!==sourceRequestEpoch||!installedDialog||installedDialog.hidden)return;installedBusy=false;closeInstalledApps(false,true);sourceRequestEpoch+=1;await window.__slgLoadSelectedApk(selection)}catch(error){if(epoch!==sourceRequestEpoch||!installedDialog||installedDialog.hidden)return;installedError=error?.message||String(error);renderInstalledApps()}finally{if(epoch===sourceRequestEpoch&&installedDialog&&!installedDialog.hidden){installedBusy=false;renderInstalledApps();focusInstalledTarget()}}}
 function closeInstalledApps(preserveHistory=false,preserveSourceRequest=false){installedListEpoch+=1;if(!preserveSourceRequest)sourceRequestEpoch+=1;installedLoading=false;installedBusy=false;if(installedDialog){installedDialog.hidden=true;installedDialog.setAttribute("aria-busy","false")}if(!preserveHistory)releaseModalHistory();previousSourceFocus?.focus()}
 function findButton(label){return[...document.querySelectorAll("#root button")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent&&el.textContent.includes(label))}
-function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}const isInstall=button===installButton||button?.textContent?.includes("安装补丁版");const target=isStart?(findButton("开始翻译")||button):isInstall?findButton("安装补丁版"):button;if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
-function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();return clone.textContent||""}
+function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}const isInstall=button===installButton||button?.textContent?.includes("安装补丁版");const target=isStart?(findButton("开始翻译")||button):isInstall?findButton("安装补丁版"):button;if(isInstall&&!target){installButton=null;lastSnapshot="";refresh();return}if(isStart&&target?.disabled){const snap=readTaskSnapshot();setWorkshopState("ready",{...snap,apiRequired:true});return}target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))}
+function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();clone.querySelector(".workshop-source-dialog")?.remove();clone.querySelector(".workshop-installed-dialog")?.remove();clone.querySelector(".workshop-settings-shell")?.remove();clone.querySelector(".workshop-gallery-shell")?.remove();return clone.textContent||""}
 function readProgressLog(){const source=[...document.querySelectorAll("#root details")].find(el=>!el.closest(".workshop-task-shell")&&el.querySelector('[class*="font-mono"]'));const panel=source?.querySelector('[class*="font-mono"]');const lines=[...(panel?.children||[])].slice(-40).map(row=>(row.innerText||row.textContent||"").trim()).filter(Boolean);return{raw:lines.join("\n"),latest:lines.at(-1)||""}}
 function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog=window.__slgScanWatchdog,selectionMeta=window.__slgSelectionMeta,text=sourceText();const selected=text.match(/已选择\s*[:：]?\s*([^\n]{1,180}?)(?=发现|正在|处理|$)/);const fileName=selected?.[1]?.trim()||"";const found=text.match(/发现\s*(\d+)\s*个可翻译文件/),headerCount=text.match(/(?:·\s*)?(\d+)\s*个脚本/);const count=found?.[1]||headerCount?.[1]||"";const progress=text.match(/正在处理脚本\s*(\d+)\s*\/\s*(\d+)/);const current=progress?.[1]||"0",total=progress?.[2]||count||"0";const translated=text.match(/共翻译\s*(\d+)\s*条文本/)?.[1]||"";const log=readProgressLog();const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))return{state:"failed",reason:"space",raw:failed.textContent};const networkFailed=text.match(/翻译失败\s*[:：]?\s*(无法连接 (?:DeepSeek|OpenAI|自定义接口)。请检查网络，或前往“我的”切换供应商。)/);if(networkFailed)return{state:"failed",reason:"network",raw:networkFailed[1]};if(/翻译完成/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest};if(/正在生成 Ren'Py 补丁 APK/.test(text))return{state:"patching",fileName,count,current,total,raw:log.raw,latest:log.latest};if(/正在处理脚本|翻译中|开始处理/.test(text))return{state:"translating",fileName,count,current,total,raw:log.raw,latest:log.latest};if(count==="0"&&watchdog?.epoch===window.__slgSelectionEpoch&&watchdog.settled&&!watchdog.timerFired)return{state:"empty",fileName,count,splitApk:!!selectionMeta?.splitApk,splitCount:selectionMeta?.splitCount||0};if(count!==""&&count!=="0")return{state:"ready",fileName,count};if(fileName||/正在扫描|正在检查文件|检查文件/.test(text))return{state:"scanning",fileName};return{state:"idle"}}
 function detailToggle(raw,live=false){const wrap=textNode("div","workshop-detail-wrap");const toggle=textNode("button","workshop-detail-toggle",detailsOpen?"收起详情":"处理详情");toggle.type="button";toggle.setAttribute("aria-expanded",String(detailsOpen));const body=textNode("div","workshop-detail-body",raw||"暂无更多信息");body.dataset.open=String(detailsOpen);const scrollLatest=()=>{if(live&&detailsOpen)window.requestAnimationFrame(()=>{body.scrollTop=body.scrollHeight})};toggle.onclick=()=>{detailsOpen=!detailsOpen;body.dataset.open=String(detailsOpen);toggle.setAttribute("aria-expanded",String(detailsOpen));toggle.textContent=detailsOpen?"收起详情":"处理详情";scrollLatest()};wrap.append(toggle,body);scrollLatest();return wrap}
- function renderTopbar(state){const bar=textNode("header","workshop-task-topbar");const label=state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":"";if(state!=="idle"){const back=textNode("button","workshop-task-back","‹");back.type="button";back.setAttribute("aria-label","返回");back.onclick=()=>setWorkshopState("idle",{fromBack:true});bar.append(back)}bar.append(textNode("h1","","APK 翻译"),textNode("span","workshop-topbar-state",label));return bar}
+ function renderTopbar(state){const bar=textNode("header","workshop-task-topbar");const label=state==="scanning"?"读取中":state==="empty"?"无文本":state==="ready"?"已就绪":state==="translating"?"翻译中":state==="patching"?"生成中":state==="completed"?"已完成":state==="failed"?"失败":"";if(state!=="idle"){const back=textNode("button","workshop-task-back","‹ 返回");back.type="button";back.setAttribute("aria-label","返回");back.onclick=()=>setWorkshopState("idle",{fromBack:true});bar.append(back)}bar.append(textNode("h1","","APK 翻译"),textNode("span","workshop-topbar-state",label));return bar}
 function fileRow(fileName){const row=textNode("div","workshop-file-row");row.append(textNode("span","workshop-file-icon","APK"));const copy=textNode("div","workshop-file-copy");copy.append(textNode("div","workshop-file-name",fileName||"尚未选择 APK"),textNode("div","workshop-file-meta",fileName?"已选择文件":"支持 Android APK 文件"));row.append(copy);return row}
 function actionButton(label,handler,secondary){const button=textNode("button",secondary?"workshop-secondary-action":"workshop-primary-action",label);button.type="button";button.onclick=handler;return button}
 function renderStateBody(state,payload){const body=textNode("div","workshop-task-body");if(state==="idle"){const brand=textNode("section","workshop-brand-panel");brand.append(textNode("p","","今天翻译什么？"),textNode("h2","","让喜欢的故事，用中文继续。"));const card=textNode("section","workshop-task-card");card.append(fileRow(""),textNode("p","workshop-state-copy","选择一个应用或 APK，开始你的中文旅程。"),actionButton("选择应用或 APK",openSourceChooser));body.append(brand,card);return body}
@@ -232,16 +289,16 @@ const title=textNode("h2","workshop-error-title","手机空间不足");const cop
 function setWorkshopState(state,payload={}){if(!shell)return;shell.dataset.workshopState=state;shell.setAttribute("data-workshop-state",state);shell.dataset.workshopTask=state==="idle"?"idle":"active";const task=shell.dataset.workshopTask;shell.setAttribute("data-workshop-task",shell.dataset.workshopTask);runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",task);shell.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");shell.classList.add(`workshop-state-${state}`);runtimeRoot?.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");runtimeRoot?.classList.add(`workshop-state-${state}`);shell.replaceChildren(renderTopbar(state),renderStateBody(state,payload))}
 function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.current||"",s.total||"",s.translated||"",s.reason||"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""].join("|")}
 function retryTask(payload){retrying=true;triggerReactButton(startButton||sourceButton);setWorkshopState("scanning",payload);window.setTimeout(()=>{retrying=false;refresh()},600)}
-function refresh(){if(!shell||retrying||settingsOpen)return;const snap=readTaskSnapshot();const active=snap.state==='scanning'||snap.state==='translating'||snap.state==='patching'||snap.state==='completed'||snap.state==='failed';if(manualIdle&&!active)return;const key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
+function refresh(){if(!shell||retrying||settingsOpen)return;const snap=readTaskSnapshot();const active=snap.state==='scanning'||snap.state==='translating'||snap.state==='patching'||snap.state==='completed'||snap.state==='failed';if(manualIdle&&!active)return;if(snap.state==='translating'){try{const now=Date.now();if(now-sessionLastBeat>=10000){sessionLastBeat=now;const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=now;localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}}catch{}}const key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
  function decorate(){const heading=[...document.querySelectorAll("#root h2")].find(el=>el.textContent&&el.textContent.includes("选择游戏 APK"));if(heading?.parentElement)heading.parentElement.classList.add("workshop-picker-source");startButton=findButton("开始翻译");if(startButton){startButton.classList.add("workshop-start-button");startButton.setAttribute("aria-hidden","true")}installButton=findButton("安装补丁版");if(installButton)installButton.setAttribute("aria-hidden","true");sourceButton=findButton("选择");if(sourceButton){sourceButton.classList.add("workshop-source-button");sourceButton.setAttribute("aria-label","选择 APK 文件");sourceButton.setAttribute("aria-hidden","true")}applyApiKeyToReact()}
 
 function formatBytes(bytes){const value=Number(bytes)||0;if(value<1024)return`${value} B`;const units=["KB","MB","GB"];let n=value/1024,unit=0;while(n>=1024&&unit<units.length-1){n/=1024;unit+=1}return`${n>=100?Math.round(n):Math.round(n*10)/10} ${units[unit]}`}
-function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u4f5c\u54c1"))?.setAttribute("aria-current","page");if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u6211\u7684\u8865\u4e01");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;top.append(back,textNode("h1","","\u6211\u7684\u8865\u4e01"));const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");const saveSection=textNode("section","workshop-saves-shell");const saveTitle=textNode("h2","workshop-settings-title","存档转移（雏形）");const saveHint=textNode("p","workshop-settings-status","备份当前游戏的 RenPy 存档，换机或重装后恢复。");const backupBtn=textNode("button","workshop-secondary-action","备份当前游戏存档");backupBtn.type="button";const restoreBtn=textNode("button","workshop-secondary-action","恢复所选备份");restoreBtn.type="button";const saveList=textNode("div","workshop-gallery-content");let saveBackups=[];const renderSaveList=()=>{saveList.replaceChildren();if(!saveBackups.length){saveList.append(textNode("p","workshop-gallery-status","还没有备份。"));return}for(const b of saveBackups){const row=textNode("div","workshop-patch-row");row.append(textNode("div","workshop-patch-name",b.name),textNode("div","workshop-patch-meta",`${b.fileCount||0} 个文件 · ${new Date(b.modifiedAt||Date.now()).toLocaleString()}`));const use=actionButton("恢复此备份",()=>restoreSelected(b));use.className="workshop-patch-save";row.append(use);saveList.append(row)}};const refreshSaves=async()=>{try{const r=await window.Capacitor.Plugins.FileManager.listSaveBackups();saveBackups=Array.isArray(r?.backups)?r.backups:[]}catch(e){saveBackups=[]}renderSaveList()};const backupSelected=async()=>{const meta=window.__slgSelectionMeta;if(!meta?.packageName){saveHint.textContent="请先在首页选择要备份的游戏。";return}backupBtn.disabled=true;saveHint.textContent="正在备份…";try{const r=await window.Capacitor.Plugins.FileManager.backupSaves({packageName:meta.packageName});saveHint.textContent=`已备份 ${r&&r.savedFiles||0} 个文件`;await refreshSaves()}catch(e){saveHint.textContent="备份失败："+(e&&e.message||String(e))}finally{backupBtn.disabled=false}};const restoreSelected=async(b)=>{const meta=window.__slgSelectionMeta;if(!meta?.packageName){saveHint.textContent="请先在首页选择要恢复的游戏。";return}restoreBtn.disabled=true;saveHint.textContent=`正在恢复 ${b.name} …`;try{const r=await window.Capacitor.Plugins.FileManager.restoreSaves({packageName:meta.packageName,backupDir:b.path});saveHint.textContent=`已恢复 ${r&&r.restoredFiles||0} 个文件，请重启游戏查看。`}catch(e){saveHint.textContent="恢复失败："+(e&&e.message||String(e))}finally{restoreBtn.disabled=false}};backupBtn.onclick=backupSelected;restoreBtn.onclick=()=>{saveHint.textContent="在下方备份列表选择要恢复的备份。";};saveSection.append(saveTitle,saveHint,backupBtn,restoreBtn,saveList);galleryShell.append(top,list,refresh,saveSection);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches();refreshSaves()}
-function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");[...(nav?.children||[])].forEach(el=>el.removeAttribute("aria-current"));[...(nav?.children||[])].find(el=>el.textContent?.includes("\u9996\u9875"))?.setAttribute("aria-current","page");if(!preserveHistory)releaseModalHistory();refresh()}
+function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;if(!galleryPrevNav){const nav0=document.querySelector(".workshop-bottom-nav");galleryPrevNav=nav0?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("\u5b89\u88c5\u5305"))?.setAttribute("aria-current","page")}if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u6211\u7684\u8865\u4e01");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039 \u8fd4\u56de");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;top.append(back,textNode("h1","","\u6211\u7684\u8865\u4e01"));const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");galleryShell.append(top,list,refresh);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches()}
+function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes(galleryPrevNav||"首页"))?.setAttribute("aria-current","page")}if(!preserveHistory)releaseModalHistory();refresh()}
 function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;list.replaceChildren();if(galleryLoading){list.append(textNode("p","workshop-gallery-status","\u6b63\u5728\u8bfb\u53d6\u8865\u4e01\u5217\u8868\u2026"));return}if(galleryError){list.append(textNode("p","workshop-gallery-status workshop-installed-error","\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError));return}if(!galleryPatches.length){list.append(textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u8865\u4e01 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u8865\u4e01\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));return}const rows=textNode("ul","workshop-gallery-list");for(const patch of galleryPatches){const item=textNode("li","");const card=textNode("div","workshop-patch-row");card.append(textNode("div","workshop-patch-name",patch.name||"\u672a\u547d\u540d\u8865\u4e01"));card.append(textNode("div","workshop-patch-meta",`${formatBytes(patch.size)} \u00b7 ${new Date(patch.modifiedAt||Date.now()).toLocaleString()}`));const save=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";card.append(save);item.append(card);rows.append(item)}list.append(rows)}
 async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager;galleryLoading=true;galleryError="";renderGallery();if(!plugin?.listPatchedApks){galleryLoading=false;galleryError="\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8bfb\u53d6\u8865\u4e01\u5217\u8868\uff0c\u8bf7\u5347\u7ea7\u5e94\u7528";renderGallery();return}try{const result=await plugin.listPatchedApks();galleryPatches=Array.isArray(result?.patches)?result.patches:[]}catch(error){galleryError=error?.message||String(error)}finally{galleryLoading=false;renderGallery()}}
 function enableNativeBackHandling(){if(nativeBackEnabled||nativeBackPending)return;const plugin=window.Capacitor?.Plugins?.FileManager;if(!plugin?.enableWorkshopBackHandling)return;nativeBackPending=true;Promise.resolve(plugin.enableWorkshopBackHandling()).then(()=>{nativeBackEnabled=true}).catch(()=>{}).finally(()=>{nativeBackPending=false})}
-function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["作品",openGallery],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
+function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;const app=document.querySelector("#root>div");if(!app||!sourceButton)return;runtimeRoot=app;if(!shell){app.classList.add(ID);shell=document.createElement("section");shell.className="workshop-task-shell";shell.dataset.workshopState="idle";shell.dataset.workshopTask="idle";app.prepend(shell);const nav=document.createElement("nav");nav.className="workshop-bottom-nav";nav.setAttribute("aria-label","主导航");[["首页",()=>window.scrollTo({top:0,behavior:"smooth"})],["安装包",openGallery],["我的",openSettings]].forEach(([label,action],index)=>{const button=textNode("button","workshop-touch",label);button.type="button";if(index===0)button.setAttribute("aria-current","page");button.onclick=()=>{[...nav.children].forEach(el=>el.removeAttribute("aria-current"));button.setAttribute("aria-current","page");action()};nav.append(button)});app.append(nav);setWorkshopState("idle",{})}refresh()}
 function handleWorkshopPopState(){if(modalHistoryClosing){modalHistoryClosing=false;if(modalHistoryRearm){modalHistoryRearm=false;armModalHistory()}return}if(installedDialog&&!installedDialog.hidden){modalHistoryArmed=false;closeInstalledApps(true);return}if(sourceDialog&&!sourceDialog.hidden){modalHistoryArmed=false;closeSourceChooser(true);return}if(settingsOpen){modalHistoryArmed=false;closeSettings(true);return}if(galleryOpen){modalHistoryArmed=false;closeGallery(true);return}if(shell?.dataset.workshopTask==="active"){manualIdle=true;setWorkshopState("idle",{fromBack:true})}}
 function schedule(){clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)}
 window.__slgHandleAndroidBack=()=>{if(installedDialog&&!installedDialog.hidden){closeInstalledApps();return true}if(sourceDialog&&!sourceDialog.hidden){closeSourceChooser();return true}if(settingsOpen){closeSettings();return true}if(galleryOpen){closeGallery();return true}return false};
@@ -250,86 +307,36 @@ document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-t
 
 
 def patch_scan_flow(js: str) -> str:
-    old = """xe=async()=>{try{let e=await E.pickApkFile();r(e.uri),a(e.uri.split(`/`).pop()||`Unknown.apk`),s([]),fe(null),w([]),d(!0),O(`正在扫描 APK 中的文本文件...`,`info`);let t=await E.listApkEntries({uri:e.uri});s(t.entries);try{let t=await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);t.packageName&&(p(t.packageName),O(`识别到包名: `+t.packageName,`info`))}catch{}let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(e){e.message!==`User cancelled`&&O(`选择文件失败: ${e.message}`,`error`),d(!1)}}"""
-    new = """function withTimeout(promise,timeoutMs,message){let timer;return new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(new Error(message)),timeoutMs);Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))}loadSelectedApk=window.__slgLoadSelectedApk=async e=>{let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;try{window.__slgSelectionError=null,window.__slgSelectionMeta=e,r(e.uri),a(e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`),p(e.packageName||``),s([]),fe(null),he.current=[],w([]),d(!0),O(e.source===`installed`?`正在读取已安装应用的 APK...`:`正在扫描 APK 中的文本文件...`,`info`),e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);let t=await withTimeout(E.listApkEntries({uri:e.uri}),window.__slgScanTimeoutMs||65000,`APK 检查超时，请重新选择应用或文件。`);if(selectionEpoch!==window.__slgSelectionEpoch)return;if(e.splitApk&&t.entries.length===0)throw new Error(`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`);s(t.entries),O(`APK 检查${t.cacheHit?`（缓存）`:``}用时 ${Math.max(0,Math.round((t.scanDurationMs||0)/100)/10)} 秒`,`info`);try{let n=e.packageName?{packageName:e.packageName}:t.packageName?{packageName:t.packageName}:await Promise.race([E.getApkPackageName({uri:e.uri}),new Promise(e=>setTimeout(()=>e({packageName:``}),3e3))]);if(selectionEpoch!==window.__slgSelectionEpoch)return;n.packageName&&(p(n.packageName),O(`识别到包名: `+n.packageName,`info`))}catch{}if(selectionEpoch!==window.__slgSelectionEpoch)return;let n=Jo(t.entries,c,g),i=Oe(n),o=Object.entries(i).map(([e,t])=>`${ds[e]||e}×${t}`).join(`, `);if(window.__slgRenpyMenuType===`renpy`){try{let _m=await E.injectTranslatorMenu({apkUri:e.uri,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''}catch{window.__slgTranslatorLang=''}}O(`共发现 ${n.length} 个可翻译文件（${o||`默认仅 Ren'Py`}）`,`success`),d(!1)}catch(t){if(selectionEpoch!==window.__slgSelectionEpoch)return;t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t}},xe=async()=>{try{await loadSelectedApk(await E.pickApkFile())}catch(e){e.message!==`User cancelled`&&!window.__slgSelectionError&&(window.__slgSelectionError={message:e.message,fileName:``},O(`选择文件失败: ${e.message}`,`error`)),d(!1)}}"""
-    new = new.replace(
-        "function withTimeout(promise,timeoutMs,message){",
-        "withTimeout=(promise,timeoutMs,message)=>{",
-        1,
-    ).replace(
-        ")}loadSelectedApk=window.__slgLoadSelectedApk=",
-        ")},loadSelectedApk=window.__slgLoadSelectedApk=",
-        1,
-    )
-    new = new.replace(
-        "withTimeout=(promise,timeoutMs,message)=>{let timer;return new Promise((resolve,reject)=>{"
-        "timer=setTimeout(()=>reject(new Error(message)),timeoutMs);"
-        "Promise.resolve(promise).then(resolve,reject)}).finally(()=>clearTimeout(timer))},",
-        "withTimeout=(promiseFactory,timeoutMs,message,onTimeout,watchdog)=>{let timer,finished=false;"
-        "return new Promise((resolve,reject)=>{timer=window.setTimeout(()=>{if(finished)return;"
-        "let error=new Error(message);watchdog.timerFired=true;onTimeout(error);reject(error)},timeoutMs);"
-        "Promise.resolve().then(promiseFactory).then(resolve,reject)}).finally(()=>{finished=true;"
-        "watchdog.settled=true;window.clearTimeout(timer)})},",
-        1,
-    )
-    loader_marker = "loadSelectedApk=window.__slgLoadSelectedApk=async e=>"
-    loader_start = new.index(loader_marker)
-    loader_end = new.index(",xe=async()=>", loader_start)
-    loader = new[loader_start + len(loader_marker) : loader_end]
-    body_start = loader.index("try{") + len("try{")
-    body_end = loader.index("}catch(t){", body_start)
-    scan_body = loader[body_start:body_end]
-    nested_deadline_start = scan_body.index("await withTimeout(E.listApkEntries")
-    nested_deadline_end = scan_body.index(";if(selectionEpoch", nested_deadline_start)
-    scan_body = (
-        scan_body[:nested_deadline_start]
-        + "await E.listApkEntries({uri:e.uri})"
-        + scan_body[nested_deadline_end:]
-    )
-    timeout_message = "APK 检查超时，请重新选择应用或文件。"
-    deadline_loader = (
-        "scanTimeoutMs=window.__slgScanTimeoutMs??=65000,"
-        "scanSelectedApk=async(e,selectionEpoch)=>{" + scan_body + "},"
-        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
-        "let selectionEpoch=window.__slgSelectionEpoch=(window.__slgSelectionEpoch||0)+1;"
-        "let watchdog=window.__slgScanWatchdog={epoch:selectionEpoch,"
-        "deadlineAt:Date.now()+window.__slgScanTimeoutMs,timerFired:false,settled:false,applied:false};"
-        "return withTimeout(()=>selectionEpoch===window.__slgSelectionEpoch?"
-        "scanSelectedApk(e,selectionEpoch):undefined,window.__slgScanTimeoutMs,`"
-        + timeout_message
-        + "`,timeoutError=>{if(selectionEpoch!==window.__slgSelectionEpoch)return;watchdog.applied=true;"
-        "window.__slgSelectionEpoch=selectionEpoch+1;"
-        "timeoutError.message!==`User cancelled`&&(window.__slgSelectionError={message:timeoutError.message,fileName:e.name||e.label||``},"
-        "O(`选择文件失败: ${timeoutError.message}`,`error`)),d(!1)},watchdog).catch(t=>{"
-        "if(watchdog.timerFired){if(watchdog.applied)throw t;return}"
-        "if(selectionEpoch!==window.__slgSelectionEpoch)return;"
-        "t.message!==`User cancelled`&&(window.__slgSelectionError={message:t.message,fileName:e.name||e.label||``},"
-        "O(`选择文件失败: ${t.message}`,`error`)),d(!1);throw t})}"
-    )
-    new = new[:loader_start] + deadline_loader + new[loader_end:]
-    session_save = "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
-    session_replacement = (
-        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{"
-        "try{globalThis.localStorage?.setItem('slg-workshop-session-v1',"
-        "JSON.stringify({uri:e.uri,name:e.name||e.label,packageName:e.packageName||'',source:e.source||'',savedAt:Date.now()}))}catch{}"
-    )
-    if new.count(session_save) != 1:
-        raise ValueError("Session persistence signature not found")
-    new = new.replace(session_save, session_replacement, 1)
+    start_marker = ",xe=async()=>{"
+    end_marker = ",Se=async()=>{"
+    start = js.find(start_marker)
+    end = js.find(end_marker, start)
+    if start < 0 or end < 0:
+        raise ValueError("APK scan flow signature not found")
+    old_flow = js[start:end]
+    if js.count(old_flow) != 1:
+        raise ValueError("APK scan flow signature is not unique")
+    return js.replace(old_flow, SCAN_FLOW, 1)
 
-    lang_stash_old = 's(t.entries),O(`APK '
-    lang_stash_new = ('window.__slgRenpyLanguages=t.renpyLanguages||[],'
-                      'window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgTranslatorLang=\'\',' 
-                      'window.__slgRenpyLang=t.renpyMenuType===`renpy`?([`chinese`,`schinese`,`zh-cn`,`zh-hans`,`zh-tw`,`zh`,`zh-hant`,`tchinese`,`simplified-chinese`,`simplified_chinese`,`traditional_chinese`].find(c=>(t.renpyLanguages||[]).includes(c))||``):``,'
-                      's(t.entries),O(`APK ')
-    if new.count(lang_stash_old) != 1:
-        raise ValueError("Language stash signature not found")
-    new = new.replace(lang_stash_old, lang_stash_new, 1)
-    if js.count(old) != 1:
-        raise ValueError("APK picker flow signature not found")
-    return js.replace(old, new, 1)
+def patch_saves_runtime(js: str) -> str:
+    open_old = 'function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsPrevNav){const nav=document.querySelector(".workshop-bottom-nav");settingsPrevNav=nav?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("我的"))?.setAttribute("aria-current","page")}let menuView=null,serviceView=null,savesView=null,cleanupView=null,aboutView=null;const showMenu=()=>{if(menuView)menuView.hidden=false;if(serviceView)serviceView.hidden=true;if(savesView)savesView.hidden=true;if(cleanupView)cleanupView.hidden=true;if(aboutView)aboutView.hidden=true};const showView=(v)=>{if(!menuView)return;menuView.hidden=true;serviceView.hidden=v!==serviceView;savesView.hidden=v!==savesView;cleanupView.hidden=v!==cleanupView;aboutView.hidden=v!==aboutView};if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");function makeView(){const v=textNode("section","workshop-settings-view");v.hidden=true;return v}function viewBack(label,handler){const b=textNode("button","workshop-task-back","‹ 返回");b.type="button";b.setAttribute("aria-label",label);b.onclick=handler;return b}menuView=makeView();serviceView=makeView();savesView=makeView();cleanupView=makeView();aboutView=makeView();const menuTop=textNode("header","workshop-task-topbar");const back=viewBack("返回任务",closeSettings);menuTop.append(back,textNode("h1","","我的设置"));const menu=textNode("div","workshop-settings-menu");function makeMenuItem(label,desc){const row=textNode("button","workshop-menu-item");row.type="button";const name=textNode("span","workshop-menu-item-label",label);const note=textNode("span","workshop-menu-item-desc",desc||"");const arrow=textNode("span","workshop-menu-item-arrow","›");row.append(name,note,arrow);return row}const service=makeMenuItem("翻译服务","配置 AI 供应商与 API Key");const saves=makeMenuItem("存档转移","备份与恢复游戏存档");const cleanup=makeMenuItem("清理安装包与旧缓存","释放手机存储空间");cleanup.classList.add("workshop-settings-cleanup");const about=makeMenuItem("关于","版本信息");menu.append(service,saves,cleanup,about);menuView.append(menuTop,menu);'
+    open_new = 'function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsPrevNav){const nav=document.querySelector(".workshop-bottom-nav");settingsPrevNav=nav?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("我的"))?.setAttribute("aria-current","page")}let menuView=null,serviceView=null,savesView=null,importView=null,cleanupView=null,aboutView=null;const showMenu=()=>{if(menuView)menuView.hidden=false;if(serviceView)serviceView.hidden=true;if(savesView)savesView.hidden=true;if(cleanupView)cleanupView.hidden=true;if(aboutView)aboutView.hidden=true;if(importView)importView.hidden=true};const showView=(v)=>{if(!menuView)return;menuView.hidden=true;serviceView.hidden=v!==serviceView;savesView.hidden=v!==savesView;cleanupView.hidden=v!==cleanupView;aboutView.hidden=v!==aboutView;importView.hidden=v!==importView};if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");function makeView(){const v=textNode("section","workshop-settings-view");v.hidden=true;return v}function viewBack(label,handler){const b=textNode("button","workshop-task-back","‹ 返回");b.type="button";b.setAttribute("aria-label",label);b.onclick=handler;return b}menuView=makeView();serviceView=makeView();savesView=makeView();importView=makeView();cleanupView=makeView();aboutView=makeView();const menuTop=textNode("header","workshop-task-topbar");const back=viewBack("返回任务",closeSettings);menuTop.append(back,textNode("h1","","我的设置"));const menu=textNode("div","workshop-settings-menu");function makeMenuItem(label,desc){const row=textNode("button","workshop-menu-item");row.type="button";const name=textNode("span","workshop-menu-item-label",label);const note=textNode("span","workshop-menu-item-desc",desc||"");const arrow=textNode("span","workshop-menu-item-arrow","›");row.append(name,note,arrow);return row}const service=makeMenuItem("翻译服务","配置 AI 供应商与 API Key");const saves=makeMenuItem("存档转移","保存与分享游戏存档");const importItem=makeMenuItem("导入存档","从下载目录导入游戏存档");const cleanup=makeMenuItem("清理安装包与旧缓存","释放手机存储空间");cleanup.classList.add("workshop-settings-cleanup");const about=makeMenuItem("关于","版本信息");menu.append(service,saves,importItem,cleanup,about);menuView.append(menuTop,menu);'
+    if js.count(open_old) != 1:
+        raise ValueError("openSettings view signature not found")
+    js = js.replace(open_old, open_new, 1)
 
+    saves_old = 'const backupHint=textNode("p","workshop-settings-helper","请先选择游戏。");\nconst backupBtn=textNode("button","workshop-settings-save","备份当前存档");\nbackupBtn.type="button";\nconst savesList=textNode("div","workshop-saves-list");\nconst savesEmpty=textNode("p","workshop-saves-empty","暂无备份。");\nsavesList.append(savesEmpty);\nconst updateSavesState=()=>{const pkg=window.__slgSelectionMeta?.packageName||"";const ready=!!pkg&&!!plugin;backupBtn.disabled=!ready;backupHint.textContent=!pkg?"请先选择游戏。":"备份保存到本机应用目录。";if(/Android\\s+(1[1-9]|[2-9][0-9])/i.test(navigator.userAgent)){permissionNote.textContent="请在系统设置中授予“所有文件访问”权限后，再进行备份或恢复。"}else{permissionNote.hidden=true}};\nupdateSavesState();\nasync function refreshSaves(){if(!plugin){savesStatus.textContent="当前版本不支持存档转移。";return}savesStatus.textContent="正在读取备份…";try{const result=await plugin.listSaveBackups();savesList.replaceChildren();const backups=Array.isArray(result?.backups)?result.backups:[];if(!backups.length){savesList.append(savesEmpty);savesEmpty.textContent="暂无备份。";savesStatus.textContent="";return}backups.forEach(item=>{const row=textNode("article","workshop-save-row");const name=textNode("div","workshop-save-name",item.name||"未命名备份");const meta=textNode("div","workshop-save-meta",`${item.fileCount||0} 个文件 · ${new Date(item.modifiedAt||Date.now()).toLocaleString()}`);const actions=textNode("div","workshop-save-actions");const restore=textNode("button","workshop-save-restore","恢复");restore.type="button";const del=textNode("button","workshop-save-delete","删除");del.type="button";restore.onclick=async()=>{if(!confirm(`恢复 ${item.name||"该备份"} 会覆盖当前存档，确定继续？`))return;restore.disabled=true;restore.textContent="恢复中…";try{await plugin.restoreSaves({packageName:window.__slgSelectionMeta?.packageName||"",backupDir:item.path||item.name});savesStatus.textContent="恢复完成。"}catch(e){savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}};del.onclick=async()=>{if(!confirm(`确定删除备份 ${item.name||"该备份"}？`))return;del.disabled=true;del.textContent="删除中…";try{await plugin.deleteBackup({backupDir:item.path||item.name});savesStatus.textContent="已删除备份。";await refreshSaves()}catch(e){savesStatus.textContent="删除失败："+(e&&e.message||String(e));del.disabled=false;del.textContent="删除"}};actions.append(restore,del);row.append(name,meta,actions);savesList.append(row)});savesStatus.textContent=`共 ${backups.length} 个备份。`}catch(e){savesStatus.textContent="读取备份失败："+(e&&e.message||String(e))}}\nbackupBtn.onclick=async()=>{const pkg=window.__slgSelectionMeta?.packageName||"";if(!pkg)return;backupBtn.disabled=true;backupBtn.textContent="正在备份…";try{await plugin.backupSaves({packageName:pkg});savesStatus.textContent="备份完成。";await refreshSaves()}catch(e){savesStatus.textContent="备份失败："+(e&&e.message||String(e))}finally{updateSavesState()}};\nsavesCard.append(permissionNote,backupHint,backupBtn,savesStatus,savesList);\nconst originalBackupClick=backupBtn.onclick;backupBtn.onclick=async()=>{try{return await originalBackupClick()}finally{backupBtn.textContent="\\u5907\\u4efd\\u5f53\\u524d\\u5b58\\u6863"}};\nsavesView.append(savesTop,savesCard);'
+    saves_new = 'let savesSelectedPkg="",savesSelectedLabel="";\nconst gameLabel=textNode("p","workshop-settings-helper","请先选择游戏。");\nconst gameBtn=textNode("button","workshop-settings-save","选择游戏");\ngameBtn.type="button";\nconst gameSelect=textNode("select","workshop-settings-input");\ngameSelect.hidden=true;gameSelect.style.marginTop="10px";\ngameSelect.setAttribute("aria-label","选择游戏");\nlet saveGameApps=[];\nconst knownSavePackages=new Set(["zitao.mbml","cim.isekai.game","com.yishijietiantang.com","newmanwa.com","com.rogueone.tnt"]);\nfunction saveGameMatches(app){const pkg=app.packageName||"",label=app.label||"";return pkg.includes(".")&&(knownSavePackages.has(pkg)||/renpy|visual\\s*novel|galgame|manwa|isekai|rogueone|恶女/i.test(`${pkg}\\n${label}`))}\nfunction renderSaveGames(apps){\n  gameSelect.replaceChildren();\n  const placeholder=textNode("option","","请选择游戏");placeholder.value="";gameSelect.append(placeholder);\n  for(const app of apps){const option=textNode("option","",app.label||app.packageName||"未命名应用");option.value=app.packageName||"";gameSelect.append(option)}\n  gameSelect.value=savesSelectedPkg;\n}\ngameSelect.onchange=()=>{const pkg=gameSelect.value;if(!pkg)return;const app=saveGameApps.find(a=>a.packageName===pkg)||{packageName:pkg,label:pkg};savesSelectedPkg=pkg;savesSelectedLabel=app.label||pkg;gameLabel.textContent=`当前游戏：${savesSelectedLabel}`;updateSavesState();refreshSaves()};\ngameBtn.onclick=async()=>{gameBtn.disabled=true;gameBtn.textContent="正在读取…";try{const result=plugin.listSaveGameApps?await plugin.listSaveGameApps():await plugin.listInstalledApps();const apps=Array.isArray(result?.apps)?result.apps:[];const fromSaveSource=typeof plugin.listSaveGameApps==="function";saveGameApps=apps.filter(app=>{const pkg=app.packageName||"";return pkg.includes(".")&&(fromSaveSource||saveGameMatches(app))});renderSaveGames(saveGameApps);gameSelect.hidden=false;gameLabel.textContent=saveGameApps.length?`已找到 ${saveGameApps.length} 个游戏，请选择。`:"没有找到已安装的存档目录。";}catch(e){gameLabel.textContent="读取游戏列表失败："+(e&&e.message||String(e))}finally{gameBtn.disabled=false;gameBtn.textContent=savesSelectedPkg?"重新选择游戏":"选择游戏"}};\nconst exportBtn=textNode("button","workshop-settings-save","保存存档");\nexportBtn.type="button";\nconst savesList=textNode("div","workshop-saves-list");\nconst savesEmpty=textNode("p","workshop-saves-empty","暂无备份。");\nsavesList.append(savesEmpty);\nconst updateSavesState=()=>{const pkg=savesSelectedPkg;const ready=!!pkg&&!!plugin;exportBtn.disabled=!ready;gameLabel.textContent=!pkg?"请先选择游戏。":`当前游戏：${savesSelectedLabel||pkg}`;gameBtn.textContent=pkg?"重新选择游戏":"选择游戏";if(gameSelect.options)gameSelect.value=pkg;if(/Android\\s+(1[1-9]|[2-9][0-9])/i.test(navigator.userAgent)){permissionNote.textContent="请在系统设置中授予“所有文件访问”权限后，再进行保存或恢复。"}else{permissionNote.hidden=true}};\nupdateSavesState();\nasync function refreshSaves(){if(!plugin){savesStatus.textContent="当前版本不支持存档转移。";return}savesStatus.textContent="正在读取备份…";try{const result=await plugin.listSaveBackups();savesList.replaceChildren();const backups=Array.isArray(result?.backups)?result.backups:[];if(!backups.length){savesList.append(savesEmpty);savesEmpty.textContent="暂无备份。";savesStatus.textContent="";return}backups.forEach(item=>{const row=textNode("article","workshop-save-row");const name=textNode("div","workshop-save-name",item.name||"未命名备份");const meta=textNode("div","workshop-save-meta",`${item.fileCount||0} 个文件 · ${new Date(item.modifiedAt||Date.now()).toLocaleString()}`);const actions=textNode("div","workshop-save-actions");const restore=textNode("button","workshop-save-restore","恢复");restore.type="button";const share=textNode("button","workshop-save-share","分享");share.type="button";const del=textNode("button","workshop-save-delete","删除");del.type="button";restore.onclick=async()=>{if(!confirm(`恢复 ${item.name||"该备份"} 会覆盖当前存档，确定继续？`))return;restore.disabled=true;restore.textContent="恢复中…";try{await plugin.restoreSaves({packageName:savesSelectedPkg,backupDir:item.path||item.name});savesStatus.textContent="恢复完成。"}catch(e){savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}};share.onclick=async()=>{share.disabled=true;share.textContent="分享中…";try{await plugin.shareSaveBackup({backupDir:item.path||item.name});savesStatus.textContent="已分享存档。"}catch(e){savesStatus.textContent="分享失败："+(e&&e.message||String(e))}finally{share.disabled=false;share.textContent="分享"}};del.onclick=async()=>{if(!confirm(`确定删除备份 ${item.name||"该备份"}？`))return;del.disabled=true;del.textContent="删除中…";try{await plugin.deleteBackup({backupDir:item.path||item.name});savesStatus.textContent="已删除备份。";await refreshSaves()}catch(e){savesStatus.textContent="删除失败："+(e&&e.message||String(e));del.disabled=false;del.textContent="删除"}};actions.append(restore,share,del);row.append(name,meta,actions);savesList.append(row)});savesStatus.textContent=`共 ${backups.length} 个备份。`}catch(e){savesStatus.textContent="读取备份失败："+(e&&e.message||String(e))}}\nexportBtn.onclick=async()=>{const pkg=savesSelectedPkg;if(!pkg)return;exportBtn.disabled=true;exportBtn.textContent="正在保存…";try{const result=await plugin.exportSavesToDownloads({packageName:pkg});savesStatus.textContent=result?.path?`已保存：${result.path}`:"已保存到下载。";}catch(e){savesStatus.textContent="保存失败："+(e&&e.message||String(e))}finally{exportBtn.textContent="保存存档";updateSavesState()}};\nsavesCard.append(permissionNote,gameLabel,gameBtn,gameSelect,exportBtn,savesStatus,savesList);\nsavesView.append(savesTop,savesCard);\nconst importTop=textNode("header","workshop-task-topbar");\nconst importBack=viewBack("返回菜单",showMenu);\nimportTop.append(importBack,textNode("h1","","导入存档"));\nconst importCard=textNode("section","workshop-settings-card");\nimportCard.append(textNode("h2","workshop-settings-title","导入存档"));\nconst importPermission=textNode("p","workshop-settings-helper");\nconst importStatus=textNode("p","workshop-settings-status");\nconst importGameLabel=textNode("p","workshop-settings-helper","请先选择游戏。");\nconst importGameBtn=textNode("button","workshop-settings-save","选择游戏");\nimportGameBtn.type="button";\nconst importGameSelect=textNode("select","workshop-settings-input");\nimportGameSelect.hidden=true;importGameSelect.style.marginTop="10px";importGameSelect.setAttribute("aria-label","选择游戏");\nlet importSelectedPkg="",importSelectedLabel="";\nlet importGameApps=[];\nfunction renderImportGames(apps){importGameSelect.replaceChildren();const placeholder=textNode("option","","请选择游戏");placeholder.value="";importGameSelect.append(placeholder);for(const app of apps){const option=textNode("option","",app.label||app.packageName||"未命名应用");option.value=app.packageName||"";importGameSelect.append(option)}importGameSelect.value=importSelectedPkg}\nimportGameSelect.onchange=()=>{const pkg=importGameSelect.value;if(!pkg)return;const app=importGameApps.find(a=>a.packageName===pkg)||{packageName:pkg,label:pkg};importSelectedPkg=pkg;importSelectedLabel=app.label||pkg;importGameLabel.textContent=`当前游戏：${importSelectedLabel}`;updateImportState()};\nimportGameBtn.onclick=async()=>{importGameBtn.disabled=true;importGameBtn.textContent="正在读取…";try{const result=plugin.listSaveGameApps?await plugin.listSaveGameApps():await plugin.listInstalledApps();const apps=Array.isArray(result?.apps)?result.apps:[];const fromSaveSource=typeof plugin.listSaveGameApps==="function";importGameApps=apps.filter(app=>{const pkg=app.packageName||"";return pkg.includes(".")&&(fromSaveSource||saveGameMatches(app))});renderImportGames(importGameApps);importGameSelect.hidden=false;importGameLabel.textContent=importGameApps.length?`已找到 ${importGameApps.length} 个游戏，请选择。`:"没有找到已安装的存档目录。";}catch(e){importGameLabel.textContent="读取游戏列表失败："+(e&&e.message||String(e))}finally{importGameBtn.disabled=false;importGameBtn.textContent=importSelectedPkg?"重新选择游戏":"选择游戏"}};\nconst importArchiveBtn=textNode("button","workshop-settings-save","导入分享存档");\nimportArchiveBtn.type="button";\nconst importList=textNode("div","workshop-saves-list");\nlet importArchives=[];\nlet importArchiveSection=null;\nfunction renderImportArchiveRows(){\n  if(importArchiveSection){importArchiveSection.hidden=true;try{importArchiveSection.remove()}catch(e){}importArchiveSection=null}\n  if(!importArchives.length)return;\n  const section=textNode("section","workshop-archive-section");\n  const heading=textNode("h3","workshop-archive-title",`下载目录存档（${importArchives.length}）`);\n  section.append(heading);\n  importArchives.forEach(item=>{\n    const row=textNode("article","workshop-save-row");\n    const name=textNode("div","workshop-save-name",item.name||"未命名存档");\n    const size=item.size||0;\n    const sizeLabel=size>1048576?`${(size/1048576).toFixed(1)} MB`:Math.max(1,Math.round(size/1024))+" KB";\n    const meta=textNode("div","workshop-save-meta",`${sizeLabel} · ${new Date(item.modifiedAt||Date.now()).toLocaleString()}`);\n    const importOne=textNode("button","workshop-save-restore","导入");\n    importOne.type="button";\n    const delArchive=textNode("button","workshop-save-delete","删除");\n    delArchive.type="button";\n    importOne.onclick=async()=>{importOne.disabled=true;importOne.textContent="导入中…";try{const result=await plugin.importSaveBackup({path:item.path});if(result?.packageName){importSelectedPkg=result.packageName;const importedApp=importGameApps.find(a=>a.packageName===result.packageName)||{packageName:result.packageName,label:result.packageName};importSelectedLabel=importedApp.label;renderImportGames(importGameApps);importGameLabel.textContent=`当前游戏：${importSelectedLabel}`;updateImportState()}importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent=result?.packageName?`已导入 ${result.packageName} 的存档。`:"已导入存档。";}catch(e){importStatus.textContent="导入失败："+(e&&e.message||String(e));importOne.disabled=false;importOne.textContent="导入"}};\n    delArchive.onclick=async()=>{if(!confirm(`确定删除存档 ${item.name||"该文件"}？`))return;delArchive.disabled=true;delArchive.textContent="删除中…";try{await plugin.deleteSaveArchive({path:item.path});importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent=`已删除 ${item.name||"存档"}。`;}catch(e){importStatus.textContent="删除失败："+(e&&e.message||String(e));delArchive.disabled=false;delArchive.textContent="删除"}};\n    row.append(name,meta,importOne,delArchive);\n    section.append(row);\n  });\n  importArchiveSection=section;\n  importList.append(section);\n}\nimportArchiveBtn.onclick=async()=>{importArchiveBtn.disabled=true;importArchiveBtn.textContent="正在读取…";try{const result=await plugin.listSaveArchives();importArchives=Array.isArray(result?.archives)?result.archives:[];renderImportArchiveRows();importStatus.textContent=importArchives.length?`找到 ${importArchives.length} 个存档 zip，已显示在下方面板。`:"下载目录没有找到存档 zip。";}catch(e){importStatus.textContent="读取存档文件失败："+(e&&e.message||String(e))}finally{importArchiveBtn.disabled=false;importArchiveBtn.textContent="重新选择存档"}};\nconst updateImportState=()=>{const pkg=importSelectedPkg;importGameBtn.textContent=pkg?"重新选择游戏":"选择游戏";importGameLabel.textContent=!pkg?"请先选择游戏。":`当前游戏：${importSelectedLabel||pkg}`;if(importGameSelect.options)importGameSelect.value=pkg;if(/Android\\s+(1[1-9]|[2-9][0-9])/i.test(navigator.userAgent)){importPermission.textContent="请在系统设置中授予“所有文件访问”权限后，再导入或恢复。"}else{importPermission.hidden=true}};\nupdateImportState();\nimportCard.append(importPermission,importGameLabel,importGameBtn,importGameSelect,importArchiveBtn,importStatus,importList);\nimportView.append(importTop,importCard);'
+    if js.count(saves_old) != 1:
+        raise ValueError("saves runtime signature not found")
+    js = js.replace(saves_old, saves_new, 1)
 
+    bottom_old = 'service.onclick=()=>showView(serviceView);saves.onclick=()=>{showView(savesView);refreshSaves()};cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}'
+    bottom_new = 'service.onclick=()=>showView(serviceView);saves.onclick=()=>{showView(savesView);refreshSaves()};importItem.onclick=()=>showView(importView);cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,importView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}'
+    if js.count(bottom_old) != 1:
+        raise ValueError("settings shell append signature not found")
+    js = js.replace(bottom_old, bottom_new, 1)
+    return js
 def enhance_runtime(runtime: str) -> str:
     runtime = runtime.replace(
         "manualIdle=false,retrying=false,detailsOpen=false;\nfunction textNode",
@@ -359,7 +366,7 @@ function setReactInputValue(input,value)""",
         raise ValueError("Scanning state signature not found")
     runtime = runtime.replace(
         "function setWorkshopState(state,payload={}){if(!shell)return;",
-        'function setWorkshopState(state,payload={}){if(!shell)return;state==="scanning"?startScanClock():stopScanClock();',
+        'function setWorkshopState(state,payload={}){if(!shell)return;if(state==="translating"||state==="patching"){try{navigator.wakeLock?.request("screen").then(w=>{globalThis.__slgWakeLock=w}).catch(()=>{})}catch{}}else if(globalThis.__slgWakeLock){try{globalThis.__slgWakeLock.release().catch(()=>{})}catch{}globalThis.__slgWakeLock=null}state==="scanning"?startScanClock():stopScanClock();',
         1,
     )
     runtime = runtime.replace(
@@ -377,12 +384,12 @@ function setReactInputValue(input,value)""",
         raise ValueError("Completed install action signature not found")
     runtime = runtime.replace(
         's.reason||"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""',
-        's.reason||"",s.installAvailable?"install":"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""',
+        's.reason||"",s.installAvailable?"install":"",s.sessionRestoredAt?`restored-${s.sessionRestoredAt}`:"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""',
         1,
     )
     # --- session auto-resume (renderer-crash recovery) ---
     session_state_old = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0;"
-    session_state_new = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError='';"
+    session_state_new = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError='';"
     if runtime.count(session_state_old) != 1:
         raise ValueError("Session state signature not found")
     runtime = runtime.replace(session_state_old, session_state_new, 1)
@@ -408,9 +415,9 @@ function setReactInputValue(input,value)""",
     mount_old = "function mount(){decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;"
     mount_new = (
         "function restoreSession(){if(restoringSession||window.__slgSelectionMeta)return;let raw=null;try{raw=localStorage.getItem(SESSION_KEY)}catch{}"
-        "if(!raw)return;let s=null;try{s=JSON.parse(raw)}catch{}if(!s||!s.uri)return;restoringSession=true;"
+        "if(!raw)return;let s=null;try{s=JSON.parse(raw)}catch{}if(!s||!s.uri||!s.translating)return;restoringSession=true;"
         "Promise.resolve(window.__slgLoadSelectedApk?.({uri:s.uri,name:s.name||s.label||\"\",packageName:s.packageName||\"\",source:s.source||\"installed\",splitApk:false,splitCount:0}))"
-        ".catch(()=>{}).finally(()=>{restoringSession=false;sessionRestoredAt=s.savedAt||Date.now();refresh()})}\n"
+        ".catch(()=>{}).finally(()=>{restoringSession=false;if(s.translating)sessionRestoredAt=s.savedAt||Date.now();refresh()})}\n"
         "function recoveryBanner(savedAt){const wrap=textNode(\"section\",\"workshop-task-card\");"
         "wrap.append(textNode(\"h2\",\"workshop-settings-title\",\"" "\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad" "\"),"
         "textNode(\"p\",\"workshop-state-copy\",\"" "\u7ffb\u8bd1\u4f1a\u8bdd\u56e0\u9875\u9762\u5237\u65b0\u4e2d\u65ad\uff0c\u5df2\u5b8c\u6210\u5185\u5bb9\u5df2\u4fdd\u5b58\u5728\u672c\u673a\u7f13\u5b58\u4e2d\u3002" "\"),"
@@ -444,9 +451,35 @@ function setReactInputValue(input,value)""",
         raise ValueError("Completed clear signature not found")
     runtime = runtime.replace(completed_old, completed_new, 1)
 
+    # --- overlay idle-state preservation ---
+    overlay_helpers = (
+        'function beginOverlay(){manualIdleBeforeOverlay=manualIdle;manualIdle=true}'
+        'function endOverlay(){manualIdle=manualIdleBeforeOverlay}\n'
+    )
+    settings_close_old = 'function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false;lastSnapshot="";'
+    settings_close_new = 'function closeSettings(preserveHistory=false){settingsOpen=false;endOverlay();lastSnapshot="";'
+    if runtime.count(settings_close_old) != 1:
+        raise ValueError("Settings close signature not found")
+    runtime = runtime.replace(settings_close_old, overlay_helpers + settings_close_new, 1)
+    settings_open_old = 'function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;'
+    settings_open_new = 'function openSettings(){armModalHistory();beginOverlay();settingsOpen=true;'
+    if runtime.count(settings_open_old) != 1:
+        raise ValueError("Settings open signature not found")
+    runtime = runtime.replace(settings_open_old, settings_open_new, 1)
+    gallery_open_old = 'function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;'
+    gallery_open_new = 'function openGallery(){armModalHistory();beginOverlay();galleryOpen=true;'
+    if runtime.count(gallery_open_old) != 1:
+        raise ValueError("Gallery open signature not found")
+    runtime = runtime.replace(gallery_open_old, gallery_open_new, 1)
+    gallery_close_old = 'function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";'
+    gallery_close_new = 'function closeGallery(preserveHistory=false){galleryOpen=false;endOverlay();lastSnapshot="";'
+    if runtime.count(gallery_close_old) != 1:
+        raise ValueError("Gallery close signature not found")
+    runtime = runtime.replace(gallery_close_old, gallery_close_new, 1)
+
     # --- patched APK visibility & signature-conflict handling ---
     snap_old = 'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected};'
-    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
+    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
                 'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected}}')
     if runtime.count(snap_old) != 1:
         raise ValueError("Completed snapshot signature not found")
@@ -502,13 +535,42 @@ function setReactInputValue(input,value)""",
     mode_anchor = 'if(state==="ready"){card.append(textNode("p","workshop-state-copy","'
     # mode selector inserted right after the ready card opens (before ?????)
     mode_new = (
-        'if(state==="ready"){const modes=textNode("div","workshop-summary-list");'
-        '["' "\u7ee7\u7eed\u4e0a\u6b21" '","' "\u626b\u63cf\u65b0\u589e" '","' "\u5168\u90e8\u91cd\u8bd1" '"].forEach(label=>{modes.append(actionButton(label,()=>clickReact(label),true))});'
+        'if(state==="ready"){const modes=textNode("div","workshop-summary-list");const _pkg=window.__slgSelectionMeta?.packageName||"";if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(_pkg)){'
+        '["' "\u7ee7\u7eed\u4e0a\u6b21" '","' "\u626b\u63cf\u65b0\u589e" '","' "\u5168\u90e8\u91cd\u8bd1" '"].forEach(label=>{modes.append(actionButton(label,()=>clickReact(label),true))});}'
         'card.append(modes);card.append(textNode("p","workshop-state-copy","'
     )
     if runtime.count(mode_anchor) != 1:
         raise ValueError("Ready mode selector signature not found")
     runtime = runtime.replace(mode_anchor, mode_new, 1)
+
+    runtime = runtime.replace(
+        "card.append(textNode(\"p\",\"workshop-settings-status\",\"提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。\"));",
+        "if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(window.__slgSelectionMeta?.packageName||\"\"))card.append(textNode(\"p\",\"workshop-settings-status\",\"提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。\"));",
+        1,
+    )
+    runtime = runtime.replace(
+        "window.__slgHandleAndroidBack=()=>{",
+        "var settingsPrevNav=\"首页\",galleryPrevNav=\"首页\";globalThis.__slgSrcLang??=`en`;globalThis.__slgDstLang??=`zh`;window.__slgHandleAndroidBack=()=>{",
+        1,
+    )
+
+    boot_old = ';(()=>{const ID="workshop-runtime";'
+    boot_new = (
+        ';(()=>{const bootStyle=document.createElement("style");'
+        'bootStyle.textContent="#root>div:not(.workshop-runtime)>header,#root>div:not(.workshop-runtime)>nav,#root>div:not(.workshop-runtime)>footer,#root>div:not(.workshop-runtime)>main{display:none!important}";'
+        '(document.head||document.documentElement).appendChild(bootStyle);'
+        'const ID="workshop-runtime";'
+    )
+    if runtime.count(boot_old) != 1:
+        raise ValueError("Legacy UI boot style signature not found")
+    runtime = runtime.replace(boot_old, boot_new, 1)
+
+    mount_wait_old = 'const app=document.querySelector("#root>div");if(!app||!sourceButton)return;'
+    mount_wait_new = 'const app=document.querySelector("#root>div");if(!app)return;'
+    if runtime.count(mount_wait_old) != 1:
+        raise ValueError("Mount source-button wait signature not found")
+    runtime = runtime.replace(mount_wait_old, mount_wait_new, 1)
+    runtime = enhance_local_runtime(runtime)
 
     return runtime
 
@@ -517,7 +579,7 @@ function setReactInputValue(input,value)""",
 
 def patch_translation_cache(js: str) -> str:
     old_state = 'var _o=`slg-translator-cache:`,vo={},yo=!1,bo=!1,bp=Promise.resolve();'
-    new_state = 'var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();'
+    new_state = 'var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();globalThis.__slgHasHistory=function(pkg){if(!pkg)return false;try{for(const[_k,_v]of Object.entries(vo)){if(_k.startsWith(`slg-file-v1:`)&&_v&&_v.pkg===pkg)return true}return false}catch{return false}};'
     if js.count(old_state) != 1:
         raise ValueError("Translation cache state signature not found")
     js = js.replace(old_state, new_state, 1)
@@ -553,6 +615,63 @@ async function wo()'''
     if js.count(old_lookup) != 1:
         raise ValueError("Translation cache lookup signature not found")
     return js.replace(old_lookup, new_lookup, 1)
+
+
+def patch_local_engine(js: str) -> str:
+    # Add the on-device provider to the React provider list so the settings
+    # UI can select it and the React translate flow keeps working untouched.
+    old_providers = "_e=[{id:`openai`,"
+    local_provider = (
+        "_e=[{id:`local`,name:`本机离线翻译（免费）`,baseURL:``,models:["
+        "{id:`mlkit`,name:`轻量翻译（ML Kit）`,supportsJsonMode:!1},"
+        "{id:`qwen`,name:`高质量翻译（本地模型）`,supportsJsonMode:!1}]},{id:`openai`,"
+    )
+    if js.count(old_providers) != 1:
+        raise ValueError("Local engine provider anchor not found")
+    js = js.replace(old_providers, local_provider, 1)
+
+    # Route batch translation to the local kernel when the workshop runtime
+    # arms window.__slgLocalTranslate (local engine selected in settings).
+    old_lo = (
+        "async function Lo(e){let{texts:t,sourceLang:n,targetLang:r,baseURL:i,apiKey:a,"
+        "model:o,glossary:s,batchSize:c=jo,onProgress:l}=e;if(await Co(),t.length===0)"
+    )
+    local_branch = (
+        "if(globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl){let _engine=\"\";try{"
+        "const _s=document.querySelector(\"#settingsProvider\");if(_s&&_s.value===\"local\"){"
+        "const _m=document.querySelector(\"#settingsModel\");_engine=(_m&&_m.value===\"qwen\")?\"llm\":\"mlkit\"}}catch(_x){}"
+        "if(!_engine){try{const _p=JSON.parse(localStorage.getItem(\"slg-workshop-settings-v1\")||\"null\");"
+        "if(_p&&_p.providerId===\"local\")_engine=_p.model===\"qwen\"?\"llm\":\"mlkit\"}catch(_x){}}"
+        "if(_engine){let _lr=null,_le=null;try{"
+        "_lr=await (globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl)("
+        "{texts:t,sourceLang:n,targetLang:r,onProgress:l,engine:_engine})"
+        "}catch(e){_le=e}if(_lr)return _lr;"
+        "if(_le)return {translations:new Map(),successCount:0,"
+        "warnings:[String(_le&&_le.message||_le)],error:String(_le&&_le.message||_le)}}}"
+    )
+    new_lo = old_lo.replace("}=e;if(await Co(),t.length===0)", "}=e;" + local_branch + "if(await Co(),t.length===0)")
+    if js.count(old_lo) != 1:
+        raise ValueError("Local engine Lo anchor not found")
+    js = js.replace(old_lo, new_lo, 1)
+
+    # Let the React start button stay enabled when the local engine is
+    # selected even without an API key, and let the translation controller
+    # skip its apiKey gate in that case. The workshop runtime keeps
+    # window.__slgLocalSelected up to date.
+    old_disabled = "disabled:se||!te&&!oe"
+    new_disabled = "disabled:se||(!te&&!oe&&!window.__slgLocalSelected)"
+    if js.count(old_disabled) != 1:
+        raise ValueError("Local engine start-button disabled anchor not found")
+    js = js.replace(old_disabled, new_disabled, 1)
+
+    old_gate = "if(!n||ae.length===0||!te&&!oe)return;"
+    new_gate = "if(!n||ae.length===0||(!te&&!oe&&!window.__slgLocalSelected))return;"
+    if js.count(old_gate) != 1:
+        raise ValueError("Local engine controller gate anchor not found")
+    js = js.replace(old_gate, new_gate, 1)
+
+    return js
+
 
 
 def patch_translation_network(js: str) -> str:
@@ -625,7 +744,7 @@ async function Lo(e){'''
     )
     new_build = (
         "E.buildPatchedApk({uri:(window.__slgSelectionMeta?.uri||n),"
-        "files:(()=>{const _f=a.filter(_x=>!String(_x.path).includes(`/x-tl/`)&&!String(_x.path).includes(`/tl/`));return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
+        "files:(()=>{const _f=a.filter(_x=>{let _p=String(_x.path);return !_p.includes(`/tl/`)&&!_p.includes(`x-slgtranslated`)});return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
         "outputDirUri:m,outputName:Me(i),"
         "targetRenpyLanguage:window.__slgCompiledCount>0?'':is(y),sourceRenpyLanguage:window.__slgCompiledCount>0?'':is(g)}"
     )
@@ -716,7 +835,7 @@ async function Lo(e){'''
         "let _outs=[rs(o,l,_map,`None`),rs(o,l,_map,g)],_uniq=new Map;oe||_outs.unshift(rs(o,l,_map,y));"
         "for(let e of _outs)_uniq.set(e.outputPath,e);"
         "for(let e of _uniq.values())await Ne(e.outputPath,e.content),a.push({path:e.outputPath,content:e.content});"
-        "vo[_fk]={outputs:Array.from(_uniq.values()),texts:l,translations:Array.from(_map.entries()),count:l.length,updatedAt:Date.now()},bo=!0,await wo();"
+        "vo[_fk]={texts:l,translations:Array.from(_map.entries()),count:l.length,updatedAt:Date.now(),pkg:window.__slgSelectionMeta?.packageName||``},bo=!0,await wo(),delete vo[_fk];"
         "t+=l.length,O(`  \u5df2\u5b8c\u6210\u6587\u4ef6\uff0c\u590d\u7528 ${l.length} \u6761\u8bd1\u6587`,`success`),ue({current:c+1,total:ae.length});return}"
     )
     if js.count(old_resume) != 1:
@@ -725,7 +844,7 @@ async function Lo(e){'''
 
     # Cache the raw translations + texts so resume can rebuild outputs.
     old_cache = "vo[_fk]={outputs:_fo,count:p,updatedAt:Date.now()}"
-    new_cache = "vo[_fk]={outputs:_fo,texts:l,translations:Array.from(f.entries()),count:p,updatedAt:Date.now()}"
+    new_cache = "vo[_fk]={texts:l,translations:Array.from(f.entries()),count:p,updatedAt:Date.now(),pkg:window.__slgSelectionMeta?.packageName||``}"
     if js.count(old_cache) != 1:
         raise ValueError("File cache write signature not found")
     js = js.replace(old_cache, new_cache, 1)
@@ -757,7 +876,8 @@ def patch_translation_memory(js: str) -> str:
         "let _snap={};for(const[_k,_v]of Object.entries(vo)){"
         "if(_k.startsWith(_o)||_k.startsWith(`slg-file-v1:`))_snap[_k]=_v}let _e=JSON.stringify(_snap);"
         "try{await E.saveTranslationCache({data:_e})}catch(e){bo=!0;globalThis.__slgCacheDbg.errors++;globalThis.__slgCacheDbg.lastError='save:'+(e&&e.message||e)}"
-        "_saveBusy=!1,_lastSaveAt=Date.now();if(_saveAgain)await new Promise(r=>setTimeout(r,1500))}while(_saveAgain)}"
+        "_saveBusy=!1,_lastSaveAt=Date.now();if(_saveAgain)await new Promise(r=>setTimeout(r,1500))}while(_saveAgain);"
+        "for(let _pk of Object.keys(vo)){if(_pk.startsWith(`slg-file-v1:`))delete vo[_pk]}}"
     )
     if js.count(old_save) != 1:
         raise ValueError("Translation cache save signature not found")
@@ -795,8 +915,13 @@ def patch_rpyc_string_pipeline(js: str) -> str:
     new_ne = (
         "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
         "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12);"
-        "if(!e.trim()||e.length<2||i.has(e))continue;"
-        "e=e.replace(/\\\\n/g,`\n`).replace(/\\\\r/g,`\r`).replace(/\\\\t/g,`\t`);"
+        "if(!e.trim()||i.has(e))continue;"
+        "e=e.replace("
+        "/\\\\(?:\\\\|n|r|t)/g,"
+        "m=>m===\"\\\\\\\\\"?\"\\\\\":"
+        "m===\"\\\\n\"?\"\\n\":"
+        "m===\"\\\\r\"?\"\\r\":"
+        "\"\\t\");"
         "i.add(e),r.push({keyPath:`${t}rpyc_string_${a++}`,text:e})}return r}"
     )
     if js.count(old_ne) != 1:
@@ -834,6 +959,49 @@ def patch_extraction_rules(js: str) -> str:
     return js
 
 
+def patch_short_text_and_code_filters(js: str) -> str:
+    # Short-text filter: capitalized 1-2 letter tokens are legitimate
+    # character names / choices ("E", "Ed", "Li"), so only lowercase
+    # short tokens stay filtered as identifier noise.
+    old_ue = "t===`en`&&(/^[A-Za-z]{1,2}$/.test(e)||/^[A-Z0-9_-]{2,12}$/.test(e)||/^[a-z_][a-z0-9_]{1,24}$/.test(e))"
+    new_ue = "t===`en`&&(/^[a-z]{1,2}$/.test(e)||/^[A-Z0-9_-]{2,12}$/.test(e)||/^[a-z_][a-z0-9_]{1,24}$/.test(e))"
+    if js.count(old_ue) != 1:
+        raise ValueError("Short-text filter signature not found")
+    js = js.replace(old_ue, new_ue, 1)
+
+    # Code filter: '/' or backslash only marks a path when the token has
+    # no spaces. User text like "A/Bottom Button" or Ren'Py hyperlink
+    # sentences must survive.
+    old_ke = "function Ke(e){return!!(e.includes(`/`)||e.includes(`\\\\`)||"
+    new_ke = "function Ke(e){return!!(((e.includes(`/`)||e.includes(`\\\\`))&&!e.includes(` `))||"
+    if js.count(old_ke) != 1:
+        raise ValueError("Code filter signature not found")
+    js = js.replace(old_ke, new_ke, 1)
+    return js
+
+
+def patch_speed_tuning(js: str) -> str:
+    # Larger batches and more parallel workers speed up translation without
+    # changing correctness. The split-and-retry path still handles API
+    # limits, and the in-memory cache avoids redundant calls.
+    old_const = "Ao=4,jo=80,Mo=6e3"
+    new_const = "Ao=5,jo=120,Mo=9e3"
+    if js.count(old_const) != 1:
+        raise ValueError("Speed tuning constants signature not found")
+    js = js.replace(old_const, new_const, 1)
+    old_default = "fs=1,ps=80;"
+    new_default = "fs=1,ps=120;"
+    if js.count(old_default) != 1:
+        raise ValueError("Default batch size signature not found")
+    js = js.replace(old_default, new_default, 1)
+    old_parallel = "runFileTasksParallel(e,t,concurrency=2)"
+    new_parallel = "runFileTasksParallel(e,t,concurrency=3)"
+    if js.count(old_parallel) != 1:
+        raise ValueError("File task concurrency signature not found")
+    js = js.replace(old_parallel, new_parallel, 1)
+    return js
+
+
 def patch_candidate_filter(js: str) -> str:
     # Only story scripts should be candidates: existing translation buckets
     # (x-tl/...) are never translated again, and rpy/rpyc duplicates collapse
@@ -842,7 +1010,7 @@ def patch_candidate_filter(js: str) -> str:
     # marked strings), so they are candidates too; only pure-config files
     # (options/style/common) remain skipped.
     old_rpycskip = "var _rpycSkip=/^(?:x-)?(?:gui|media|gallery|gallery_new|screens?|options|common|style|audio|images?|init|splash|preferences)(?:[_-].*)?$/i"
-    new_rpycskip = "var _rpycSkip=/^(?:x-)?(?:gui|media|gallery|gallery_new|options|common|style|audio|images?|init|splash|preferences)(?:[_-].*)?$/i"
+    new_rpycskip = "var _rpycSkip=/^(?:x-)?(?:gui|media|gallery|gallery_new|common|style|audio|images?|init|splash|preferences)(?:[_-].*)?$/i"
     if js.count(old_rpycskip) != 1:
         raise ValueError("Rpyc skip signature not found")
     js = js.replace(old_rpycskip, new_rpycskip, 1)
@@ -873,6 +1041,17 @@ def patch_candidate_filter(js: str) -> str:
     # segment, so os() fell back to a bare tl/<lang>/ path that the compile
     # step never scans. Route them into the same x-game/x-tl bucket so the
     # engine UI strings reach the compiled translations.
+    old_os_main = (
+        "if(r>=0&&n[r+1])return n[r+1]=ss(n[r+1],t),`${n.join(`/`)}.rpy`;"
+    )
+    new_os_main = (
+        "if(r>=0&&n[r+1]){let s=es(n[r+1]);n[r+1]=ss(n[r+1],t);"
+        "if(s&&s!==`none`&&s!==t&&!n[n.length-1].includes(`-${s}-`))n[n.length-1]=`x-${s}-${n[n.length-1]}`;"
+        "return `${n.join(`/`)}.rpy`}"
+    )
+    if js.count(old_os_main) != 1:
+        raise ValueError("Output path tl branch signature not found")
+    js = js.replace(old_os_main, new_os_main, 1)
     old_os = (
         "return`tl/${t}/${n.at(-1)||`strings`}.rpy`}"
     )
@@ -894,10 +1073,149 @@ def patch_candidate_filter(js: str) -> str:
     js = js.replace(old_jo, new_jo, 1)
 
     old_yb = "{let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:Zo(r,n)}"
-    new_yb = "{if(Qo(r)!=null)return!1;let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
+    new_yb = "{let q=Qo(r);if(q!=null){let l=es(q);if(l===`slgtranslated`)return!1;if(l===`none`)return!0;let _s=globalThis.__slgSrcLang||`en`,_d=globalThis.__slgDstLang||`zh`;return $o(_s).has(l)||$o(_d).has(l)?!0:!1}let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
     if js.count(old_yb) != 1:
         raise ValueError("Candidate filter Yo branch signature not found")
     js = js.replace(old_yb, new_yb, 1)
+    return js
+
+# ===== 翻译质量优化：视觉小说 EN→ZH 专业本地化 =====
+
+QUALITY_PROMPT_EN_ZH = """You are a senior game localization translator for English → Simplified Chinese visual novels. Translate like an experienced localization team, not a dictionary.
+
+CORE PRINCIPLES
+1. Dialogue must read as natural spoken Chinese. Eliminate translationese (翻译腔): no stiff word order, no awkward passives, no unnatural connectors.
+2. Preserve the speaker's emotion, tone and personality; match the character's register (tsundere, cheerful, cold, villainous...).
+3. Translate meaning, not surface structure. Localize idioms and cultural references into what a Chinese player would naturally say.
+4. Keep character and place names as-is unless the game itself establishes a Chinese name.
+
+VISUAL NOVEL TRANSLATION HABITS (apply to every visual novel)
+1. Spoken style: dialogue must sound like speech a Chinese person would actually say. Use natural particles (呢/吧/啊/嘛/哦/呀) where a native speaker would, but never stuff every sentence with them.
+2. Interjections and exclamations: Hmph→哼, Ah→啊, Uh/Ugh→呃/唔, Huh→嗯/诶, Ha→哈, Oh→哦/啊, Hmm→嗯……, *sigh*→（叹气）/唉, *laugh*→（笑）/呵呵, *yawn*→（打哈欠）. Keep them short and natural; do not over-translate asterisk stage directions.
+3. Onomatopoeia: localize to Chinese conventions (bang→砰, creak→吱呀, rustle→沙沙, thud→咚) instead of keeping romanized sounds.
+4. Ellipsis: always use …… (two ideographic ellipses), never three dots (...).
+5. Sentence rhythm: keep short lines short and punchy. Never merge two short lines into one long sentence, and never split one line into several.
+6. Addresses: adapt naturally — mom/dad/brother→妈妈/爸爸/哥哥/姐姐 per relationship and register; Mr./Miss→先生/小姐 (use 君/桑 only when the setting clearly calls for it).
+7. Internal monologue vs narration: first-person thoughts must read naturally (我…); narration may be slightly more literary but must stay fluid. Keep Chinese aspect natural (don't clutter with 了/着/过).
+8. Repetition is meaningful: if the source repeats a word or pattern for emphasis, keep that repetition in Chinese.
+9. Terminology consistency: the same term or name must be rendered identically across lines in a scene.
+10. Cultural references: adapt to an equivalent Chinese expression when one exists; otherwise keep the meaning. Never add translator footnotes.
+
+RULES
+1. Keep every __PH0__ token EXACTLY in place — they protect code, markup and format strings. Preserve line breaks.
+2. Use simplified Chinese punctuation: 「」 for quotes, …… for ellipsis. No half-width punctuation.
+3. Dialogue must sound colloquial and fit the character; UI text must stay concise; narration can be slightly literary.
+4. Never add translator notes or explanations inside the text.
+
+REFERENCE EXAMPLES
+Input: ["Hmph. Don't get the wrong idea. I just happened to pass by."]
+Output: {"translations":["哼，别误会了。我只是碰巧路过而已。"]}
+
+Input: ["Wait... are you really okay? You look exhausted."]
+Output: {"translations":["等等……你真的没事吗？你看起来累坏了。"]}
+
+Input: ["New Game"]
+Output: {"translations":["新的旅程"]}"""
+
+
+def patch_translation_quality(js: str) -> str:
+    # 0) keyPath 前缀：提取文本时把文件路径写入 keyPath（o.name + "::"），
+    #    供 Vo 注入 Source file / 同文件场景上下文
+    old_ke = r'''l=ke(i,s,``,g)'''
+    new_ke = r'''l=ke(i,s,o.name+`::`,g)'''
+    if js.count(old_ke) != 1:
+        raise ValueError("Text extraction call signature not found")
+    js = js.replace(old_ke, new_ke, 1)
+
+    # 0b) 缓存键版本：质量策略升级后旧缓存自动失效
+    old_o = r'''var _o=`slg-translator-cache:`,vo={}'''
+    new_o = r'''var _o=`slg-translator-cache:v2:`,vo={}'''
+    if js.count(old_o) != 1:
+        raise ValueError("Cache namespace signature not found")
+    js = js.replace(old_o, new_o, 1)
+
+    # 1) Le：Ren'Py 源格式解析捕获说话人名字（maria "text" → speaker: maria）
+    old_le = r'''let c=s.match(/^(['"])((?:[^"'\\]|\\.)+)\1\s*:/),l=s.match(/^(?:(?:[A-Za-z_]\w*|\w+\.[A-Za-z_]\w*)\s+)?(['"])((?:[^"'\\]|\\.)+)\1\s*(?:#.*)?$/),u=c?.[2]??l?.[2];u&&He(u,n)&&!i.has(u)&&(i.add(u),r.push({keyPath:`${t}rpy_${a++}`,text:u}))'''
+    new_le = r'''let c=s.match(/^(['"])((?:[^"'\\]|\\.)+)\1\s*:/),l=s.match(/^(?:([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s+)?(['"])((?:[^"'\\]|\\.)+)\2\s*(?:#.*)?$/),u=c?.[2]??l?.[3],sp=l?.[1];u&&He(u,n)&&!i.has(u)&&(i.add(u),r.push({keyPath:`${t}rpy_${a++}`,text:u,...sp?{speaker:sp}:{}}))'''
+    if js.count(old_le) != 1:
+        raise ValueError("Speaker extraction signature not found")
+    js = js.replace(old_le, new_le, 1)
+
+    # 2) No：去重时保留第一个说话人字段，避免 speaker 在去重后丢失
+    old_no = r'''function No(e){let t=new Map;for(let n of e){let e=n.text.trim();if(!e)continue;let r=t.get(e);if(r){r.duplicateKeys.push(n.keyPath);continue}t.set(e,{keyPath:n.keyPath,text:n.text,duplicateKeys:[]})}return Array.from(t.values())}'''
+    new_no = r'''function No(e){let t=new Map;for(let n of e){let e=n.text.trim();if(!e)continue;let r=t.get(e);if(r){r.duplicateKeys.push(n.keyPath);continue}t.set(e,{keyPath:n.keyPath,text:n.text,duplicateKeys:[],...(n.speaker?{speaker:n.speaker}:{})})}return Array.from(t.values())}'''
+    if js.count(old_no) != 1:
+        raise ValueError("Dedupe signature not found")
+    js = js.replace(old_no, new_no, 1)
+
+    # 3) Ro：占位符保护后仍携带 speaker 字段，供 Vo 构造上下文
+    old_ro = r'''function Ro(e){return{...e,protectedText:Fo(e.text)}}'''
+    new_ro = r'''function Ro(e){return{...e,protectedText:Fo(e.text),...(e.speaker?{speaker:e.speaker}:{})}}'''
+    if js.count(old_ro) != 1:
+        raise ValueError("Placeholder protection signature not found")
+    js = js.replace(old_ro, new_ro, 1)
+
+    # 4) Go：system prompt 全面重写（EN→ZH 视觉小说专业版，其他语言对通用版），
+    #    推理模型（非 JSON 模式）附加思考引导指令
+    old_go = r'''function Go(e,t,n,r){let i=`Translate game dialogue ${ko[e]??e}->${ko[t]??t}. Keep __PH0__ tokens, line breaks, and formatting.`;if(n&&n.length>0){i+=`
+Use these terms consistently:
+`;for(let e of n)i+=`${e.source}=${e.target}\n`}return r&&(i+=`
+Return only JSON: {"translations":["..."]}`),i}'''
+    new_go = r'''function Go(e,t,n,r){let i=ko[e]??e,o=ko[t]??t;if(e===`en`&&t===`zh`){i=`''' + QUALITY_PROMPT_EN_ZH + r'''`}else{i=`You are a professional game localization translator. Translate ${i} text to ${o} with natural, idiomatic flow, preserving tone and meaning.`}if(!r){i=`Think carefully about each line's context, tone and natural expression before translating.\n`+i}if(n&&n.length>0){i+=`
+Use these terms consistently:
+`;for(let e of n)i+=`${e.source}=${e.target}\n`}return r&&(i+=`
+Return only JSON: {"translations":["..."]}`),i}'''
+    if js.count(old_go) != 1:
+        raise ValueError("System prompt signature not found")
+    js = js.replace(old_go, new_go, 1)
+
+    # 5) Vo：user content 注入来源文件名与说话人标注，保留 JSON 数组格式
+    old_vo = r'''async function Vo(e,t,n,r,i,a,o){let s=new Map,c=Go(r,i,a,o),l=`Translate this JSON array. `+(o?`Return a JSON object exactly like {"translations":["..."]} with translations in the same order:
+`:`Return a JSON array with translations in the same order:
+`)+Po(n.map(e=>({...e,text:e.protectedText.text}))),u=(await e.chat.completions.create({model:t,messages:[{role:`system`,content:c},{role:`user`,content:l}],temperature:.3,...o?{response_format:{type:`json_object`}}:{}})).choices[0]?.message?.content;if(!u)throw Error(`API returned empty content`);let d=Ho(u);for(let e=0;e<n.length;e++){let t=d[e];typeof t==`string`&&t.trim()&&s.set(e,Io(t,n[e].protectedText))}return s}'''
+    new_vo = r'''async function Vo(e,t,n,r,i,a,o){let s=new Map,c=Go(r,i,a,o),p0=String(n[0]?.keyPath||``),_f=p0.includes(`::`)?p0.split(`::`)[0]:``,w=_f.split(`/`).pop()||``,sf=!!_f&&n.length>1&&n.every(e=>String(e.keyPath||``).split(`::`)[0]===_f),_ns=n.map(e=>{let k=String(e.keyPath||``).split(`::`).pop()||``,m=k.match(/(?:^|_)(\d+)$/)||k.match(/\[L(\d+)\]/)||k.match(/\[r(\d+)c/);return m?+m[1]:null}).filter(x=>x!==null).sort((a,b)=>a-b),_sc=sf&&_ns.length===n.length&&_ns.length>1&&_ns.every((x,i)=>i===0||x-_ns[i-1]===1),l=((_f?`Source file: ${w}\n`:`\n`)+(_sc?`These are consecutive lines from the same scene (${w}). Translate them as one coherent dialogue flow — keep tone, terminology and speaking habits consistent across all lines.\n`:(sf?`These lines belong to the same file (${w}). Translate them as one coherent passage — keep tone, terminology and speaking habits consistent.\n`:`\n`))+(n.some(e=>e.speaker)?`Context hints (index → speaker):\n`+n.map((e,i)=>`[${i}]${e.speaker?` → ${e.speaker}`:``}\n`).join(``):``)+`Translate this JSON array. `+(o?`Return a JSON object exactly like {"translations":["..."]} with translations in the same order:
+`:`Return a JSON array with translations in the same order:
+`)+Po(n.map(e=>({...e,text:e.protectedText.text})))),u=(await e.chat.completions.create({model:t,messages:[{role:`system`,content:c},{role:`user`,content:l}],temperature:.3,...o?{response_format:{type:`json_object`}}:{}})).choices[0]?.message?.content;if(!u)throw Error(`API returned empty content`);let d=Ho(u);for(let e=0;e<n.length;e++){let t=d[e];typeof t==`string`&&t.trim()&&s.set(e,Io(t,n[e].protectedText))}return s}'''
+    if js.count(old_vo) != 1:
+        raise ValueError("Batch request signature not found")
+    js = js.replace(old_vo, new_vo, 1)
+    return js
+
+
+# ===== 缓存内存管理：full 清空同步清 cacheIndex + 缓存上限淘汰 =====
+CACHE_PRUNE_LIMIT = 30000
+
+
+def patch_cache_memory(js: str) -> str:
+    # 1) full 模式清空 vo 时必须同步清 cacheIndex，否则旧缓存引用残留，
+    #    内存不释放且 To() 仍能从 cacheIndex 命中旧缓存（清理无效）。
+    old_full = "_mode===`full`&&(vo={},bo=!0,await wo())"
+    new_full = "_mode===`full`&&(vo={},cacheIndex={},bo=!0,await wo())"
+    if js.count(old_full) != 1:
+        raise ValueError("Full-clear signature not found")
+    js = js.replace(old_full, new_full, 1)
+
+    # 2) 缓存上限：超过 CACHE_PRUNE_LIMIT 条时按 updatedAt 淘汰最旧一半，
+    #    并从 cacheIndex 同步删除引用。在 wo() 保存前调用。
+    prune_fn = (
+        "function maybePruneCache(){let ks=[],pre=_o+`v2|`;"
+        "for(const k of Object.keys(vo)){if(k.startsWith(_o))ks.push(k)}"
+        f"if(ks.length<={CACHE_PRUNE_LIMIT})return;"
+        "ks.sort((a,b)=>(vo[a].updatedAt||0)-(vo[b].updatedAt||0));"
+        "let drop=Math.floor(ks.length/2);"
+        "for(let i=0;i<drop;i++){let k=ks[i],id=k.startsWith(pre)?k.slice(pre.length):k.slice(_o.length);"
+        "delete vo[k];delete cacheIndex[id]}bo=!0}"
+    )
+    old_anchor = "async function wo(){"
+    if js.count(old_anchor) != 1:
+        raise ValueError("wo anchor signature not found")
+    js = js.replace(old_anchor, prune_fn + old_anchor, 1)
+
+    old_save = "globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
+    new_save = "maybePruneCache();globalThis.__slgCacheDbg.entries=Object.keys(vo).length;bo=!1;"
+    if js.count(old_save) != 1:
+        raise ValueError("wo save point signature not found")
+    js = js.replace(old_save, new_save, 1)
     return js
 
 def _verify_digest(data: bytes, expected: str, label: str) -> None:
@@ -939,10 +1257,15 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_translation_cache(patched)
     patched = patch_translation_network(patched)
     patched = patch_translation_memory(patched)
+    patched = patch_local_engine(patched)
     patched = patch_extraction_rules(patched)
+    patched = patch_short_text_and_code_filters(patched)
     patched = patch_rpyc_string_pipeline(patched)
+    patched = patch_speed_tuning(patched)
     patched = patch_candidate_filter(patched)
-    return patched + copy_contract + enhance_runtime(WORKSHOP_RUNTIME), css + "\n" + WORKSHOP_CSS
+    patched = patch_translation_quality(patched)
+    patched = patch_cache_memory(patched)
+    return patched + copy_contract + enhance_runtime(patch_saves_runtime(WORKSHOP_RUNTIME)), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:

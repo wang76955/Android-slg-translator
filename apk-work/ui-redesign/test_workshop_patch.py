@@ -88,8 +88,9 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertNotIn("/x-renpy/x-common/", candidate_filter)
         self.assertIn("_rpycSkip", candidate_filter)
         self.assertNotIn("screens?", candidate_filter)
-        self.assertIn("options|common|style", candidate_filter)
-        self.assertIn("Qo(r)!=null", candidate_filter)
+        self.assertIn("common|style", candidate_filter)
+        self.assertNotIn("options|", candidate_filter)
+        self.assertIn("let q=Qo(r);if(q!=null)", candidate_filter)
         self.assertIn("e===`tl`||e===`x-tl`", candidate_filter)
         self.assertIn("p.fileType!==`rpyc`", candidate_filter)
         renpy_start = candidate_filter.index("if(e.fileType===`rpyc`||e.fileType===`rpy`)")
@@ -97,6 +98,118 @@ class WorkshopPatchContractTest(unittest.TestCase):
         renpy_branch = candidate_filter[renpy_start:renpy_end]
         for obsolete_keyword in ("text", "string", "dialogue", "script"):
             self.assertNotIn(obsolete_keyword, renpy_branch)
+
+    def test_translation_bucket_files_seed_supplementary_corpus(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        filter_start = js.index("function Jo(e,t,n){")
+        filter_end = js.index("var ts=", filter_start)
+        candidate_filter = js[filter_start:filter_end]
+        self.assertIn("slgtranslated", candidate_filter)
+        self.assertIn("es(q)", candidate_filter)
+        self.assertIn("$o(_d).has(l)", candidate_filter)
+        self.assertIn("__slgDstLang", candidate_filter)
+
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+var qo=new Set(['png','jpg','jpeg','gif','webp','bmp','ico','mp3','wav','ogg','aac','flac','m4a','mp4','webm','avi','mkv','mov','ttf','otf','woff','woff2']);
+globalThis.__slgSrcLang='en';globalThis.__slgDstLang='zh';
+check(Yo({name:'assets/x-game/x-tl/x-chinese/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'chinese tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-english/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'english tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-german/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated german tl bucket must be excluded');
+check(Yo({name:'assets/x-game/x-tl/x-bosnian/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated bosnian tl bucket must be excluded');
+check(Yo({name:'assets/x-game/x-tl/x-slgtranslated/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'slgtranslated bucket must be excluded');
+check(Yo({name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},'auto','zh')===true,'story script must stay a candidate');
+"""
+        result = subprocess.run(
+            ["node", "-e", candidate_filter + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_recovery_modes_hidden_for_game_without_history(self):
+        """New games with no translation history must not show 继续上次/扫描新增
+        recovery modes; the ready state should only offer a fresh start."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        # The cache module must expose a history helper that reads per-file pkg.
+        self.assertIn("globalThis.__slgHasHistory", js)
+        self.assertIn("_v.pkg===pkg", js)
+        # Per-file cache writes must record the package for history detection.
+        self.assertIn("pkg:window.__slgSelectionMeta?.packageName", js)
+        # Ready state must guard the recovery mode buttons behind history.
+        self.assertIn("if(globalThis.__slgHasHistory&&globalThis.__slgHasHistory(_pkg))", js)
+
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+var _o=`slg-translator-cache:`,vo={},cacheIndex={},yo=!1,bo=!1,bp=Promise.resolve();
+globalThis.__slgHasHistory=function(pkg){if(!pkg)return false;
+try{for(const[_k,_v]of Object.entries(vo)){
+if(_k.startsWith(`slg-file-v1:`)&&_v&&_v.pkg===pkg)return true}return false}catch{return false}};
+check(globalThis.__slgHasHistory('zitao.mbml')===false,'no history initially');
+vo['slg-file-v1:abc']={pkg:'zitao.mbml',texts:[],translations:[],count:0};
+check(globalThis.__slgHasHistory('zitao.mbml')===true,'history detected after file processed');
+check(globalThis.__slgHasHistory('other.pkg')===false,'other game still no history');
+"""
+        result = subprocess.run(
+            ["node", "-e", contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_build_files_filter_keeps_translation_buckets_except_slgtranslated(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("x-slgtranslated", js)
+        self.assertIn("a.filter", js)
+        build_fragment = js[js.index("files:(()=>{const _f="):js.index("files:(()=>{const _f=") + 260]
+        self.assertIn("x-slgtranslated", build_fragment)
+        self.assertNotIn("includes(`/x-tl/`)", build_fragment)
+
+    def test_output_path_keeps_translation_bucket_source_prefix(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        os_start = js.index("function os(e,t){")
+        os_end = js.index("function ss(", os_start)
+        os_fn = js[os_start:os_end]
+        self.assertIn("x-${s}-${n[n.length-1]}", os_fn)
+        contract = r"""
+function check(condition,label){if(!condition)throw new Error(label)}
+function es(e){return e.trim().toLowerCase().replace(/^x[-_]/,``).replace(/[\s-]+/g,`_`)}
+function ss(e,t){return e.startsWith(`x-`)?`x-${t}`:t}
+// original script keeps its plain name
+check(os('assets/x-game/x-ch1ep1.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-ch1ep1.rpy'),'original keeps plain output: '+os('assets/x-game/x-ch1ep1.rpyc','slgtranslated'));
+// translation bucket gets source-language prefix so it never clobbers the original
+check(os('assets/x-game/x-tl/x-german/x-ch1ep1.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-german-x-ch1ep1.rpy'),'german bucket prefixed: '+os('assets/x-game/x-tl/x-german/x-ch1ep1.rpyc','slgtranslated'));
+check(os('assets/x-game/x-tl/x-chinese/x-phone.rpyc','slgtranslated').endsWith('/x-slgtranslated/x-chinese-x-phone.rpy'),'chinese bucket prefixed: '+os('assets/x-game/x-tl/x-chinese/x-phone.rpyc','slgtranslated'));
+// engine common fallback still lands in the x-game bucket
+check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('assets/x-game/x-tl/x-slgtranslated/'),'engine common routed: '+os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated'));
+"""
+        result = subprocess.run(
+            ["node", "-e", os_fn + contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translation_state_requests_screen_wakelock(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("navigator.wakeLock?.request", js)
+        self.assertIn("__slgWakeLock", js)
+        self.assertIn('state==="patching"', js)
 
     def test_installed_app_source_chooser_contract(self):
         module = self.load_patch()
@@ -425,6 +538,7 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
         contract = r'''
 function check(value,label){if(!value)throw new Error(label)}
 globalThis.window=globalThis;
+globalThis.document={querySelector(){return null},querySelectorAll(){return[]},addEventListener(){},createElement(){return{children:[],append(){},classList:{add(){},remove(){}},setAttribute(){},querySelector(){return null},querySelectorAll(){return[]}}},body:{}};
 const ID=`workshop-runtime`;
 let pushes=0,backs=0,marker=false;
 globalThis.history={state:{base:true},pushState(state){pushes+=1;marker=true;this.state=state},back(){backs+=1;marker=false;this.state={base:true}}};
@@ -432,8 +546,9 @@ let modalHistoryArmed=false,modalHistoryClosing=false,modalHistoryRearm=false;
 let returnedFocus=0,previousSourceFocus={focus(){returnedFocus+=1}};
 let sourceDialog=null,installedDialog=null,settingsShell={hidden:false},settingsOpen=false,galleryShell=null,galleryOpen=false;
 let installedListEpoch=0,sourceRequestEpoch=0,installedLoading=false,installedBusy=false;
-let manualIdle=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
+let manualIdle=false,manualIdleBeforeOverlay=false,lastSnapshot=``,shell={hidden:true,dataset:{workshopTask:`idle`}},refreshes=0;
 function refresh(){refreshes+=1} function setWorkshopState(){} function closeGallery(){}
+function beginOverlay(){manualIdleBeforeOverlay=manualIdle;manualIdle=true} function endOverlay(){manualIdle=manualIdleBeforeOverlay}
 
 function resetHistory(){pushes=0;backs=0;marker=false;returnedFocus=0;refreshes=0;modalHistoryArmed=false;modalHistoryClosing=false;modalHistoryRearm=false;history.state={base:true}}
 function assertNativeClose(label,isClosed,closeEffects){
@@ -688,7 +803,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             "可以开始了",
             "手机空间不足",
             "首页",
-            "作品",
+            "安装包",
             "我的",
         ):
             self.assertIn(token, js)
@@ -727,6 +842,44 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         self.assertIn("min-height:48px", css)
         self.assertNotIn(".workshop-picker-source{display:none!important}", css)
         self.assertNotIn("clip-path", picker_rule)
+
+    def test_runtime_injects_legacy_ui_hide_style_before_mount(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("#root>div:not(.workshop-runtime)>header", js)
+        self.assertIn("bootStyle.textContent=", js)
+
+    def test_mount_creates_shell_before_react_source_button_is_available(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("function mount(){")
+        end = js.index("function handleWorkshopPopState(){", start)
+        mount_runtime = js[start:end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const ID="workshop-runtime";
+let shell=null,runtimeRoot=null,settingsRestored=true,pendingApiKey=null,sourceButton=null,startButton=null,installButton=null;
+const app={classList:{classes:[],add(value){this.classes.push(value)},remove(){}},dataset:{},setAttribute(){},children:[],prepend(node){this.children.unshift(node)},append(node){this.children.push(node)},querySelector(){return null}};
+const document={querySelector(){return app},querySelectorAll(){return[]},createElement(tag){return{tag,className:"",textContent:"",children:[],dataset:{},style:{},type:"",onclick:null,setAttribute(){},append(...nodes){this.children.push(...nodes)},classList:{add(){},remove(){}}}},head:{appendChild(){}},addEventListener(){}};
+globalThis.document=document;
+function textNode(tag,cls,text){const el=document.createElement(tag);el.className=cls;if(text!==undefined)el.textContent=text;return el}
+function decorate(){} function enableNativeBackHandling(){} function applySettingsToReact(){return false} function readSettingsPrefs(){return{}} function restoreSession(){} function installLocalHooks(){}
+function setWorkshopState(state,payload={}){if(!shell)return;shell.dataset.workshopState=state;shell.dataset.workshopTask=state==="idle"?"idle":"active";runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",shell.dataset.workshopTask)}
+function refresh(){} function openGallery(){} function openSettings(){}
+mount();
+check(app.classList.classes.includes(ID),"legacy app root is marked before React source button exists");
+check(!!shell&&shell.className==="workshop-task-shell","shell mounts before React source button exists");
+'''
+        result = subprocess.run(
+            ["node", "-e", mount_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_task_runtime_bridges_and_recovery_contract(self):
         """The visible shell must bridge to React without taking ownership of it."""
@@ -811,8 +964,268 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             '已保存：',
         ):
             self.assertIn(token, js)
-        self.assertIn('min-height:48px', ''.join(css.split()))
-        self.assertIn('.workshop-settings-error', css)
+            self.assertIn('min-height:48px', ''.join(css.split()))
+            self.assertIn('.workshop-settings-error', css)
+
+    def test_save_transfer_settings_runtime_contract(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        for token in (
+            "function refreshSaves()",
+            "plugin.restoreSaves",
+            "plugin.listSaveBackups",
+            "plugin.deleteBackup",
+            "plugin.exportSavesToDownloads",
+            "plugin.shareSaveBackup",
+            "plugin.listSaveArchives",
+            "plugin.importSaveBackup",
+            "plugin.deleteSaveArchive",
+            "plugin.listSaveGameApps",
+            "plugin.listInstalledApps",
+            "选择游戏",
+            "保存存档",
+            "导入存档",
+            "导入分享存档",
+            "importSelectedPkg",
+            "importGameSelect",
+            "renderImportArchiveRows",
+            "exportBtn.textContent",
+            "restore.textContent",
+            "share.textContent",
+            "del.textContent",
+        ):
+            self.assertIn(token, js)
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        saves_runtime = js[start:end]
+        self.assertNotIn("备份当前存档", saves_runtime)
+        self.assertNotIn("manageBtn", saves_runtime)
+        self.assertNotIn("importGoBtn", saves_runtime)
+
+    def test_save_transfer_runtime_actions_and_state_gating(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const importTop=textNode(", start)
+        saves_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+let backups=[{name:"com.sample.game-20260804-120000",path:"/backups/1",fileCount:2,modifiedAt:1}];
+const calls={restore:[],delete:[],export:[],share:[],list:0};
+window.Capacitor={Plugins:{FileManager:{
+  listSaveBackups:async()=>{calls.list++;return{backups}},
+  restoreSaves:async input=>{calls.restore.push(input);return{restoredFiles:2}},
+  deleteBackup:async input=>{calls.delete.push(input);backups=[];return{deletedFiles:2}},
+  exportSavesToDownloads:async input=>{calls.export.push(input);return{path:"/storage/emulated/0/Download/SLG-Translator/saves/com.sample.game.zip",uri:"content://downloads/1",zipFiles:2}},
+  shareSaveBackup:async input=>{calls.share.push(input);return{path:"/storage/emulated/0/Download/SLG-Translator/saves/com.sample.game-20260804-120000.zip",shared:true}},
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{}};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children.splice(0,el.children.length,...nodes);for(const node of nodes){node.parent=el;el.children.push(node)}};el.remove=function(){if(this.parent){const index=this.parent.children.indexOf(this);if(index>=0)this.parent.children.splice(index,1)}};el.setAttribute=(name,val)=>{el[name]=val};return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  check(exportBtn.disabled,"save button is disabled before picking a game");
+  const topButtons=[...savesCard.children].filter(el=>el.tag==="button"&&!el.hidden);
+  check(topButtons.length===2,"save page keeps only game picker and save buttons");
+  check(topButtons.some(el=>el.textContent==="选择游戏")&&topButtons.some(el=>el.textContent==="保存存档"),"save page exposes picker and export intents");
+  check(typeof backupBtn==="undefined","backup button is removed from save page");
+  savesSelectedPkg="com.sample.game";savesSelectedLabel="Sample Game";updateSavesState();
+  check(!exportBtn.disabled,"save-to-download enabled when a game is selected");
+  await refreshSaves();
+  check(savesList.children.length===1,"list renders one backup row");
+  const actions=savesList.children[0].children.find(el=>el.cls==="workshop-save-actions");
+  const restore=actions.children.find(el=>el.textContent==="恢复");
+  const del=actions.children.find(el=>el.textContent==="删除");
+  const share=actions.children.find(el=>el.textContent==="分享");
+  check(restore&&share&&del,"row exposes restore, share and delete buttons");
+  globalThis.confirm=()=>true;
+  await restore.onclick();
+  check(calls.restore.length===1&&calls.restore[0].backupDir==="/backups/1"&&calls.restore[0].packageName==="com.sample.game","restore calls native plugin with selected game and backupDir");
+  await share.onclick();
+  check(calls.share.length===1&&calls.share[0].backupDir==="/backups/1","share calls native plugin with backupDir");
+  await del.onclick();
+  check(calls.delete.length===1&&calls.delete[0].backupDir==="/backups/1","delete calls native plugin with backupDir");
+  check(savesList.children.length===1&&savesList.children[0].textContent==="暂无备份。","delete refreshes the list");
+  await exportBtn.onclick();
+  check(calls.export.length===1&&calls.export[0].packageName==="com.sample.game","save to download calls native plugin with packageName");
+  check(exportBtn.textContent==="保存存档"&&!exportBtn.disabled,"save button resets after completion");
+  check(permissionNote.textContent.includes("所有文件访问"),"Android 11+ shows permission guidance");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + saves_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_can_pick_game_from_installed_apps(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const importTop=textNode(", start)
+        saves_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+const calls={listInstalled:0,listGames:0,listBackups:0};
+window.Capacitor={Plugins:{FileManager:{
+  listInstalledApps:async()=>{calls.listInstalled++;return{apps:[{label:"Chrome",packageName:"com.android.chrome"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"恶女2.2",packageName:"zitao.mbml"},{label:"异世界",packageName:"cim.isekai.game"}]}},
+  listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
+  restoreSaves:async()=>({}),
+  deleteBackup:async()=>({}),
+  exportSavesToDownloads:async()=>({}),
+  shareSaveBackup:async()=>({}),
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{}};el.append=(...nodes)=>el.children.push(...nodes);el.replaceChildren=(...nodes)=>el.children.splice(0,el.children.length,...nodes);el.setAttribute=(name,val)=>{el[name]=val};return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  check(exportBtn.disabled,"save actions are disabled before picking a game");
+  await gameBtn.onclick();
+  check(calls.listGames===1,"save page game picker loads save-aware apps");
+  check(calls.listInstalled===0,"save game picker does not fall back to all installed apps");
+  check(gameSelect.children.length===3,"game picker renders placeholder plus apps");
+  gameSelect.value="zitao.mbml";gameSelect.onchange();
+  check(savesSelectedPkg==="zitao.mbml","picking a game updates the save page local state");
+  check(gameLabel.textContent.includes("恶女2.2"),"picked game name is visible");
+  check(!exportBtn.disabled,"picking a game enables save actions");
+  check(calls.listBackups>=1,"picking a game refreshes the backup list");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + saves_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_can_import_shared_archive(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        save_import_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+const calls={listArchives:0,imports:[],deleteArchive:[],listGames:0,listBackups:0};
+window.Capacitor={Plugins:{FileManager:{
+  listSaveArchives:async()=>{calls.listArchives++;return{archives:[{name:"zitao.mbml-20260805-120000.zip",path:"/downloads/1.zip",size:2048},{name:"renamed.zip",path:"/downloads/2.zip",size:1024}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"恶女2.2",packageName:"zitao.mbml"}]}},
+  importSaveBackup:async input=>{calls.imports.push(input);return{backupDir:"/backups/imported",name:"imported",fileCount:2,packageName:"zitao.mbml"}},
+  deleteSaveArchive:async input=>{calls.deleteArchive.push(input);return{deleted:true}},
+  listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
+  restoreSaves:async()=>({}),
+  deleteBackup:async()=>({}),
+  exportSavesToDownloads:async()=>({}),
+  shareSaveBackup:async()=>({}),
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{}};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children.splice(0,el.children.length,...nodes);for(const node of nodes){node.parent=el;el.children.push(node)}};el.remove=function(){if(this.parent){const index=this.parent.children.indexOf(this);if(index>=0)this.parent.children.splice(index,1)}};el.setAttribute=(name,val)=>{el[name]=val};return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+const importView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  await importGameBtn.onclick();
+  check(calls.listGames===1,"import page has its own game picker");
+  await importArchiveBtn.onclick();
+  check(calls.listArchives===1,"import button scans downloaded archives");
+  const archiveSection=importList.children.find(el=>el.cls==="workshop-archive-section"&&!el.hidden);
+  const archiveRows=(archiveSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
+  check(archiveRows.length===2,"all downloaded archives are shown as importable rows");
+  globalThis.confirm=()=>true;
+  const delArchive=archiveRows[0].children.find(el=>el.textContent==="删除");
+  check(delArchive,"each archive row exposes a delete action");
+  await delArchive.onclick();
+  check(calls.deleteArchive.length===1&&calls.deleteArchive[0].path==="/downloads/1.zip","delete calls native plugin with selected archive path");
+  const remainingSection=importList.children.find(el=>el.cls==="workshop-archive-section"&&!el.hidden);
+  const remainingRows=(remainingSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
+  check(remainingRows.length===1,"deleted archive is removed from the panel");
+  const importOne=remainingRows[0].children.find(el=>el.textContent==="导入");
+  check(importOne,"remaining archive row exposes an import action");
+  await importOne.onclick();
+  check(calls.imports.length===1&&calls.imports[0].path==="/downloads/2.zip","import calls native plugin with selected path");
+  check(importSelectedPkg==="zitao.mbml","import auto-selects the game from the archive");
+  check(importGameSelect.value==="zitao.mbml","import updates the import page game picker");
+  check(importGameLabel.textContent.includes("恶女2.2"),"import page shows the auto-selected game label");
+  check(importList.children.length===0,"imported archive is removed from the downloaded panel");
+  check(importStatus.textContent.includes("已导入 zitao.mbml 的存档。"),"import success message is visible");
+  check(importArchiveBtn.textContent==="重新选择存档"&&!importArchiveBtn.disabled,"import button resets after completion");
+  check(calls.listBackups===0,"import page does not refresh the transfer page backup list");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + save_import_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_and_import_game_selection_are_independent(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        save_import_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+window.Capacitor={Plugins:{FileManager:{
+  listSaveGameApps:async()=>({apps:[{label:"恶女2.2",packageName:"zitao.mbml"},{label:"异世界",packageName:"cim.isekai.game"}]}),
+  listSaveBackups:async()=>({backups:[]}),
+  restoreSaves:async()=>({}),
+  deleteBackup:async()=>({}),
+  exportSavesToDownloads:async()=>({}),
+  shareSaveBackup:async()=>({}),
+  listSaveArchives:async()=>({archives:[]}),
+  importSaveBackup:async()=>({}),
+  deleteSaveArchive:async()=>({}),
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{}};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children.splice(0,el.children.length,...nodes);for(const node of nodes){node.parent=el;el.children.push(node)}};el.remove=function(){if(this.parent){const index=this.parent.children.indexOf(this);if(index>=0)this.parent.children.splice(index,1)}};el.setAttribute=(name,val)=>{el[name]=val};return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+const importView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  await gameBtn.onclick();
+  gameSelect.value="zitao.mbml";gameSelect.onchange();
+  await importGameBtn.onclick();
+  importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
+  check(savesSelectedPkg==="zitao.mbml","save page keeps its own selected game");
+  check(importSelectedPkg==="cim.isekai.game","import page keeps its own selected game");
+  check(gameLabel.textContent.includes("恶女2.2"),"save page shows its own game label");
+  check(importGameLabel.textContent.includes("异世界"),"import page shows its own game label");
+  check(gameSelect.value==="zitao.mbml"&&importGameSelect.value==="cim.isekai.game","both selectors preserve independent values");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + save_import_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
 
     def test_install_bridge_refreshes_stale_react_button(self):
         module = self.load_patch()
@@ -899,7 +1312,7 @@ check(refreshes===1,`refresh requested`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        start = js.index('var _o=`slg-translator-cache:`')
+        start = js.index('var _o=`slg-translator-cache:v2:`')
         end = js.index('function Do()', start)
         cache_runtime = js[start:end]
         behavior_contract = r'''
@@ -1085,11 +1498,11 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        self.assertIn('async function runFileTasksParallel(e,t,concurrency=2)', js)
+        self.assertIn('async function runFileTasksParallel(e,t,concurrency=3)', js)
         self.assertIn('N=await runFileTasksParallel(ae,async(o,c)=>{', js)
         self.assertIn('...r?{error:N||`部分文件处理失败，请查看日志`}:{}', js)
 
-        start = js.index('async function runFileTasksParallel(e,t,concurrency=2)')
+        start = js.index('async function runFileTasksParallel(e,t,concurrency=3)')
         end = js.index('async function Lo(e){', start)
         scheduler = js[start:end]
         behavior_contract = r'''
@@ -1243,7 +1656,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         )
 
         self.assertIn(
-            r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)){const patchedApkPath=',
+            r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=',
             js,
         )
         self.assertIn('const progress=text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)
@@ -1318,7 +1731,7 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`
         self.assertIn('window.__slgSelectionMeta?.uri||n', js)
         self.assertIn('No such file|Failed to build patched APK', js)
 
-        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
+        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
         self.assertIn('body.dataset.open=String(detailsOpen)', js)
         self.assertIn('body.scrollTop=body.scrollHeight', js)
         compact_css = ''.join(css.split())
@@ -1398,6 +1811,8 @@ globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.option
 function findButton(label){clicked.push(label);return{dispatchEvent(){}}}
 function clickReact(label){const b=findButton(label);if(b){b.dispatchEvent(new MouseEvent(`click`,{bubbles:true,cancelable:true,view:window}));return true}return false}
 
+globalThis.__slgHasHistory=()=>true;
+window.__slgSelectionMeta={packageName:`zitao.mbml`};
 const readyBody=renderStateBody(`ready`,{fileName:`Game.apk`,count:`12`,sessionRestoredAt:0});
 const readyButtons=[];
 function visit(node){if(!node)return;if(node.tag===`button`)readyButtons.push(node);for(const child of node.children||[])visit(child)}
@@ -1443,7 +1858,7 @@ check(customTexts.some(t=>t.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf
             "async function loadPatches()",
             "function formatBytes(bytes)",
             "listPatchedApks",
-            '["\u9996\u9875",()=>window.scrollTo({top:0,behavior:"smooth"})],["\u4f5c\u54c1",openGallery],["\u6211\u7684",openSettings]',
+            '["\u9996\u9875",()=>window.scrollTo({top:0,behavior:"smooth"})],["\u5b89\u88c5\u5305",openGallery],["\u6211\u7684",openSettings]',
             'if(state!=="idle"){const back=',
             "if(galleryOpen){modalHistoryArmed=false;closeGallery(true);return}",
             "if(galleryOpen){closeGallery();return true}",
@@ -1470,7 +1885,7 @@ const idle=renderTopbar(`idle`);
 check(idle.children.length===2,`idle topbar has no back button`);
 check(idle.children.every(el=>el.tag!==`button`),`idle topbar renders only heading and state`);
 const ready=renderTopbar(`ready`);
-check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active topbar keeps back button`);
+check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`),`active topbar keeps back button`);
 '''
         result = subprocess.run(
             ["node", "-e", topbar + behavior_contract],
@@ -1497,17 +1912,22 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
             "  {name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-ch1ep1.rpy',fileType:'rpy'},\n"
             "  {name:'assets/x-game/x-tl/x-chinese/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-tl/x-english/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-tl/x-german/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
+            "  {name:'assets/x-game/x-tl/x-slgtranslated/x-ch1ep1.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-gui.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-renpy/x-common/x-00gamemenu.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-special.rpyc',fileType:'rpyc'},\n"
             "  {name:'assets/x-game/x-special.rpy',fileType:'rpy'}\n"
             "];\n"
             "const result=Jo(entries,`all`,`zh`);\n"
-            "check(result.length===3,`story scripts kept, duplicates/tl/skip dropped: `+result.length);\n"
+            "check(result.length===5,`story + translation buckets kept: `+result.length);\n"
             "check(result.some(e=>e.name.includes(`x-00gamemenu.rpyc`)),`engine common kept`);\n"
             "check(result.every(e=>e.fileType===`rpyc`),`compiled variant wins`);\n"
-            "check(result.every(e=>!e.name.includes(`x-tl/`)),`translation buckets excluded`);\n"
+            "check(result.some(e=>e.name.includes(`x-tl/x-chinese/x-ch1ep1.rpyc`)),`chinese tl bucket kept as corpus`);\n"
+            "check(result.some(e=>e.name.includes(`x-tl/x-english/x-ch1ep1.rpyc`)),`english tl bucket kept as corpus`);\n"
+            "check(result.every(e=>!e.name.includes(`x-tl/x-german`)),`unrelated german tl bucket excluded`);\n"
+            "check(result.every(e=>!e.name.includes(`x-slgtranslated`)),`slgtranslated bucket excluded`);\n"
             "check(result.some(e=>e.name.includes(`x-ch1ep1.rpyc`)),`story kept`);\n"
             "check(result.some(e=>e.name.includes(`x-special.rpyc`)),`special kept`)\n"
         )
@@ -1527,16 +1947,14 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039`),`active top
         ne_end = js.index("function Pe(", ne_start)
         ne = js[ne_start:ne_end]
         self.assertNotIn("!He(e,n)", ne)
-        self.assertIn("e=e.replace(/\\\\n/g", ne)
+        self.assertIn("e=e.replace(/\\\\(?:\\\\|n|r|t)/g", ne)
         self.assertIn("let i=r.text,a=e.trim();", js)
         self.assertNotIn("let i=r.text.trim(),a=e.trim();", js)
         self.assertIn("cleanupStorage", js)
         self.assertIn("清理安装包与旧缓存", js)
         self.assertIn("workshop-settings-cleanup", js)
-        self.assertIn("backupSaves", js)
-        self.assertIn("restoreSaves", js)
-        self.assertIn("listSaveBackups", js)
-        self.assertIn("存档转移（雏形）", js)
+        self.assertIn("workshop-settings-cleanup", js)
+        self.assertIn("存档转移", js)
         self.assertIn("继续上次只翻译新增文本（推荐）", js)
         self.assertIn("return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}", js)
         self.assertNotIn("return`tl/${t}/${n.at(-1)||`strings`}.rpy`}", js)
@@ -1592,6 +2010,258 @@ console.log('ok');
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
+
+
+    def test_dismiss_recovery_banner_re_renders_immediately(self):
+        """Dismissing the interrupted-session banner must re-render right away."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_start = js.index("function readTaskSnapshot(){")
+        snapshot_end = js.index("function detailToggle(", snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        topbar_start = js.index("function renderTopbar(state)")
+        topbar_end = js.index("function fileRow(", topbar_start)
+        topbar_runtime = js[topbar_start:topbar_end]
+        render_start = js.index("function renderStateBody(state,payload)")
+        render_end = js.index("function setWorkshopState(", render_start)
+        render_runtime = js[render_start:render_end]
+        state_start = render_end
+        state_end = js.index("function snapshotKey(", state_start)
+        state_runtime = js[state_start:state_end]
+        key_start = js.index("function snapshotKey(s){")
+        key_end = js.index("function retryTask(", key_start)
+        key_runtime = js[key_start:key_end]
+        refresh_start = js.index("function refresh(){")
+        refresh_end = js.index("function decorate(){", refresh_start)
+        refresh_runtime = js[refresh_start:refresh_end]
+        recovery_start = js.index("function recoveryBanner(savedAt){")
+        recovery_end = js.index("function mount(){", recovery_start)
+        recovery_runtime = js[recovery_start:recovery_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+const document={querySelectorAll(){return[]}};
+let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0;
+function sourceText(){return`已选择：Broken.apk发现 5 个可翻译文件`}
+function readProgressLog(){return{raw:"",latest:""}}
+function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function openSourceChooser(){} function openSettings(){} function retryTask(){} function triggerReactButton(){}
+const startButton=null,installButton=null,sourceButton=null;
+function startScanClock(){} function stopScanClock(){}
+function classList(){return{remove(){},add(){}}}
+let shell={dataset:{},classList:classList(),setAttribute(){},replaceChildren(...nodes){this.rendered=nodes}};
+const runtimeRoot={classList:classList(),setAttribute(){}};
+function collectText(node){let out=node.text||"";for(const child of node.children||[])out+=collectText(child);return out}
+function collectButtons(node,acc){if(!node)return acc;if(node.tag===`button`)acc.push(node);for(const child of node.children||[])collectButtons(child,acc);return acc}
+sessionRestoredAt=123;
+refresh();
+let buttons=collectButtons(shell.rendered[1],[]);
+const dismiss=buttons.find(b=>(b.label||b.text)===`放弃恢复`);
+check(dismiss,`recovery banner offers dismiss`);
+check(collectText(shell.rendered[1]).includes(`上次翻译中断`),`banner visible before dismiss`);
+dismiss.onclick();
+check(sessionRestoredAt===0,`dismiss clears restored marker`);
+check(!collectText(shell.rendered[1]).includes(`上次翻译中断`),`dismiss must re-render immediately without banner`);
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_session_banner_only_after_translation_started(self):
+        """Recovery banner must only appear for sessions where translation started."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        restore_start = js.index("function restoreSession(){")
+        restore_end = js.index("function recoveryBanner(savedAt){", restore_start)
+        restore_runtime = js[restore_start:restore_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+let restoringSession=false,sessionRestoredAt=0;
+let loaded=null;
+window.__slgLoadSelectedApk=async e=>{loaded=e};
+function refresh(){}
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function main(){
+  localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",name:"Picked.apk",packageName:"game.pkg",source:"installed",savedAt:123,translating:false});
+  restoreSession();
+  await tick();
+  check(!loaded,"selection-only session must not restore automatically");
+  check(sessionRestoredAt===0,"selection-only session must not show recovery banner");
+  loaded=null;
+  localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",name:"Picked.apk",packageName:"game.pkg",source:"installed",savedAt:456,translating:true});
+  restoreSession();
+  await tick();
+  check(sessionRestoredAt===456,"translation session restores the interrupted marker");
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", restore_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translation_heartbeat_updates_session(self):
+        """While translating, the persisted session gets a fresh heartbeat."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_start = js.index("function readTaskSnapshot(){")
+        snapshot_end = js.index("function detailToggle(", snapshot_start)
+        snapshot_runtime = js[snapshot_start:snapshot_end]
+        key_start = js.index("function snapshotKey(s){")
+        key_end = js.index("function retryTask(", key_start)
+        key_runtime = js[key_start:key_end]
+        refresh_start = js.index("function refresh(){")
+        refresh_end = js.index("function decorate(){", refresh_start)
+        refresh_runtime = js[refresh_start:refresh_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+const document={querySelectorAll(){return[]}};
+let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionLastBeat=0;
+function sourceText(){return`正在处理脚本 1/5`}
+function readProgressLog(){return{raw:"",latest:""}}
+const shell={};
+let states=[];function setWorkshopState(state,payload){states.push([state,payload])}
+const before=Date.now();
+localStorage.data[SESSION_KEY]=JSON.stringify({uri:"file://picked.apk",savedAt:0,translating:true});
+refresh();
+const session=JSON.parse(localStorage.data[SESSION_KEY]);
+check(session.translating===true,"heartbeat keeps translating flag");
+check(session.savedAt>=before,"heartbeat refreshes savedAt while translating");
+check(states[0][0]===`translating`,"shell still shows translating after heartbeat");
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + key_runtime + refresh_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_overlay_close_preserves_manual_idle_state(self):
+        """Closing settings/gallery must restore the idle state from before opening."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        settings_start = js.index("function beginOverlay(){")
+        settings_end = js.index("function openSettings(){", settings_start)
+        settings_runtime = js[settings_start:settings_end]
+        gallery_start = js.index("function closeGallery(preserveHistory=false){")
+        gallery_end = js.index("function renderGallery(){", gallery_start)
+        gallery_runtime = js[gallery_start:gallery_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const document={querySelector(){return{children:[],removeAttribute(){},textContent:""}}};
+function releaseModalHistory(){}
+let refreshes=0;function refresh(){refreshes+=1}
+let manualIdle=true,manualIdleBeforeOverlay=true,galleryOpen=true,settingsOpen=true,lastSnapshot="x";
+const galleryShell={hidden:false};const settingsShell={hidden:false};const shell={hidden:false};
+closeSettings();
+check(manualIdle===true,"closing settings restores the pre-overlay idle state");
+check(settingsOpen===false&&settingsShell.hidden===true,"settings actually closes");
+manualIdle=true;manualIdleBeforeOverlay=true;galleryOpen=true;settingsOpen=false;lastSnapshot="y";
+closeGallery();
+check(manualIdle===true,"closing gallery restores the pre-overlay idle state");
+check(galleryOpen===false&&galleryShell.hidden===true,"gallery actually closes");
+'''
+        result = subprocess.run(
+            ["node", "-e", settings_runtime + gallery_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for token in (
+            "function beginOverlay(){",
+            "function endOverlay(){",
+            "beginOverlay();settingsOpen=true",
+            "settingsOpen=false;endOverlay()",
+            "beginOverlay();galleryOpen=true",
+            "galleryOpen=false;endOverlay()",
+        ):
+            self.assertIn(token, js, token)
+
+    def test_filters_keep_every_audit_missing_string(self):
+        """Regression: the 19 audit-verified gaps must survive the text filters."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        ue_start = js.index("function Ue(e,t){")
+        ue_end = js.index("function Ke(e){", ue_start)
+        ue = js[ue_start:ue_end]
+        ke_start = ue_end
+        ke_end = js.index("function qe(", ke_start) if "function qe(" in js[ke_start:] else ke_start + 900
+        ke = js[ke_start:ke_end]
+        ne_start = js.index("function Ne(e,t=``,n){")
+        ne_end = js.index("function Pe(", ne_start)
+        ne = js[ne_start:ne_end]
+        skip_start = js.index("var _rpycSkip=")
+        skip_end = js.index("function Yo(", skip_start)
+        skip = js[skip_start:skip_end]
+        contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const NL = String.fromCharCode(10);
+const mustKeep = [
+  'E',
+  'My Bully is My Lover',
+  'Right Trigger' + NL + 'A/Bottom Button',
+  'Mouse Wheel Up' + NL + 'Click Rollback Side',
+  'Loading will lose unsaved progress.' + NL + 'Are you sure you want to do this?',
+  "This will upload your saves to the {a=https://sync.renpy.org}Ren'Py Sync Server{/a}." + NL + 'Do you want to continue?',
+  '\\n{color=#fff}Copied to clipboard.{/color}',
+];
+for (const s of mustKeep) {
+  check(Ue(s, 'en') === false, 'Ue must keep: ' + JSON.stringify(s));
+  check(Ke(s) === false, 'Ke must keep: ' + JSON.stringify(s));
+}
+const mustDrop = ['bar', 'SKIP', 'assets/x-game/x-ch1.rpyc', 'renpy.config.developer', 'statement_start'];
+for (const s of mustDrop) {
+  check(Ue(s, 'en') === true || Ke(s) === true, 'filter must drop: ' + JSON.stringify(s));
+}
+// Ne must preserve literal backslash-n (2 chars) and restore real newlines.
+const literalBackslashN = 'Press <esc> to exit console. Type help for help.\\n';
+const realNewline = 'Line one' + NL + 'Line two';
+const protocolLiteral = 'RPYC_STRING\t' + 'Press <esc> to exit console. Type help for help.' + '\\\\n' + NL;
+const protocolReal = 'RPYC_STRING\t' + 'Line one' + '\\n' + 'Line two' + NL;
+const out = Ne(protocolLiteral + protocolReal, '', 'en');
+check(out.length === 2, 'Ne keeps both lines: ' + out.length);
+check(out[0].text === literalBackslashN, 'Ne preserves literal backslash-n: ' + JSON.stringify(out[0].text));
+check(out[1].text === realNewline, 'Ne preserves real newline: ' + JSON.stringify(out[1].text));
+// candidate filter must include the options file (game title lives there)
+check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
+'''
+        result = subprocess.run(
+            ["node", "-e", ue + ke + ne + skip + contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

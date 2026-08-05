@@ -28,6 +28,7 @@ public final class CleanupSupport {
     public static void cleanupStorage(Context context, PluginCall call) {
         try {
             String keepUri = call.getString("keepUri");
+            String keepPackage = call.getString("packageName");
             File base = context.getExternalFilesDir(null);
             long freed = 0;
             int deleted = 0;
@@ -40,7 +41,7 @@ public final class CleanupSupport {
                 kept += source.keptCount;
 
                 File output = new File(base, "SLG-Translator-Output");
-                CleanupResult patches = keepNewestApk(output);
+                CleanupResult patches = keepNewestApk(output, keepPackage);
                 freed += patches.freedBytes;
                 deleted += patches.deletedCount;
                 kept += patches.keptCount;
@@ -90,8 +91,14 @@ public final class CleanupSupport {
         return new CleanupResult(freed, deleted, kept);
     }
 
-    /** Deletes all but the newest .apk under the patch output directory. */
-    private static CleanupResult keepNewestApk(File directory) {
+    /**
+     * Deletes patch APKs that do not belong to the currently selected game.
+     * When a game package is known, APKs of other games are removed because
+     * their patches are already installed and no longer needed. When no
+     * package is known (nothing selected), it falls back to keeping only the
+     * newest patch APK.
+     */
+    private static CleanupResult keepNewestApk(File directory, String keepPackage) {
         List<File> apks = new ArrayList<>();
         File[] files = directory == null ? null : directory.listFiles();
         if (files != null) {
@@ -100,6 +107,52 @@ public final class CleanupSupport {
                     apks.add(file);
                 }
             }
+        }
+        if (apks.isEmpty()) {
+            return new CleanupResult(0, 0, 0);
+        }
+        if (keepPackage != null && !keepPackage.isEmpty()) {
+            // Remove patches whose package differs from the selected game.
+            long freed = 0;
+            int deleted = 0;
+            int kept = 0;
+            List<File> sameGame = new ArrayList<>();
+            for (File apk : apks) {
+                String pkg = packageNameOf(apk);
+                if (keepPackage.equals(pkg)) {
+                    sameGame.add(apk);
+                } else {
+                    long size = apk.length();
+                    if (apk.delete()) {
+                        freed += size;
+                        deleted++;
+                    } else {
+                        sameGame.add(apk);
+                    }
+                }
+            }
+            // Keep the newest same-game patch, delete the rest.
+            if (sameGame.size() > 1) {
+                Collections.sort(sameGame, new Comparator<File>() {
+                    @Override
+                    public int compare(File left, File right) {
+                        return Long.compare(right.lastModified(), left.lastModified());
+                    }
+                });
+                for (int i = 1; i < sameGame.size(); i++) {
+                    long size = sameGame.get(i).length();
+                    if (sameGame.get(i).delete()) {
+                        freed += size;
+                        deleted++;
+                    } else {
+                        kept++;
+                    }
+                }
+                kept++;
+            } else if (sameGame.size() == 1) {
+                kept = 1;
+            }
+            return new CleanupResult(freed, deleted, kept);
         }
         if (apks.size() <= 1) {
             return new CleanupResult(0, 0, apks.size());
@@ -122,6 +175,75 @@ public final class CleanupSupport {
         return new CleanupResult(freed, deleted, 1);
     }
 
+    /**
+     * Best-effort package name extraction from a binary AndroidManifest.xml.
+     * The manifest string pool stores all strings as UTF-16LE, so scanning
+     * for a dotted package-like token is reliable enough for APKs produced
+     * by the translator and for game APKs.
+     */
+    private static String packageNameOf(File apk) {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(apk)) {
+            java.util.zip.ZipEntry entry = zip.getEntry("AndroidManifest.xml");
+            if (entry == null) {
+                return null;
+            }
+            byte[] data;
+            try (java.io.InputStream in = zip.getInputStream(entry);
+                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                data = out.toByteArray();
+            }
+            // Binary XML string pools store strings as UTF-16LE, so each
+            // character spans exactly two bytes. Scan on 2-byte boundaries.
+            for (int offset = 0; offset < 2; offset++) {
+                StringBuilder token = new StringBuilder();
+                for (int i = offset; i + 1 < data.length; i += 2) {
+                    char c = (char) ((data[i] & 0xff) | ((data[i + 1] & 0xff) << 8));
+                    if (Character.isLetterOrDigit(c) || c == '.' || c == '_') {
+                        token.append(c);
+                    } else {
+                        String candidate = token.toString();
+                        token.setLength(0);
+                        if (isPackageName(candidate)) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Unreadable APK: treat as not matching any game.
+        }
+        return null;
+    }
+
+    private static boolean isPackageName(String value) {
+        if (value == null || value.length() < 3) {
+            return false;
+        }
+        int dots = 0;
+        boolean firstLetter = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '.') {
+                if (i == 0 || i == value.length() - 1 || value.charAt(i - 1) == '.') {
+                    return false;
+                }
+                dots++;
+            } else if (Character.isLetter(c) || c == '_') {
+                if (i == 0) {
+                    firstLetter = true;
+                }
+            } else if (!Character.isDigit(c)) {
+                return false;
+            }
+        }
+        return dots >= 1 && firstLetter;
+    }
+
     /** Removes stray temp/idsig files left by interrupted operations. */
     private static CleanupResult deleteTempFiles(File base) {
         long freed = 0;
@@ -131,22 +253,35 @@ public final class CleanupSupport {
             return new CleanupResult(0, 0, 0);
         }
         for (File file : files) {
-            if (!file.isFile()) {
-                continue;
+            if (file.isFile() && isTempName(file.getName())) {
+                long size = file.length();
+                if (file.delete()) {
+                    freed += size;
+                    deleted++;
+                }
             }
-            String name = file.getName();
-            boolean stale = name.endsWith(".tmp") || name.endsWith(".partial")
-                    || name.endsWith(".idsig");
-            if (!stale) {
-                continue;
-            }
-            long size = file.length();
-            if (file.delete()) {
-                freed += size;
-                deleted++;
+        }
+        // Interrupted installed-app copies live in installed-apks/ as
+        // .partial/.tmp files; the top-level scan above cannot reach them.
+        File installedApks = new File(base, "installed-apks");
+        File[] partials = installedApks.listFiles();
+        if (partials != null) {
+            for (File file : partials) {
+                if (file.isFile() && isTempName(file.getName())) {
+                    long size = file.length();
+                    if (file.delete()) {
+                        freed += size;
+                        deleted++;
+                    }
+                }
             }
         }
         return new CleanupResult(freed, deleted, 0);
+    }
+
+    private static boolean isTempName(String name) {
+        return name.endsWith(".tmp") || name.endsWith(".partial")
+                || name.endsWith(".idsig");
     }
 
     private static void removeEmptyDir(File directory) {

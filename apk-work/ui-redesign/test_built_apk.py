@@ -258,7 +258,14 @@ class BuiltApkTest(unittest.TestCase):
             "Lcom/getcapacitor/Plugin;.getActivity:()Landroid/app/Activity;",
             plugin_code,
         )
-        helper_code = re.sub(r"\s+", "", code_dumps["classes7.dex"])
+        helper_dump = code_dumps["classes7.dex"]
+        helper_blocks = [
+            match.group(0)
+            for match in self.CLASS_BLOCK.finditer(helper_dump)
+            if re.search(r"Class descriptor  : 'Lcom/slgtranslator/app/[^']+;'", match.group(0))
+        ]
+        self.assertTrue(helper_blocks, "classes7.dex must contain SLG helper classes")
+        helper_code = re.sub(r"\s+", "", "".join(helper_blocks))
         bridge_code = re.sub(r"\s+", "", code_dumps["classes3.dex"])
         render_gone_start = bridge_code.index("BridgeWebViewClient.onRenderProcessGone:(" "Landroid/webkit/WebView;Landroid/webkit/RenderProcessGoneDetail;)Z")
         render_gone_tail = bridge_code.find("Lcom/getcapacitor/BridgeWebViewClient;", render_gone_start + 1)
@@ -296,12 +303,12 @@ class BuiltApkTest(unittest.TestCase):
             (
                 "classes6.dex",
                 "Lcom/slgtranslator/app/FileManagerPlugin;",
-                ("listInstalledApps", "selectInstalledApp", "enableWorkshopBackHandling", "savePatchedApkToDownloads", "listPatchedApks", "injectTranslatorMenu"),
+                ("listInstalledApps", "listSaveGameApps", "selectInstalledApp", "enableWorkshopBackHandling", "savePatchedApkToDownloads", "listPatchedApks", "injectTranslatorMenu", "listSaveArchives", "importSaveBackup"),
             ),
             (
                 "classes7.dex",
                 "Lcom/slgtranslator/app/InstalledAppSource;",
-                ("listInstalledApps", "selectInstalledApp"),
+                ("listInstalledApps", "listSaveGameApps", "selectInstalledApp"),
             ),
             (
                 "classes7.dex",

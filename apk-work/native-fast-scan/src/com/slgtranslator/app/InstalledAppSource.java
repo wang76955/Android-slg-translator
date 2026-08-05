@@ -85,6 +85,60 @@ public final class InstalledAppSource {
         }
     }
 
+    public static void listSaveGameApps(final Context context, final PluginCall call) {
+        WORKER.execute(new Runnable() {
+            @Override
+            public void run() {
+                listSaveGameAppsOnWorker(context, call);
+            }
+        });
+    }
+
+    private static void listSaveGameAppsOnWorker(Context context, PluginCall call) {
+        try {
+            File documents = new File(android.os.Environment.getExternalStorageDirectory(), "Documents");
+            File renpySaves = new File(documents, "RenPy_Saves");
+            List<AppEntry> apps = new ArrayList<>();
+            File[] entries = renpySaves.listFiles();
+            if (entries != null) {
+                PackageManager packageManager = context.getPackageManager();
+                for (File entry : entries) {
+                    if (!entry.isDirectory()) {
+                        continue;
+                    }
+                    String packageName = entry.getName();
+                    if (packageName == null || packageName.isEmpty() || !packageName.contains(".") || packageName.equals(context.getPackageName())) {
+                        continue;
+                    }
+                    apps.add(saveGameEntry(packageManager, packageName));
+                }
+            }
+            Collections.sort(apps, new Comparator<AppEntry>() {
+                @Override
+                public int compare(AppEntry left, AppEntry right) {
+                    int labelOrder = left.label.compareToIgnoreCase(right.label);
+                    return labelOrder != 0 ? labelOrder : left.packageName.compareTo(right.packageName);
+                }
+            });
+            JSArray resultApps = new JSArray();
+            for (AppEntry app : apps) {
+                resultApps.put(new JSObject().put("label", app.label).put("packageName", app.packageName).put("hasSaveData", true));
+            }
+            call.resolve(new JSObject().put("apps", resultApps));
+        } catch (RuntimeException error) {
+            call.reject("Unable to list Ren'Py save games. Grant all-files access and try again.");
+        }
+    }
+
+    private static AppEntry saveGameEntry(PackageManager packageManager, String packageName) {
+        try {
+            ApplicationInfo applicationInfo = packageManager.getApplicationInfo(packageName, 0);
+            return new AppEntry(labelOf(packageManager, applicationInfo), packageName);
+        } catch (PackageManager.NameNotFoundException error) {
+            return new AppEntry(packageName, packageName);
+        }
+    }
+
     public static void selectInstalledApp(final Context context, final PluginCall call) {
         final String packageName = call.getString("packageName");
         if (packageName == null || packageName.trim().isEmpty()) {

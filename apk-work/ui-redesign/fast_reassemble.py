@@ -1,14 +1,10 @@
-from __future__ import annotations
-
+#!/usr/bin/env python3
+"""Fast APK reassembly: reuse the already-generated dex/manifest/resources and
+only replace the JS/CSS assets. Useful for UI-only iteration."""
 import os
 import subprocess
 import zipfile
 from pathlib import Path
-
-from patch_workshop_ui import main as generate_assets
-
-import sys
-
 
 ROOT = Path(__file__).resolve().parents[2]
 APK_WORK = ROOT / "apk-work"
@@ -18,11 +14,7 @@ UNSIGNED_APK = APK_WORK / "slg-workshop-ui-unsigned.apk"
 ALIGNED_APK = APK_WORK / "slg-workshop-ui-aligned.apk"
 SIGNED_APK = APK_WORK / "slg-workshop-ui-signed.apk"
 GENERATED = Path(__file__).parent / "generated"
-FAST_SCAN = APK_WORK / "native-fast-scan"
-sys.path.insert(0, str(FAST_SCAN))
-from build_fast_scanner import main as generate_fast_scanner_dex  # noqa: E402
-
-FAST_SCAN_GENERATED = FAST_SCAN / "generated"
+FAST_SCAN_GENERATED = APK_WORK / "native-fast-scan" / "generated"
 ZIPALIGN = TOOLS / "android-15" / "zipalign.exe"
 APKSIGNER = TOOLS / "android-15" / "apksigner.bat"
 KEYSTORE = Path.home() / ".android" / "debug.keystore"
@@ -34,39 +26,30 @@ REPLACEMENTS = {
     "classes3.dex": FAST_SCAN_GENERATED / "classes3.dex",
     "classes7.dex": FAST_SCAN_GENERATED / "classes7.dex",
     "AndroidManifest.xml": FAST_SCAN_GENERATED / "AndroidManifest.xml",
-}
-
-MLKIT_RES_ENTRIES = {
     "resources.arsc": FAST_SCAN_GENERATED / "resources.arsc",
     "res/raw/translate_models_metadata.json": FAST_SCAN_GENERATED / "res" / "raw" / "translate_models_metadata.json",
     "res/xml/rapid_response_client_defaults.xml": FAST_SCAN_GENERATED / "res" / "xml" / "rapid_response_client_defaults.xml",
 }
-if all(path.is_file() for path in MLKIT_RES_ENTRIES.values()):
-    REPLACEMENTS.update(MLKIT_RES_ENTRIES)
 
-# Native libraries bundled for the on-device translation kernel (llama.cpp
-# runtime + ML Kit translate). They are added as new APK entries.
 NATIVE_LIB_DIR = FAST_SCAN_GENERATED / "lib" / "arm64-v8a"
 if NATIVE_LIB_DIR.is_dir():
     for native_lib in sorted(NATIVE_LIB_DIR.glob("*.so")):
         REPLACEMENTS[f"lib/arm64-v8a/{native_lib.name}"] = native_lib
 
 
-def build_unsigned() -> None:
-    generate_assets()
-    generate_fast_scanner_dex()
-    replacement_bytes = {
-        name: path.read_bytes() for name, path in REPLACEMENTS.items()
-    }
+def run(command: list[str], env: dict[str, str]) -> None:
+    subprocess.run(command, check=True, env=env)
+
+
+def main() -> None:
+    env = os.environ.copy()
+    env["JAVA_HOME"] = str(TOOLS / "jdk-17" / "jdk-17.0.19+10")
+    replacement_bytes = {name: path.read_bytes() for name, path in REPLACEMENTS.items()}
     written = set()
-    with zipfile.ZipFile(BASE_APK, "r") as source, zipfile.ZipFile(
-        UNSIGNED_APK, "w"
-    ) as output:
+    with zipfile.ZipFile(BASE_APK, "r") as source, zipfile.ZipFile(UNSIGNED_APK, "w") as output:
         for item in source.infolist():
             upper = item.filename.upper()
-            if upper.startswith("META-INF/") and upper.endswith(
-                (".RSA", ".DSA", ".EC", ".SF", ".MF")
-            ):
+            if upper.startswith("META-INF/") and upper.endswith((".RSA", ".DSA", ".EC", ".SF", ".MF")):
                 continue
             data = replacement_bytes.get(item.filename, source.read(item.filename))
             written.add(item.filename)
@@ -88,16 +71,6 @@ def build_unsigned() -> None:
                 else zipfile.ZIP_DEFLATED
             )
             output.writestr(info, data)
-
-
-def run(command: list[str], env: dict[str, str]) -> None:
-    subprocess.run(command, check=True, env=env)
-
-
-def main() -> None:
-    env = os.environ.copy()
-    env["JAVA_HOME"] = str(TOOLS / "jdk-17" / "jdk-17.0.19+10")
-    build_unsigned()
     for output in (ALIGNED_APK, SIGNED_APK):
         output.unlink(missing_ok=True)
     run([str(ZIPALIGN), "-f", "-p", "4", str(UNSIGNED_APK), str(ALIGNED_APK)], env)

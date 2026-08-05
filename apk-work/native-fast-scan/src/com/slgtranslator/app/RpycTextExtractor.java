@@ -52,6 +52,17 @@ public final class RpycTextExtractor {
 
     /** Extracts user-visible text lines from a compiled rpyc file. */
     public static List<String> extractTexts(byte[] rpyc) {
+        return extractTexts(rpyc, false);
+    }
+
+    /**
+     * Extracts text from a compiled rpyc file. When {@code onlyOld} is true the
+     * extractor returns only translation old keys (the original-language strings
+     * inside x-tl translation files), never the translated what/new values or
+     * screen text. The scanner uses this mode for translation buckets so their
+     * old keys can seed the supplementary corpus without polluting it.
+     */
+    public static List<String> extractTexts(byte[] rpyc, boolean onlyOld) {
         List<String> out = new ArrayList<>();
         byte[] pickle = readSlot(rpyc, 2);
         if (pickle == null) {
@@ -87,7 +98,7 @@ public final class RpycTextExtractor {
                         choices.add(s);
                     }
                     if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
-                        if (isUserText(s)) {
+                        if ((!onlyOld || "old".equals(lastKey)) && isUserText(s)) {
                             out.add(s);
                         }
                         lastKey = null;
@@ -97,7 +108,9 @@ public final class RpycTextExtractor {
                         lastKey = null;
                     }
                     lastString = s;
-                    collectExtraTexts(s, out, extraSeen);
+                    if (!onlyOld) {
+                        collectExtraTexts(s, out, extraSeen);
+                    }
                 }
                 afterTuple3 = false;
             } else if (code == 0x68 || code == 0x6a) { // BINGET / LONG_BINGET
@@ -116,7 +129,7 @@ public final class RpycTextExtractor {
                         choices.add(s);
                     }
                     if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
-                        if (isUserText(s)) {
+                        if ((!onlyOld || "old".equals(lastKey)) && isUserText(s)) {
                             out.add(s);
                         }
                         lastKey = null;
@@ -126,7 +139,9 @@ public final class RpycTextExtractor {
                         lastKey = null;
                     }
                     lastString = s;
-                    collectExtraTexts(s, out, extraSeen);
+                    if (!onlyOld) {
+                        collectExtraTexts(s, out, extraSeen);
+                    }
                 }
                 afterTuple3 = false;
             } else if (code == 0x71 || code == 0x72) { // BINPUT / LONG_BINPUT
@@ -180,12 +195,57 @@ public final class RpycTextExtractor {
                 }
             }
         }
+        collectSourceCallTexts(s, out, seen);
+    }
+
+    /**
+     * Source payloads keep the raw .rpy code of custom functions such as
+     * send_phone_message("Aine", "message", "channel", ...) or Ren'Py's
+     * _VolumePreference(u"Music Volume", 'music', ...) preference helpers. The
+     * string-literal arguments are user-visible text, so message-style calls
+     * contribute their first two string arguments and preference helpers
+     * contribute their label. Variable arguments, paths and empty strings
+     * are rejected by isUserText.
+     */
+    private static void collectSourceCallTexts(String s, List<String> out, Set<String> seen) {
+        if (s == null || s.isEmpty()) {
+            return;
+        }
+        java.util.regex.Matcher call = SOURCE_CALL.matcher(s);
+        while (call.find()) {
+            String func = call.group(1);
+            String args = call.group(2);
+            if (func == null || args == null) {
+                continue;
+            }
+            String lower = func.toLowerCase(java.util.Locale.ROOT);
+            boolean messageStyle = lower.contains("message") || lower.contains("phone")
+                    || lower.contains("chat") || lower.contains("dm");
+            boolean preferenceStyle = lower.startsWith("_") && lower.endsWith("preference");
+            if (!messageStyle && !preferenceStyle) {
+                continue;
+            }
+            int limit = messageStyle ? 2 : 1;
+            int collected = 0;
+            for (String arg : splitCallArgs(args)) {
+                String value = unquoteLiteral(arg);
+                if (value != null && isUserText(value) && seen.add(value)) {
+                    out.add(value);
+                    collected++;
+                    if (collected >= limit) {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     private static final java.util.regex.Pattern MARKED_TEXT = java.util.regex.Pattern.compile(
             "_\\s*\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\)");
     private static final java.util.regex.Pattern CHARACTER_NAME = java.util.regex.Pattern.compile(
             "Character\\(\\s*[\"']([^\"']+)[\"']");
+    private static final java.util.regex.Pattern SOURCE_CALL = java.util.regex.Pattern.compile(
+            "([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^()]*)\\)");
 
     private static boolean isMarkedText(String s) {
         String trimmed = s.trim();
@@ -291,8 +351,11 @@ public final class RpycTextExtractor {
         if (!hasLetter || allDigits) {
             return false;
         }
-        // Paths and file names.
-        if (s.indexOf('/') >= 0 || s.indexOf('\\') >= 0) {
+        // Paths and file names.  Ren'Py markup tags like {/i}, {/b},
+        // {/color} contain '/' but are not path separators, so strip
+        // all {…} tags before checking for path characters.
+        String pathCheck = s.replaceAll("\\{[^}]*\\}", "");
+        if (pathCheck.indexOf('/') >= 0 || pathCheck.indexOf('\\') >= 0) {
             return false;
         }
         if (s.length() > 4) {
@@ -319,6 +382,105 @@ public final class RpycTextExtractor {
             }
         }
         return true;
+    }
+
+
+    private static List<String> splitCallArgs(String args) {
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = 0; i < args.length(); i++) {
+            char c = args.charAt(i);
+            if (escaped) {
+                current.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                current.append(c);
+                escaped = true;
+                continue;
+            }
+            if (quote != 0) {
+                current.append(c);
+                if (c == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"') {
+                quote = c;
+                current.append(c);
+                continue;
+            }
+            if (c == ',') {
+                result.add(current.toString());
+                current.setLength(0);
+                continue;
+            }
+            current.append(c);
+        }
+        result.add(current.toString());
+        return result;
+    }
+
+    private static String unquoteLiteral(String arg) {
+        String value = arg.trim();
+        int start = 0;
+        while (start < value.length()) {
+            char c = value.charAt(start);
+            if (c == 'u' || c == 'r' || c == 'b') {
+                start++;
+                continue;
+            }
+            break;
+        }
+        value = value.substring(start).trim();
+        if (value.length() < 2) {
+            return null;
+        }
+        char quote = value.charAt(0);
+        if (quote != '\'' && quote != '"') {
+            return null;
+        }
+        if (value.charAt(value.length() - 1) != quote) {
+            return null;
+        }
+        String body = value.substring(1, value.length() - 1);
+        StringBuilder out = new StringBuilder();
+        boolean escaped = false;
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (escaped) {
+                switch (c) {
+                    case 'n':
+                        out.append('\n');
+                        break;
+                    case 't':
+                        out.append('\t');
+                        break;
+                    case 'r':
+                        out.append('\r');
+                        break;
+                    case '\\':
+                        out.append('\\');
+                        break;
+                    default:
+                        out.append(c);
+                        break;
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else {
+                out.append(c);
+            }
+        }
+        if (escaped) {
+            out.append('\\');
+        }
+        return out.toString();
     }
 
     // ------------------------------------------------------------------
