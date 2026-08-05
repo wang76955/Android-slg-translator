@@ -1,33 +1,38 @@
 ---
-name: Bug report
-about: Report a problem to help us improve
+name: Bug report（问题反馈）
+about: 帮助测试期排障，请尽量填写完整
 title: "[Bug] "
 labels: bug
 assignees: ''
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## 设备信息
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Tap on '...'
-3. See error
+- 手机型号（设备型号）：例如 OPPO PEMM20 / 小米 14
+- Android 版本：例如 Android 13
+- SLG Translator 版本：例如 android-v1.0.5（在「我的 → 关于」查看）
 
-**Expected behavior**
-A clear description of what you expected to happen.
+## 游戏信息
 
-**Actual behavior**
-What actually happened, including any error messages.
+- 游戏名称：
+- 游戏 APK 语言（源语言）：
+- 翻译目标语言：
+- 是否开启「翻译 Android UI XML」：是 / 否
 
-**Environment**
-- App version: (e.g. android-v1.0.4)
-- Android device: (e.g. OPPO PEMM20, Android 13)
-- Source/translated game: (e.g. That New Teacher)
+## 错误现象
 
-**Screenshots / Logs**
-If applicable, add screenshots or log output.
+- 发生了什么（详细描述）：
+- 期望的结果：
+- 复现步骤：
+  1.
+  2.
+  3.
 
-**Additional context**
-Anything else that might help.
+## 日志
+
+- 是否已在 App 内点击「导出日志」：是 / 否
+- 日志文件：请把 `logs/` 目录下的 `.log` 文件拖到这里，或直接截图
+
+## 补充
+
+其他有助于定位的信息（截图、游戏下载链接、翻译服务商与模型等）。
