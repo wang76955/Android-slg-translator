@@ -2151,6 +2151,278 @@ public final class SaveTransferHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_translation_compiler_isolates_requested_files_and_shards_pairs(self):
+        """The compiler must not read stale output and must bound each RPYC shard."""
+        compiler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java"
+        self.assertTrue(compiler.exists(), "TranslationCompiler.java must exist")
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+public final class TranslationCompilerIsolationHarness {
+    public static void main(String[] args) throws Exception {
+        File root = new File(args[0]);
+        File current = new File(root, "assets/x-game/x-tl/x-slgtranslated/current.rpy");
+        File stale = new File(root, "assets/x-game/x-tl/x-slgtranslated/stale.rpy");
+        current.getParentFile().mkdirs();
+        write(current, "translate slgtranslated strings:\n    old \\\"current\\\"\n    new \\\"当前\\\"\n");
+        write(stale, "translate slgtranslated strings:\n    old \\\"stale\\\"\n    new \\\"旧文件\\\"\n");
+
+        List<File> selected = TranslationCompiler.selectTranslationFiles(
+                root,
+                Arrays.asList(
+                        "assets/x-game/x-tl/x-slgtranslated/current.rpy",
+                        "assets/x-game/x-tl/x-slgtranslated/current.rpy"));
+        require(selected.size() == 1, "duplicate paths must be removed");
+        require(selected.get(0).getCanonicalFile().equals(current.getCanonicalFile()),
+                "only the current requested file may be selected: " + selected);
+
+        boolean rejected = false;
+        try {
+            TranslationCompiler.selectTranslationFiles(root,
+                    Arrays.asList("../outside.rpy"));
+        } catch (IllegalArgumentException expected) {
+            rejected = true;
+        }
+        require(rejected, "path traversal must be rejected");
+
+        List<String[]> pairs = new ArrayList<>();
+        for (int i = 0; i < TranslationCompiler.MAX_TRANSLATIONS_PER_SHARD * 2 + 1; i++) {
+            pairs.add(new String[]{"old-" + i, "new-" + i});
+        }
+        List<List<String[]>> shards = TranslationCompiler.shardPairs(pairs);
+        require(shards.size() == 3, "expected three bounded shards: " + shards.size());
+        int total = 0;
+        for (List<String[]> shard : shards) {
+            require(!shard.isEmpty(), "empty shard must not be emitted");
+            require(shard.size() <= TranslationCompiler.MAX_TRANSLATIONS_PER_SHARD,
+                    "shard exceeded limit: " + shard.size());
+            total += shard.size();
+        }
+        require(total == pairs.size(), "sharding must preserve every pair");
+    }
+
+    private static void write(File file, String value) throws Exception {
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            out.write(value.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        sources = [
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java",
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "LanguageMenuSupport.java",
+        ]
+        with tempfile.TemporaryDirectory(prefix="translation-compiler-isolation-test-") as temporary:
+            temporary_path = Path(temporary)
+            package_dir = temporary_path / "com" / "slgtranslator" / "app"
+            package_dir.mkdir(parents=True)
+            harness_path = package_dir / "TranslationCompilerIsolationHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "output"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs), *map(str, sources), str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [
+                    str(JAVA), "-cp", str(classes),
+                    "com.slgtranslator.app.TranslationCompilerIsolationHarness",
+                    str(fixture),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_translation_compiler_rewrites_apk_with_bounded_shards_and_keeps_original_rpyc(self):
+        """APK output must contain new shards, not the old monolithic artifact."""
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
+
+public final class TranslationCompilerApkHarness {
+    private static final String SOURCE_PATH =
+            "assets/x-game/x-tl/x-slgtranslated/current.rpy";
+    private static final String BUCKET =
+            "assets/x-game/x-tl/x-slgtranslated/";
+
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File output = new File(base, "output");
+        output.mkdirs();
+        File source = new File(output, SOURCE_PATH);
+        source.getParentFile().mkdirs();
+        StringBuilder text = new StringBuilder("translate slgtranslated strings:\n");
+        for (int i = 0; i < TranslationCompiler.MAX_TRANSLATIONS_PER_SHARD + 1; i++) {
+            text.append("    old \"old-").append(i).append("\"\n");
+            text.append("    new \"new-").append(i).append("\"\n");
+        }
+        write(source, text.toString());
+
+        File apk = new File(base, "input.apk");
+        TranslationCompiler.TemplateMeta meta = new TranslationCompiler.TemplateMeta();
+        meta.version = 1;
+        meta.key = "preferred-key";
+        meta.trailer = new byte[16];
+        List<String[]> templatePairs = new ArrayList<>();
+        templatePairs.add(new String[]{"template-old", "模板"});
+        byte[] template = TranslationCompiler.compileRpyc(
+                "chinese", "game/tl/chinese/template.rpy", templatePairs, meta);
+        TranslationCompiler.TemplateMeta commonMeta = new TranslationCompiler.TemplateMeta();
+        commonMeta.version = 99;
+        commonMeta.key = "common-key";
+        commonMeta.trailer = new byte[16];
+        byte[] commonTemplate = TranslationCompiler.compileRpyc(
+                "common", "game/common/common.rpy", templatePairs, commonMeta);
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(apk))) {
+            add(zip, "assets/x-renpy/x-common/common.rpyc", commonTemplate, 0L);
+            add(zip, "assets/x-game/x-tl/x-chinese/template.rpyc", template, 0L);
+            add(zip, BUCKET + "x-translations.rpyc", template, System.currentTimeMillis());
+            add(zip, BUCKET + "original-epoch.rpyc", template, 0L);
+        }
+
+        TranslationCompiler.CompileResult result =
+                TranslationCompiler.compileTranslationArtifacts(
+                        apk, output, Arrays.asList(SOURCE_PATH));
+        require(result.compiled == TranslationCompiler.MAX_TRANSLATIONS_PER_SHARD + 1,
+                "compiled pair count mismatch: " + result.compiled);
+        require(result.shards == 2, "expected two shards: " + result.shards);
+        require(result.files == 1, "expected one input file: " + result.files);
+
+        try (ZipFile zip = new ZipFile(apk)) {
+            require(zip.getEntry(BUCKET + "x-translations.rpyc") == null,
+                    "old monolithic translation must be removed");
+            require(zip.getEntry(BUCKET + "x-translations-0001.rpyc") != null,
+                    "first translation shard missing");
+            require(zip.getEntry(BUCKET + "x-translations-0002.rpyc") != null,
+                    "second translation shard missing");
+            require(zip.getEntry(BUCKET + "original-epoch.rpyc") != null,
+                    "original epoch-dated rpyc must remain");
+            byte[] shard = read(zip.getInputStream(
+                    zip.getEntry(BUCKET + "x-translations-0001.rpyc")));
+            Method readSlot = TranslationCompiler.class.getDeclaredMethod(
+                    "readSlot", byte[].class, int.class);
+            readSlot.setAccessible(true);
+            byte[] pickle = (byte[]) readSlot.invoke(null, shard, 1);
+            String pickleText = new String(pickle, StandardCharsets.UTF_8);
+            require(pickleText.contains("preferred-key"),
+                    "template metadata must come from the game's language bucket");
+            require(!pickleText.contains("common-key"),
+                    "common script metadata must not be selected");
+        }
+    }
+
+    private static void add(ZipOutputStream zip, String name, byte[] bytes, long time)
+            throws Exception {
+        ZipEntry entry = new ZipEntry(name);
+        entry.setTime(time);
+        zip.putNextEntry(entry);
+        zip.write(bytes);
+        zip.closeEntry();
+    }
+
+    private static void write(File file, String value) throws Exception {
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            out.write(value.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static byte[] read(InputStream in) throws Exception {
+        try (InputStream input = in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                out.write(buffer, 0, count);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        sources = [
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java",
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "LanguageMenuSupport.java",
+        ]
+        with tempfile.TemporaryDirectory(prefix="translation-compiler-apk-test-") as temporary:
+            temporary_path = Path(temporary)
+            package_dir = temporary_path / "com" / "slgtranslator" / "app"
+            package_dir.mkdir(parents=True)
+            harness_path = package_dir / "TranslationCompilerApkHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs), *map(str, sources), str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                subprocess.run(
+                    [
+                        str(JAVA), "-cp", str(classes),
+                        "com.slgtranslator.app.TranslationCompilerApkHarness",
+                        str(fixture),
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as error:
+                raise AssertionError(error.stderr.decode("utf-8", "replace")) from error
+
+    def test_translation_compiler_bridge_passes_paths_without_large_contents(self):
+        patcher = ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py"
+        source = patcher.read_text("utf-8")
+        self.assertIn("items:a.map(_x=>({path:_x.path}))", source)
+        self.assertNotIn("items:a.map(_x=>({path:_x.path,content:_x.content}))", source)
+
 
     def test_save_export_zips_directory_and_counts_files(self):
         transfer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "SaveTransfer.java"

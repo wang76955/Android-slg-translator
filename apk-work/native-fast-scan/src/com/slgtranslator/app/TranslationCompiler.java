@@ -18,8 +18,14 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
@@ -36,8 +42,22 @@ import java.util.zip.ZipOutputStream;
 public final class TranslationCompiler {
 
     private static final byte[] RPC2_MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
+    static final int MAX_TRANSLATIONS_PER_SHARD = 500;
+    private static final String OUTPUT_DIRECTORY = "SLG-Translator-Output";
 
     private TranslationCompiler() {
+    }
+
+    static final class CompileResult {
+        final int compiled;
+        final int shards;
+        final int files;
+
+        CompileResult(int compiled, int shards, int files) {
+            this.compiled = compiled;
+            this.shards = shards;
+            this.files = files;
+        }
     }
 
     public static void compileTranslationsIntoApk(Context context, PluginCall call) {
@@ -52,58 +72,14 @@ public final class TranslationCompiler {
                 call.reject("\u8865\u4e01\u6e90 APK \u4e0d\u5b58\u5728: " + apkUri);
                 return;
             }
-            TemplateMeta meta = readTemplateMeta(apk);
-            java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>();
-            String language = null;
-            // Read the generated translation .rpy files straight from the output
-            // directory. Passing them through the JS bridge truncates large
-            // payloads, which silently dropped most files.
-            File outputDir = new File(context.getExternalFilesDir(null), "SLG-Translator-Output");
-            List<File> rpyFiles = new ArrayList<>();
-            collectSlgRpy(outputDir, rpyFiles);
-            for (File rpy : rpyFiles) {
-                String content = readTextFile(rpy);
-                if (content == null || content.isEmpty()) {
-                    continue;
-                }
-                if (language == null) {
-                    language = languageOf(rpy.getPath(), content);
-                }
-                for (String[] pair : parseTranslationRpy(content)) {
-                    if (pair[0] == null || pair[0].isEmpty()) {
-                        continue;
-                    }
-                    if (!merged.containsKey(pair[0])) {
-                        merged.put(pair[0], pair[1]);
-                    }
-                }
-            }
-            if (language == null || language.isEmpty() || merged.isEmpty()) {
-                JSObject result = new JSObject();
-                result.put("compiled", 0);
-                call.resolve(result);
-                return;
-            }
-            List<String[]> pairs = new ArrayList<>();
-            for (java.util.Map.Entry<String, String> entry : merged.entrySet()) {
-                pairs.add(new String[]{entry.getKey(), entry.getValue()});
-            }
-            String rpycPath = "assets/x-game/x-tl/x-slgtranslated/x-translations.rpyc";
-            String filename = "game/tl/slgtranslated/translations.rpy";
-            byte[] rpyc = compileRpyc(language, filename, pairs, meta);
-            List<String[]> pending = new ArrayList<>();
-            List<byte[]> pendingBytes = new ArrayList<>();
-            pending.add(new String[]{rpycPath, filename});
-            pendingBytes.add(rpyc);
-            byte[] styleRpyc = cloneChineseStyleRpyc(apk);
-            if (styleRpyc != null) {
-                pending.add(new String[]{"assets/x-game/x-tl/x-slgtranslated/x-style.rpyc",
-                        "game/tl/slgtranslated/style.rpy"});
-                pendingBytes.add(styleRpyc);
-            }
-            rewriteApkWithEntries(apk, pending, pendingBytes);
+            JSArray items = call.getArray("items");
+            List<String> requestedPaths = translationPaths(items);
+            File outputDir = translationOutputDir(context);
+            CompileResult compiled = compileTranslationArtifacts(apk, outputDir, requestedPaths);
             JSObject result = new JSObject();
-            result.put("compiled", merged.size());
+            result.put("compiled", compiled.compiled);
+            result.put("shards", compiled.shards);
+            result.put("files", compiled.files);
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();
@@ -111,42 +87,186 @@ public final class TranslationCompiler {
         }
     }
 
-    /** Only the independent translator language bucket is compiled here. */
-    private static boolean isTranslatorBucket(String path) {
-        String normalized = path.replace('\\', '/').toLowerCase();
-        return normalized.contains("/x-tl/x-slgtranslated/")
-                || normalized.contains("/x-tl/x-slgtranslated")
-                || normalized.contains("/tl/slgtranslated/");
+    static List<String> translationPaths(JSArray items) {
+        List<String> paths = new ArrayList<>();
+        if (items == null) {
+            return paths;
+        }
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item;
+            try {
+                item = items.getJSONObject(i);
+            } catch (Exception ignored) {
+                item = null;
+            }
+            if (item == null) {
+                continue;
+            }
+            String path = item.optString("path", "");
+            if (path != null && !path.trim().isEmpty()) {
+                paths.add(path);
+            }
+        }
+        return paths;
     }
 
-    private static void collectSlgRpy(File dir, List<File> out) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return;
+    private static File translationOutputDir(Context context) {
+        File base = context.getExternalFilesDir(null);
+        if (base == null) {
+            base = context.getFilesDir();
         }
-        for (File file : files) {
-            if (file.isDirectory()) {
-                if (isTranslatorBucket(file.getAbsolutePath())) {
-                    collectRpyFiles(file, out);
-                } else {
-                    collectSlgRpy(file, out);
+        return base == null ? null : new File(base, OUTPUT_DIRECTORY);
+    }
+
+    static CompileResult compileTranslationArtifacts(File apk, File outputDir,
+                                                      List<String> requestedPaths)
+            throws IOException {
+        if (apk == null || !apk.isFile()) {
+            throw new IOException("\u8865\u4e01\u6e90 APK \u4e0d\u5b58\u5728");
+        }
+        if (outputDir == null) {
+            throw new IOException("\u627e\u4e0d\u5230\u7ffb\u8bd1\u8f93\u51fa\u76ee\u5f55");
+        }
+        List<File> rpyFiles = selectTranslationFiles(outputDir, requestedPaths);
+        if (rpyFiles.isEmpty()) {
+            return new CompileResult(0, 0, 0);
+        }
+
+        TemplateMeta meta = readTemplateMeta(apk);
+        LinkedHashMap<String, String> merged = new LinkedHashMap<>();
+        String language = null;
+        for (File rpy : rpyFiles) {
+            String content = readTextFile(rpy);
+            if (content == null || content.isEmpty()) {
+                continue;
+            }
+            if (language == null) {
+                language = languageOf(rpy.getPath(), content);
+            }
+            for (String[] pair : parseTranslationRpy(content)) {
+                if (pair[0] == null || pair[0].isEmpty()) {
+                    continue;
+                }
+                if (!merged.containsKey(pair[0])) {
+                    merged.put(pair[0], pair[1]);
                 }
             }
         }
+        if (language == null || language.isEmpty() || merged.isEmpty()) {
+            return new CompileResult(0, 0, rpyFiles.size());
+        }
+
+        List<String[]> pairs = new ArrayList<>();
+        for (Map.Entry<String, String> entry : merged.entrySet()) {
+            pairs.add(new String[]{entry.getKey(), entry.getValue()});
+        }
+        List<List<String[]>> shards = shardPairs(pairs);
+        List<String[]> pending = new ArrayList<>();
+        List<byte[]> pendingBytes = new ArrayList<>();
+        for (int i = 0; i < shards.size(); i++) {
+            String shard = String.format(Locale.US, "%04d", i + 1);
+            String filename = "game/tl/slgtranslated/translations-" + shard + ".rpy";
+            String rpycPath = "assets/x-game/x-tl/x-slgtranslated/x-translations-" + shard + ".rpyc";
+            pending.add(new String[]{rpycPath, filename});
+            pendingBytes.add(compileRpyc(language, filename, shards.get(i), meta));
+        }
+        byte[] styleRpyc = cloneChineseStyleRpyc(apk);
+        if (styleRpyc != null) {
+            pending.add(new String[]{"assets/x-game/x-tl/x-slgtranslated/x-style.rpyc",
+                    "game/tl/slgtranslated/style.rpy"});
+            pendingBytes.add(styleRpyc);
+        }
+        rewriteApkWithEntries(apk, pending, pendingBytes);
+        return new CompileResult(merged.size(), shards.size(), rpyFiles.size());
     }
 
-    private static void collectRpyFiles(File dir, List<File> out) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return;
+    static List<File> selectTranslationFiles(File outputDir, List<String> requestedPaths)
+            throws IOException {
+        List<File> selected = new ArrayList<>();
+        if (outputDir == null || requestedPaths == null || requestedPaths.isEmpty()
+                || !outputDir.exists()) {
+            return selected;
         }
-        for (File file : files) {
-            if (file.isDirectory()) {
-                collectRpyFiles(file, out);
-            } else if (file.getName().endsWith(".rpy")) {
-                out.add(file);
+        File canonicalRoot = outputDir.getCanonicalFile();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String requested : requestedPaths) {
+            String normalized = normalizeRequestedPath(requested);
+            if (!isTranslatorRpyPath(normalized)) {
+                continue;
             }
+            if (!seen.add(normalized)) {
+                continue;
+            }
+            File candidate = new File(outputDir, normalized).getCanonicalFile();
+            String rootPath = canonicalRoot.getPath();
+            String candidatePath = candidate.getPath();
+            if (!candidatePath.equals(rootPath)
+                    && !candidatePath.startsWith(rootPath + File.separator)) {
+                throw new IllegalArgumentException("translation path escapes output directory: " + requested);
+            }
+            if (!candidate.isFile()) {
+                throw new IOException("translation file is missing: " + normalized);
+            }
+            selected.add(candidate);
         }
+        Collections.sort(selected, (left, right) -> left.getPath().compareTo(right.getPath()));
+        return selected;
+    }
+
+    private static String normalizeRequestedPath(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("translation path is null");
+        }
+        String normalized = value.trim().replace('\\', '/');
+        if (normalized.isEmpty() || normalized.startsWith("/")
+                || normalized.matches("^[A-Za-z]:/.*")) {
+            throw new IllegalArgumentException("translation path must be relative: " + value);
+        }
+        String[] parts = normalized.split("/");
+        StringBuilder clean = new StringBuilder();
+        for (String part : parts) {
+            if (part.isEmpty() || ".".equals(part)) {
+                continue;
+            }
+            if ("..".equals(part)) {
+                throw new IllegalArgumentException("translation path contains '..': " + value);
+            }
+            if (clean.length() > 0) {
+                clean.append('/');
+            }
+            clean.append(part);
+        }
+        return clean.toString();
+    }
+
+    private static boolean isTranslatorRpyPath(String path) {
+        String normalized = path.toLowerCase(Locale.US);
+        if (!normalized.endsWith(".rpy")) {
+            return false;
+        }
+        return normalized.contains("/x-tl/x-slgtranslated/")
+                || normalized.startsWith("x-tl/x-slgtranslated/")
+                || normalized.contains("/tl/slgtranslated/")
+                || normalized.startsWith("tl/slgtranslated/");
+    }
+
+    static List<List<String[]>> shardPairs(List<String[]> pairs) {
+        List<List<String[]>> shards = new ArrayList<>();
+        if (pairs == null || pairs.isEmpty()) {
+            return shards;
+        }
+        List<String[]> current = new ArrayList<>();
+        for (String[] pair : pairs) {
+            if (current.size() >= MAX_TRANSLATIONS_PER_SHARD) {
+                shards.add(current);
+                current = new ArrayList<>();
+            }
+            current.add(pair);
+        }
+        if (!current.isEmpty()) {
+            shards.add(current);
+        }
+        return shards;
     }
 
     private static String readTextFile(File file) {
@@ -527,7 +647,7 @@ public final class TranslationCompiler {
     }
 
     static TemplateMeta readTemplateMeta(File apk) throws IOException {
-        TemplateMeta meta = new TemplateMeta();
+        TemplateMeta fallback = null;
         try (ZipFile zip = new ZipFile(apk)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -550,17 +670,31 @@ public final class TranslationCompiler {
                 if (pickle != null) {
                     Object[] found = scanVersionKey(pickle);
                     if ((Integer) found[0] != 0) {
+                        TemplateMeta meta = new TemplateMeta();
                         meta.version = (Integer) found[0];
                         if (found[1] != null) {
                             meta.key = (String) found[1];
                         }
                         meta.trailer = slice(bytes, Math.max(0, bytes.length - 16), bytes.length);
-                        return meta;
+                        if (isRenpyTranslationTemplate(name)) {
+                            return meta;
+                        }
+                        if (fallback == null) {
+                            fallback = meta;
+                        }
                     }
                 }
             }
         }
+        if (fallback != null) {
+            return fallback;
+        }
         throw new IOException("\u672a\u627e\u5230\u53ef\u7528\u7684 Ren'Py \u7f16\u8bd1\u811a\u672c\u6a21\u677f");
+    }
+
+    private static boolean isRenpyTranslationTemplate(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.US);
+        return normalized.contains("/x-tl/") || normalized.contains("/tl/");
     }
 
     /**
