@@ -5,6 +5,8 @@ import android.content.Context;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import dev.ffmpegkit.llama.Llama;
 import dev.ffmpegkit.llama.LlamaConfig;
 import dev.ffmpegkit.llama.LlamaModel;
@@ -16,7 +18,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -29,9 +34,9 @@ import kotlin.coroutines.EmptyCoroutineContext;
  *
  * The model is a quantized Qwen2.5 Instruct GGUF file that the user downloads
  * once (~1 GB for 1.5B Q4_K_M, or ~470 MB for the smaller 0.5B used for
- * testing) into the app's external files directory. Every text is translated
- * with a dedicated localization prompt and a fresh completion so earlier
- * items never pollute later ones.
+ * testing) into the app's external files directory. Texts are translated in
+ * five-line batches with JSON-array output preferred; failed batches fall
+ * back to per-line completions so earlier items never pollute later ones.
  */
 public final class LocalLlmEngine {
 
@@ -42,7 +47,9 @@ public final class LocalLlmEngine {
     private static final long DOWNLOAD_CHUNK_BYTES = 256 * 1024;
     private static final long DOWNLOAD_PROGRESS_INTERVAL_MS = 1500;
     private static final long COMPLETE_TIMEOUT_SECONDS = 300;
-    private static final int MAX_TOKENS = 512;
+    private static final int BATCH_SIZE = 5;
+    private static final int BATCH_MAX_TOKENS = 768;
+    private static final Pattern NUMBERED_LINE = Pattern.compile("^\\s*(?:\\d+)[.):\\-]\\s*(.*)$");
 
     private static volatile LlamaModel loadedModel;
     private static volatile String loadedModelPath;
@@ -343,12 +350,13 @@ public final class LocalLlmEngine {
         }
     }
 
-    /** Translate a batch with the local LLM, one fresh completion per item. */
+    /** Translate a batch with the local LLM; five lines share one completion.
+     * JSON-array output is preferred, with automatic per-line fallback. */
     public static void translate(Context context, List<LocalTranslationSupport.TextItem> items,
                                  String sourceLang, String targetLang, PluginCall call) throws Exception {
         File modelFile = modelFile(context);
         if (!modelFile.isFile() || modelFile.length() == 0) {
-            throw new IllegalStateException("高质量本地模型尚未下载，请先在“翻译服务”中下载（约 1GB）");
+            throw new IllegalStateException("高质量本地模型尚未下载，请先在“翻译服务”中下载");
         }
         if (items.isEmpty()) {
             JSObject empty = new JSObject();
@@ -360,44 +368,26 @@ public final class LocalLlmEngine {
         }
 
         LlamaModel model = getLoadedModel(modelFile.getAbsolutePath());
-        String systemPrompt = buildSystemPrompt(sourceLang, targetLang);
         JSObject translations = new JSObject();
         List<String> warnings = new java.util.ArrayList<>();
         int count = 0;
-        int warned = 0;
+        int[] warned = {0};
+        List<LocalTranslationSupport.TextItem> batch = new ArrayList<>();
         for (LocalTranslationSupport.TextItem item : items) {
             if (item.text == null || item.text.trim().length() == 0) {
                 continue;
             }
+            batch.add(item);
+            if (batch.size() >= BATCH_SIZE) {
+                count += translateBatch(model, batch, sourceLang, targetLang, translations, warnings, warned);
+                batch.clear();
+            }
             if (Thread.currentThread().isInterrupted()) {
                 break;
             }
-            try {
-                LlamaResult result = completeSync(model, item.text, systemPrompt, MAX_TOKENS);
-                String translated = cleanOutput(result.getText());
-                if (translated == null || translated.length() == 0) {
-                    if (warned < 50) {
-                        warnings.add(item.keyPath + ": 本地模型未生成译文，已跳过");
-                        warned++;
-                    }
-                    continue;
-                }
-                if (translated.equals(item.text.trim())) {
-                    if (warned < 50) {
-                        warnings.add(item.keyPath + ": 译文与原文相同，已跳过");
-                        warned++;
-                    }
-                    continue;
-                }
-                translations.put(item.keyPath, translated);
-                count++;
-            } catch (Exception e) {
-                if (warned < 50) {
-                    warnings.add(item.keyPath + ": 翻译失败 - "
-                            + LocalTranslationSupport.safeMessage(e));
-                    warned++;
-                }
-            }
+        }
+        if (!batch.isEmpty()) {
+            count += translateBatch(model, batch, sourceLang, targetLang, translations, warnings, warned);
         }
         JSObject result = new JSObject();
         result.put("translations", translations);
@@ -405,6 +395,157 @@ public final class LocalLlmEngine {
         result.put("warnings", LocalTranslationSupport.toJsonArray(warnings));
         result.put("engine", "llm");
         call.resolve(result);
+    }
+
+    private static int translateBatch(LlamaModel model, List<LocalTranslationSupport.TextItem> batch,
+                                      String sourceLang, String targetLang, JSObject translations,
+                                      List<String> warnings, int[] warned) {
+        List<String> parsed = batchCompletion(model, batch, sourceLang, targetLang);
+        if (parsed != null && parsed.size() == batch.size()) {
+            int count = 0;
+            for (int i = 0; i < batch.size(); i++) {
+                if (acceptTranslation(batch.get(i), parsed.get(i), translations, warnings, warned)) {
+                    count++;
+                }
+            }
+            return count;
+        }
+        int count = 0;
+        for (LocalTranslationSupport.TextItem item : batch) {
+            try {
+                String systemPrompt = buildSystemPrompt(sourceLang, targetLang, 1);
+                LlamaResult result = completeSync(model, item.text, systemPrompt, maxTokensForText(item.text));
+                if (acceptTranslation(item, cleanOutput(result.getText()), translations, warnings, warned)) {
+                    count++;
+                }
+            } catch (Exception e) {
+                addWarning(warnings, warned, item.keyPath + ": 翻译失败 - "
+                        + LocalTranslationSupport.safeMessage(e));
+            }
+        }
+        return count;
+    }
+
+    private static List<String> batchCompletion(LlamaModel model, List<LocalTranslationSupport.TextItem> batch,
+                                                String sourceLang, String targetLang) {
+        String systemPrompt = buildSystemPrompt(sourceLang, targetLang, batch.size());
+        String userPrompt = buildBatchPrompt(batch);
+        try {
+            LlamaResult result = completeSync(model, userPrompt, systemPrompt, batchMaxTokens(batch));
+            return parseBatchOutput(result.getText(), batch.size());
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static boolean acceptTranslation(LocalTranslationSupport.TextItem item, String translated,
+                                             JSObject translations, List<String> warnings, int[] warned) {
+        if (translated == null || translated.trim().length() == 0) {
+            addWarning(warnings, warned, item.keyPath + ": 本地模型未生成译文，已跳过");
+            return false;
+        }
+        if (translated.trim().equals(item.text.trim())) {
+            addWarning(warnings, warned, item.keyPath + ": 译文与原文相同，已跳过");
+            return false;
+        }
+        translations.put(item.keyPath, translated);
+        return true;
+    }
+
+    private static void addWarning(List<String> warnings, int[] warned, String message) {
+        if (warned[0] < 50) {
+            warnings.add(message);
+            warned[0]++;
+        }
+    }
+
+    private static String buildBatchPrompt(List<LocalTranslationSupport.TextItem> batch) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < batch.size(); i++) {
+            String text = batch.get(i).text.replace("\r\n", "\n").replace("\n", "\\n");
+            builder.append(i + 1).append(". ").append(text);
+            if (i + 1 < batch.size()) {
+                builder.append('\n');
+            }
+        }
+        return builder.toString();
+    }
+
+    private static List<String> parseBatchOutput(String raw, int count) {
+        if (raw == null || count <= 0) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.startsWith("```")) {
+            int firstNewline = value.indexOf('\n');
+            if (firstNewline > 0) {
+                value = value.substring(firstNewline + 1).trim();
+            }
+            if (value.endsWith("```")) {
+                value = value.substring(0, value.length() - 3).trim();
+            }
+        }
+        int start = value.indexOf('[');
+        int end = value.lastIndexOf(']');
+        if (start >= 0 && end > start) {
+            try {
+                JSONArray array = new JSONArray(value.substring(start, end + 1));
+                List<String> result = new ArrayList<>();
+                for (int i = 0; i < array.length() && i < count; i++) {
+                    Object item = array.opt(i);
+                    if (item == null || array.isNull(i)) {
+                        result.add(null);
+                    } else {
+                        result.add(cleanOutput(String.valueOf(item)).replace("\\n", "\n"));
+                    }
+                }
+                if (result.size() == count) {
+                    return result;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return parseNumberedOutput(value, count);
+    }
+
+    private static List<String> parseNumberedOutput(String value, int count) {
+        if (value == null || count <= 0) {
+            return null;
+        }
+        String[] lines = value.split("\n");
+        List<String> result = new ArrayList<>();
+        for (String line : lines) {
+            Matcher matcher = NUMBERED_LINE.matcher(line);
+            if (matcher.matches()) {
+                result.add(cleanOutput(matcher.group(1)));
+                if (result.size() == count) {
+                    break;
+                }
+            }
+        }
+        return result.size() == count ? result : null;
+    }
+
+    private static int batchMaxTokens(List<LocalTranslationSupport.TextItem> batch) {
+        int total = 64;
+        for (LocalTranslationSupport.TextItem item : batch) {
+            total += maxTokensForText(item.text);
+        }
+        return Math.min(BATCH_MAX_TOKENS, Math.max(128, total));
+    }
+
+    private static int maxTokensForText(String text) {
+        int length = text == null ? 0 : text.length();
+        if (length <= 24) {
+            return 64;
+        }
+        if (length <= 80) {
+            return 128;
+        }
+        if (length <= 200) {
+            return 256;
+        }
+        return 384;
     }
 
     private static synchronized LlamaModel getLoadedModel(String path) throws Exception {
@@ -481,7 +622,7 @@ public final class LocalLlmEngine {
         return result;
     }
 
-    private static String buildSystemPrompt(String sourceLang, String targetLang) {
+    private static String buildSystemPrompt(String sourceLang, String targetLang, int count) {
         return "You are a professional game localization translator for visual novels. "
                 + "Translate the following " + langName(sourceLang) + " text into "
                 + langName(targetLang) + ". "

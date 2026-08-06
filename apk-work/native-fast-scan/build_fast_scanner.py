@@ -706,6 +706,21 @@ def patch_mlkit_manifest(manifest: Path) -> None:
 
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
+def patch_version_manifest(manifest: Path) -> None:
+    """Set the release version on the decoded manifest.
+
+    apktool restores versionCode/versionName from original/AndroidManifest.xml
+    when the decoded XML omits them, so write them explicitly here to pin the
+    release version (1.0.6 / versionCode 6).
+    """
+    ET.register_namespace("android", ANDROID_NAMESPACE)
+    tree = ET.parse(manifest)
+    root = tree.getroot()
+    root.set("{" + ANDROID_NAMESPACE + "}versionCode", "6")
+    root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.6")
+    tree.write(manifest, encoding="utf-8", xml_declaration=True)
+
+
 MLKIT_AAR_RES = (
     ("res/raw/translate_models_metadata.json", "res/raw/translate_models_metadata.json"),
     ("res/xml/rapid_response_client_defaults.xml", "res/xml/rapid_response_client_defaults.xml"),
@@ -816,6 +831,7 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path
     )
     patch_launcher_queries(decoded / "AndroidManifest.xml")
     patch_mlkit_manifest(decoded / "AndroidManifest.xml")
+    patch_version_manifest(decoded / "AndroidManifest.xml")
     inject_mlkit_resources(decoded)
     inject_native_libs(decoded)
     candidates = list(decoded.glob("smali_classes6/com/slgtranslator/app/FileManagerPlugin.smali"))

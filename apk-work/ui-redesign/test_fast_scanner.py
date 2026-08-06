@@ -105,6 +105,48 @@ def build_menu_fixture_rpyc() -> bytes:
 
 
 
+def build_underscore_menu_fixture_rpyc() -> bytes:
+    """Builds a minimal RPC2 rpyc whose pickle stores language buttons as
+    _("label") payloads after their Language(...) actions, matching the
+    compiled screen layout used by Mayfly."""
+    # Structural fixture mirrors compiled Ren'Py screens: every button is an
+    # SLDisplayable NEWOBJ with a (NONE, state_dict) BUILD and one APPENDS
+    # that closes the language vbox children list.
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"ctest\nButton\n" + b"\x71\x01"  # GLOBAL Button, memo 1
+    p += b"\x5d\x71\x02"  # EMPTY_LIST children, memo 2
+    p += b"\x28"  # MARK for APPENDS
+    memo = 100
+    for lang, label in (("English", "英语"), ("russian", "俄语"),
+                        ("None", "简体中文"), ("TraditionalChinese", "繁體中文")):
+        p += b"\x68\x01\x29\x81"  # BINGET 1 EMPTY_TUPLE NEWOBJ
+        p += b"\x72" + struct.pack("<I", memo); memo += 1
+        p += b"\x4e\x7d"  # NONE EMPTY_DICT state
+        p += b"\x72" + struct.pack("<I", memo); memo += 1
+        p += b"\x28"  # MARK for SETITEMS
+        action = 'Language("%s")' % lang if lang != "None" else "Language(None)"
+        for key, value in (("language", action), ("label", '_("%s")' % label)):
+            p += pickle_short(key)
+            p += b"\x72" + struct.pack("<I", memo); memo += 1
+            p += pickle_short(value)
+            p += b"\x72" + struct.pack("<I", memo); memo += 1
+        p += b"\x75\x86"  # SETITEMS TUPLE2
+        p += b"\x72" + struct.pack("<I", memo); memo += 1
+        p += b"\x62"  # BUILD
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    import zlib
+    slot = zlib.compress(bytes(p))
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
 def build_source_call_fixture_rpyc() -> bytes:
     """Builds an RPC2 rpyc whose pickle embeds source strings containing
     message-style and Ren'Py preference-style function calls. The extractor
@@ -1037,6 +1079,75 @@ public final class CacheOwnershipHarness {
         ):
             self.assertIn(token, builder)
 
+    def test_language_menu_injects_underscore_labels_after_language_action(self):
+        fixture = build_underscore_menu_fixture_rpyc()
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+public final class UnderscoreMenuHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] input = Files.readAllBytes(Paths.get(args[0]));
+        byte[] output = LanguageMenuSupport.injectMenu(input, "schinese", "slgtranslated");
+        if (output == null) {
+            throw new AssertionError("injectMenu returned null for _() language buttons");
+        }
+        if (!LanguageMenuSupport.menuHasLanguage(output, "slgtranslated")) {
+            throw new AssertionError("slgtranslated language entry was not written");
+        }
+        Files.write(Paths.get(args[1]), output);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        import zlib
+        with tempfile.TemporaryDirectory(prefix="underscore-menu-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            output_path = temporary_path / "injected.rpyc"
+            harness_path = temporary_path / "UnderscoreMenuHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.UnderscoreMenuHarness",
+                 str(fixture_path), str(output_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            data = output_path.read_bytes()
+            pos = len(RPC2_MAGIC)
+            texts = b""
+            while pos + 12 <= len(data):
+                sid, off, ln = struct.unpack_from("<III", data, pos)
+                if sid == 0:
+                    break
+                texts += zlib.decompress(data[off:off + ln])
+                pos += 12
+            self.assertIn(b'Language("slgtranslated")', texts)
+            self.assertIn('_("翻译文本")'.encode("utf-8"), texts)
+            self.assertIn(b'Language("TraditionalChinese")', texts)
+            self.assertIn('_("繁體中文")'.encode("utf-8"), texts)
+
     def test_rpyc_text_extractor_registers_structural_reading_bridge(self):
         extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
         self.assertTrue(extractor.exists(), "RpycTextExtractor.java must exist")
@@ -1687,6 +1798,20 @@ public final class InstallSaveFailureHarness {
         for token in ("installViaSession", "PackageInstaller.SessionParams", "MODE_FULL_INSTALL",
                       "session.openWrite", "session.commit", "ACTION_PACKAGE_INSTALLED"):
             self.assertIn(token, source)
+        self.assertIn("PendingIntent.getBroadcast(context, 0, broadcast, PendingIntent.FLAG_MUTABLE);", source)
+        self.assertNotIn("PendingIntent.getBroadcast(context, 0, broadcast, 0);", source)
+        commit_index = source.index("session.commit(sender);")
+        close_index = source.index("session.close();")
+        self.assertLess(commit_index, close_index, "session must be committed before it is closed")
+        self.assertIn("installer.abandonSession(sessionId)", source)
+        self.assertIn("STATUS_PENDING_USER_ACTION", source)
+        self.assertIn("intent.getParcelableExtra(Intent.EXTRA_INTENT)", source)
+        self.assertIn("Intent.FLAG_ACTIVITY_NEW_TASK", source)
+        self.assertIn("ctx.startActivity(confirm)", source)
+        self.assertIn("Context.RECEIVER_NOT_EXPORTED", source)
+        self.assertNotIn("PendingIntent.FLAG_IMMUTABLE", source)
+        self.assertEqual(source.count("appContext.registerReceiver(receiver, filter);"), 1)
+        self.assertIn("appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);", source)
         builder = BUILDER.read_text("utf-8")
         self.assertIn("INSTALL_APK_SIGNATURE", builder)
         self.assertIn("INSTALL_APK_PATTERN", builder)

@@ -38,6 +38,11 @@ public final class MlKitTranslator {
     private static volatile boolean downloading = false;
     private static volatile String downloadState = "idle";
 
+    private static final Object TRANSLATOR_LOCK = new Object();
+    private static Translator sharedTranslator = null;
+    private static String sharedSource = null;
+    private static String sharedTarget = null;
+
     private MlKitTranslator() {
     }
 
@@ -230,6 +235,7 @@ public final class MlKitTranslator {
         freed += deleteMlkitDirs(context.getNoBackupFilesDir());
         downloading = false;
         downloadState = "idle";
+        resetSharedTranslator();
         return freed;
     }
 
@@ -271,27 +277,29 @@ public final class MlKitTranslator {
         return total;
     }
 
-    /** Translate a batch of texts sequentially with the ML Kit engine. */
-    public static void translate(Context context, List<LocalTranslationSupport.TextItem> items,
-                                 String sourceLang, String targetLang, PluginCall call) throws Exception {
+    /** Reuse one ML Kit Translator for the same language pair so every batch
+     * does not pay model loading again. Callers must hold TRANSLATOR_LOCK.
+     */
+    private static Translator getSharedTranslator(Context context, String sourceLang, String targetLang) throws Exception {
         String source = toMlKitLang(sourceLang);
         String target = toMlKitLang(targetLang);
         if (source == null || target == null) {
             throw new IllegalArgumentException(
                     "ML Kit 轻量翻译暂不支持该语言对（当前支持英文/中文，繁体请用高质量本地模型或云端 API）");
         }
-        if (items.isEmpty()) {
-            JSObject empty = new JSObject();
-            empty.put("translations", new JSObject());
-            empty.put("count", 0);
-            empty.put("warnings", LocalTranslationSupport.toJsonArray(new java.util.ArrayList<String>()));
-            call.resolve(empty);
-            return;
+        if (sharedTranslator != null && source.equals(sharedSource) && target.equals(sharedTarget)) {
+            return sharedTranslator;
         }
         if (!isModelDownloaded(context, sourceLang) || !isModelDownloaded(context, targetLang)) {
             throw new IllegalStateException("本地翻译模型尚未下载，请先在“翻译服务”中下载轻量翻译模型");
         }
-
+        if (sharedTranslator != null) {
+            try {
+                sharedTranslator.close();
+            } catch (Throwable ignored) {
+            }
+            sharedTranslator = null;
+        }
         TranslatorOptions options = new TranslatorOptions.Builder()
                 .setSourceLanguage(source)
                 .setTargetLanguage(target)
@@ -300,7 +308,47 @@ public final class MlKitTranslator {
         try {
             Tasks.await(translator.downloadModelIfNeeded(
                     new DownloadConditions.Builder().build()), DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Throwable e) {
+            try {
+                translator.close();
+            } catch (Throwable ignored) {
+            }
+            throw e;
+        }
+        sharedTranslator = translator;
+        sharedSource = source;
+        sharedTarget = target;
+        return sharedTranslator;
+    }
 
+    /** Close the shared translator, e.g. after models are deleted. */
+    static void resetSharedTranslator() {
+        synchronized (TRANSLATOR_LOCK) {
+            if (sharedTranslator != null) {
+                try {
+                    sharedTranslator.close();
+                } catch (Throwable ignored) {
+                }
+                sharedTranslator = null;
+            }
+            sharedSource = null;
+            sharedTarget = null;
+        }
+    }
+
+    /** Translate a batch of texts sequentially with a shared ML Kit engine. */
+    public static void translate(Context context, List<LocalTranslationSupport.TextItem> items,
+                                 String sourceLang, String targetLang, PluginCall call) throws Exception {
+        if (items.isEmpty()) {
+            JSObject empty = new JSObject();
+            empty.put("translations", new JSObject());
+            empty.put("count", 0);
+            empty.put("warnings", LocalTranslationSupport.toJsonArray(new java.util.ArrayList<String>()));
+            call.resolve(empty);
+            return;
+        }
+        synchronized (TRANSLATOR_LOCK) {
+            Translator translator = getSharedTranslator(context, sourceLang, targetLang);
             JSObject translations = new JSObject();
             List<String> warnings = new java.util.ArrayList<>();
             int count = 0;
@@ -344,11 +392,6 @@ public final class MlKitTranslator {
             result.put("count", count);
             result.put("warnings", LocalTranslationSupport.toJsonArray(warnings));
             call.resolve(result);
-        } finally {
-            try {
-                translator.close();
-            } catch (Throwable ignored) {
-            }
         }
     }
 }

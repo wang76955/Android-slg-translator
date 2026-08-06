@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.6] - 2026-08-06
+
+### Added
+
+- Independent `翻译文本` entry added to compiled Ren'Py language menus while preserving every original language option
+- Translation detail view now shows the batch currently being processed
+- Faster translation pipeline: global API semaphore, file-level parallel workers, incremental cache persistence, background saves, and output directory URI caching
+- Local LLM and ML Kit translation engine improvements for faster on-device translation
+
+### Fixed
+
+- First translation page flash that appeared immediately after opening the app
+- Long translation sessions no longer crash the WebView or leak cache memory
+- Install button remains functional after translating a new game
+- Translated games expose the translated text as a selectable language option
+- Cache cleanup now also clears the in-memory cache index
+
+### Changed
+
+- Release version bumped to 1.0.6 (versionCode 6) and the About screen now shows Android v1.0.6
+
 ## [1.0.5] - 2026-08-05
 
 ### Added

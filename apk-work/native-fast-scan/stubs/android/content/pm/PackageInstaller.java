@@ -28,6 +28,9 @@ public class PackageInstaller {
     public void registerSessionCallback(SessionCallback callback) {
     }
 
+    public void abandonSession(int sessionId) {
+    }
+
     public static class SessionParams {
         public static final int MODE_FULL_INSTALL = 1;
 

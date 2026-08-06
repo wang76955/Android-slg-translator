@@ -211,7 +211,7 @@ class CacheMemoryPatchTest(unittest.TestCase):
     def test_full_clear_resets_cache_index(self):
         # full 清空必须同步清 cacheIndex，否则旧缓存引用残留、清理无效
         self.assertIn(
-            "_mode===`full`&&(vo={},cacheIndex={},bo=!0,await wo())",
+            "_mode===`full`&&(vo={},cacheIndex={},_dirty={},bo=!0,await wo(!0))",
             self.js,
         )
         self.assertNotIn("_mode===`full`&&(vo={},bo=!0,await wo())", self.js)
@@ -260,3 +260,41 @@ process.stdout.write(JSON.stringify(out));
         self.assertEqual(out["orphanIndex"], 0, "cacheIndex 不得残留 vo 中已删除的引用")
         self.assertIsNone(out["toOld"], "被淘汰的条目不得再命中")
         self.assertIsNotNone(out["toNew"], "新条目应保留")
+    def test_cache_save_is_throttled_until_forced_flush(self):
+        module = self.module
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            js_path = Path(directory) / "patched.js"
+            js_path.write_text(js, encoding="utf-8")
+            js_literal = json.dumps(str(js_path))
+            script = f"""
+const fs = require('fs');
+const js = fs.readFileSync({js_literal}, 'utf-8');
+const start = js.indexOf('var _o=');
+const end = js.indexOf('var ko=', start);
+const region = js.slice(start, end) + '\\nreturn {{wo,vo,cacheIndex,bo,Eo}};';
+const api = new Function(region)();
+const saves = [];
+globalThis.E={{loadTranslationCache:async()=>({{data:null}}),saveTranslationCache:async payload=>{{saves.push(payload.data.length)}}}};
+globalThis.O=()=>{{}};
+const scope='en|zh|deepseek-v4-flash|g0';
+(async()=>{{
+  api.Eo(scope,'text-a','a');
+  await api.wo();
+  const afterFirst=saves.length;
+  api.Eo(scope,'text-b','b');
+  await api.wo();
+  const afterSecond=saves.length;
+  api.Eo(scope,'text-c','c');
+  await api.wo(true);
+  const afterFlush=saves.length;
+   process.stdout.write(JSON.stringify({{afterFirst,afterSecond,afterFlush,skipped:globalThis.__slgCacheDbg.skipped}}));process.exit(0);
+}})();
+"""
+            out = json.loads(run_node(script, ROOT))
+            self.assertEqual(out["afterFirst"], 1, "first dirty cache writes a checkpoint")
+            self.assertEqual(out["afterSecond"], 1, "recent non-forced calls must not serialize the full cache again")
+            self.assertEqual(out["afterFlush"], 2, "forced flush persists the dirty cache")
+            self.assertGreaterEqual(out["skipped"], 1, "throttled call is counted as skipped")

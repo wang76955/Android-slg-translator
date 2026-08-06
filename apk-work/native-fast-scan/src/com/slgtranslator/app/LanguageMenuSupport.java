@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
@@ -121,7 +123,7 @@ public final class LanguageMenuSupport {
     }
 
     /** Returns true when a rpyc already contains the translator language entry. */
-    private static boolean menuHasLanguage(byte[] rpyc, String translatorLang) {
+    static boolean menuHasLanguage(byte[] rpyc, String translatorLang) {
         if (rpyc.length < RPC2_MAGIC.length || !startsWith(rpyc, RPC2_MAGIC)) {
             return false;
         }
@@ -185,7 +187,7 @@ public final class LanguageMenuSupport {
             if (!menuFound && containsAscii(inflated, "Language(\"")) {
                 menuFound = true;
             }
-            byte[] next = rewriteButton(inflated, gameTargetLang, translatorLang);
+            byte[] next = appendMenuButton(inflated, gameTargetLang, translatorLang);
             if (next == null) {
                 rebuilt.add(compressed);
             } else {
@@ -241,18 +243,40 @@ public final class LanguageMenuSupport {
             }
             String label = null;
             List<String> payloads = new ArrayList<>();
-            for (int j = k - 1; j >= Math.max(0, k - 120); j--) {
-                String p = stringPayload(data, ops, j);
-                String lab = textLabel(p);
-                if (lab != null) {
-                    label = lab;
-                    for (int j2 = Math.max(0, k - 120); j2 < k; j2++) {
-                        String p2 = stringPayload(data, ops, j2);
-                        if (p2 != null && lab.equals(textLabel(p2))) {
-                            payloads.add(p2);
+            int from = Math.max(0, k - 240);
+            int to = Math.min(ops.size() - 1, k + 240);
+            // Compiled Ren'Py screens store the button label after the
+            // Language(...) action in some games, and before it in others.
+            for (int direction = 0; direction < 2 && label == null; direction++) {
+                if (direction == 0) {
+                    for (int j = k + 1; j <= to; j++) {
+                        String p = stringPayload(data, ops, j);
+                        String lab = textLabel(p);
+                        if (lab != null) {
+                            label = lab;
+                            break;
                         }
                     }
-                    break;
+                } else {
+                    for (int j = k - 1; j >= from; j--) {
+                        String p = stringPayload(data, ops, j);
+                        String lab = textLabel(p);
+                        if (lab != null) {
+                            label = lab;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (label != null) {
+                for (int j = from; j <= to; j++) {
+                    if (j == k) {
+                        continue;
+                    }
+                    String p2 = stringPayload(data, ops, j);
+                    if (p2 != null && label.equals(textLabel(p2)) && !payloads.contains(p2)) {
+                        payloads.add(p2);
+                    }
                 }
             }
             langs.add(lang);
@@ -312,13 +336,234 @@ public final class LanguageMenuSupport {
 
 
     /**
+     * Clones the last expendable language button and appends the copy as an
+     * independent translation-text entry. Original buttons stay untouched.
+     */
+    private static byte[] appendMenuButton(byte[] data, String gameTargetLang, String translatorLang) {
+        List<int[]> ops = walk(data);
+        if (ops == null) {
+            return null;
+        }
+        List<String> langs = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        List<List<String>> labelPayloads = new ArrayList<>();
+        List<Integer> langOps = new ArrayList<>();
+        for (int k = 0; k < ops.size(); k++) {
+            String payload = stringPayload(data, ops, k);
+            if (payload == null) {
+                continue;
+            }
+            String lang = languageCode(payload);
+            if (lang == null) {
+                continue;
+            }
+            String label = null;
+            List<String> payloads = new ArrayList<>();
+            int from = Math.max(0, k - 240);
+            int to = Math.min(ops.size() - 1, k + 240);
+            for (int direction = 0; direction < 2 && label == null; direction++) {
+                if (direction == 0) {
+                    for (int j = k + 1; j <= to; j++) {
+                        String p = stringPayload(data, ops, j);
+                        String lab = textLabel(p);
+                        if (lab != null) {
+                            label = lab;
+                            break;
+                        }
+                    }
+                } else {
+                    for (int j = k - 1; j >= from; j--) {
+                        String p = stringPayload(data, ops, j);
+                        String lab = textLabel(p);
+                        if (lab != null) {
+                            label = lab;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (label != null) {
+                for (int j = from; j <= to; j++) {
+                    if (j == k) {
+                        continue;
+                    }
+                    String p2 = stringPayload(data, ops, j);
+                    if (p2 != null && label.equals(textLabel(p2)) && !payloads.contains(p2)) {
+                        payloads.add(p2);
+                    }
+                }
+            }
+            langs.add(lang);
+            labels.add(label);
+            labelPayloads.add(payloads);
+            langOps.add(k);
+        }
+        int candidateIdx = -1;
+        for (int i = 0; i < langs.size(); i++) {
+            if (langs.get(i).equals(translatorLang)) {
+                return null; // already injected
+            }
+            String lang = langs.get(i);
+            if (!lang.equals("None") && !lang.isEmpty() && !lang.equals(gameTargetLang)) {
+                candidateIdx = i;
+            }
+        }
+        if (candidateIdx < 0 || labels.get(candidateIdx) == null) {
+            return null;
+        }
+        int langOp = langOps.get(candidateIdx);
+        int start = findButtonStart(ops, langOp);
+        int end = findButtonEnd(ops, langOp);
+        if (start < 0 || end < 0) {
+            return null;
+        }
+        String[] styles = chooseStyles(labels, labelPayloads, candidateIdx);
+        String candidateLang = langs.get(candidateIdx);
+        List<String> candidatePayloads = labelPayloads.get(candidateIdx);
+        byte[] clone = buildCloneButton(data, ops, start, end, candidateLang,
+                candidatePayloads, styles, translatorLang);
+        if (clone == null) {
+            return null;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length + clone.length + 64);
+        out.write(data, 0, ops.get(end)[1]);
+        out.write(clone, 0, clone.length);
+        out.write(data, ops.get(end)[1], data.length - ops.get(end)[1]);
+        return out.toByteArray();
+    }
+
+    /** Finds the opcode index of the SLDisplayable creation for a language button. */
+    private static int findButtonStart(List<int[]> ops, int langOp) {
+        int newObj = -1;
+        for (int i = langOp - 1; i >= 0; i--) {
+            if (ops.get(i)[0] == 0x81) {
+                newObj = i;
+                break;
+            }
+        }
+        if (newObj < 2 || ops.get(newObj - 1)[0] != 0x29) {
+            return -1;
+        }
+        int cls = ops.get(newObj - 2)[0];
+        if (cls != 0x68 && cls != 0x6a && cls != 0x63) {
+            return -1;
+        }
+        return newObj - 2;
+    }
+
+    /** Finds the APPENDS opcode that closes the language button list. */
+    private static int findButtonEnd(List<int[]> ops, int langOp) {
+        for (int i = langOp + 1; i + 1 < ops.size(); i++) {
+            if (ops.get(i)[0] == 0x62 && ops.get(i + 1)[0] == 0x65) {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    /** Builds a memo-renumbered byte copy of the button opcode range. */
+    private static byte[] buildCloneButton(byte[] data, List<int[]> ops, int startOp, int endOp,
+                                           String candidateLang, List<String> candidatePayloads,
+                                           String[] styles, String translatorLang) {
+        Map<Integer, Integer> memo = new HashMap<>();
+        int nextMemo = 0x40000000;
+        for (int i = startOp; i < endOp; i++) {
+            int code = ops.get(i)[0];
+            if (code == 0x71 || code == 0x72) {
+                memo.put(memoId(data, ops.get(i)), nextMemo++);
+            }
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream(512);
+        for (int i = startOp; i < endOp; i++) {
+            int[] op = ops.get(i);
+            int code = op[0];
+            if (code == 0x95) {
+                continue;
+            }
+            byte[] chunk = slice(data, op[1], op[2]);
+            if (code == 0x71 || code == 0x72) {
+                Integer mapped = memo.get(memoId(data, op));
+                if (mapped != null) {
+                    writeLongBinInput(out, mapped);
+                } else {
+                    out.write(chunk, 0, chunk.length);
+                }
+                continue;
+            }
+            if (code == 0x68 || code == 0x6a) {
+                Integer mapped = memo.get(memoId(data, op));
+                if (mapped != null) {
+                    writeLongBinGet(out, mapped);
+                } else {
+                    out.write(chunk, 0, chunk.length);
+                }
+                continue;
+            }
+            String payload = stringPayload(data, ops, i);
+            if (payload != null) {
+                if (payload.equals("Language(\"" + candidateLang + "\")")) {
+                    writeUnicode(out, "Language(\"" + translatorLang + "\")");
+                    continue;
+                }
+                if (candidatePayloads != null && candidatePayloads.contains(payload)) {
+                    String next = rewriteTextPayload(payload, TRANSLATOR_LABEL, styles);
+                    if (next != null && !next.equals(payload)) {
+                        writeUnicode(out, next);
+                        continue;
+                    }
+                }
+            }
+            out.write(chunk, 0, chunk.length);
+        }
+        return out.toByteArray();
+    }
+
+    private static int memoId(byte[] data, int[] op) {
+        if (op[0] == 0x71 || op[0] == 0x68) {
+            return data[op[1] + 1] & 0xFF;
+        }
+        if (op[0] == 0x72 || op[0] == 0x6a) {
+            return le32(data, op[1] + 1);
+        }
+        return -1;
+    }
+
+    private static void writeLongBinInput(ByteArrayOutputStream out, int id) {
+        out.write(0x72);
+        writeIntLe(out, id);
+    }
+
+    private static void writeLongBinGet(ByteArrayOutputStream out, int id) {
+        out.write(0x6a);
+        writeIntLe(out, id);
+    }
+
+    private static void writeUnicode(ByteArrayOutputStream out, String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= 255) {
+            writeShortUnicode(out, value);
+        } else {
+            out.write(0x58);
+            writeIntLe(out, bytes.length);
+            out.write(bytes, 0, bytes.length);
+        }
+    }
+
+    /**
      * Extracts the label text from Text(...) payloads like
      * Text(("English"), style="..."), Text("中文", style="...") or
      * Text(_("Info"), style="..."). Returns null when the payload is not a
      * Text label payload.
      */
     private static String textLabel(String payload) {
-        if (payload == null || !payload.startsWith("Text(")) {
+        if (payload == null) {
+            return null;
+        }
+        if (payload.startsWith("_(\"") && payload.endsWith("\")")) {
+            String label = payload.substring(3, payload.length() - 2);
+            return label.isEmpty() ? null : label;
+        }
+        if (!payload.startsWith("Text(")) {
             return null;
         }
         int open = -1;
@@ -425,6 +670,9 @@ public final class LanguageMenuSupport {
      * structural form).
      */
     private static String rewriteTextPayload(String payload, String newLabel, String[] styles) {
+        if (payload != null && payload.startsWith("_(\"") && payload.endsWith("\")")) {
+            return "_(\"" + newLabel + "\")";
+        }
         if (styles == null) {
             return null;
         }

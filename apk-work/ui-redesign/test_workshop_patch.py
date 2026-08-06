@@ -109,14 +109,14 @@ class WorkshopPatchContractTest(unittest.TestCase):
         candidate_filter = js[filter_start:filter_end]
         self.assertIn("slgtranslated", candidate_filter)
         self.assertIn("es(q)", candidate_filter)
-        self.assertIn("$o(_d).has(l)", candidate_filter)
-        self.assertIn("__slgDstLang", candidate_filter)
+        self.assertIn("$o(_s).has(l)", candidate_filter)
+        self.assertNotIn("$o(_d).has(l)", candidate_filter)
 
         contract = r"""
 function check(condition,label){if(!condition)throw new Error(label)}
 var qo=new Set(['png','jpg','jpeg','gif','webp','bmp','ico','mp3','wav','ogg','aac','flac','m4a','mp4','webm','avi','mkv','mov','ttf','otf','woff','woff2']);
 globalThis.__slgSrcLang='en';globalThis.__slgDstLang='zh';
-check(Yo({name:'assets/x-game/x-tl/x-chinese/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'chinese tl bucket must be a candidate');
+check(Yo({name:'assets/x-game/x-tl/x-chinese/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'chinese tl bucket must be skipped as target language');
 check(Yo({name:'assets/x-game/x-tl/x-english/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===true,'english tl bucket must be a candidate');
 check(Yo({name:'assets/x-game/x-tl/x-german/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated german tl bucket must be excluded');
 check(Yo({name:'assets/x-game/x-tl/x-bosnian/x-phone.rpyc',fileType:'rpyc'},'auto','zh')===false,'unrelated bosnian tl bucket must be excluded');
@@ -132,7 +132,7 @@ check(Yo({name:'assets/x-game/x-ch1ep1.rpyc',fileType:'rpyc'},'auto','zh')===tru
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_recovery_modes_hidden_for_game_without_history(self):
-        """New games with no translation history must not show 继续上次/扫描新增
+        """New games with no translation history must not show 缁х画涓婃/鎵弿鏂板
         recovery modes; the ready state should only offer a fresh start."""
         module = self.load_patch()
         js, _ = module.patch_assets(
@@ -227,8 +227,8 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
             "e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`",
             "e.packageName||``",
             "e.splitApk&&t.entries.length===0",
-            "该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。",
-            "该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。",
+            "璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛屽熀纭€ APK 涓病鏈夊彲缈昏瘧鏂囦欢銆傝鏀圭敤鈥滀粠鏂囦欢閫夋嫨 APK鈥濄€?,
+            "璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛?{e.splitCount||0} 涓媶鍒嗗寘锛夛紝褰撳墠鍏堟壂鎻忓熀纭€ APK锛岄儴鍒嗚祫婧愬彲鑳芥棤娉曡鍙栥€?,
             "function openSourceChooser()",
             "function openInstalledApps()",
             "function filterInstalledApps(apps,query)",
@@ -243,15 +243,15 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
             "FileManager.listInstalledApps()",
             "FileManager.selectInstalledApp({packageName:app.packageName})",
             "await window.__slgLoadSelectedApk(selection)",
-            "选择应用或 APK",
-            "从已安装应用选择",
-            "从文件选择 APK",
-            "正在读取应用列表",
-            "没有找到可选择的已安装应用。你仍可从文件选择 APK。",
-            "正在读取应用安装包…",
-            "正在读取已安装应用的 APK...",
-            "重新加载",
-            "搜索应用名称或包名",
+            "閫夋嫨搴旂敤鎴?APK",
+            "浠庡凡瀹夎搴旂敤閫夋嫨",
+            "浠庢枃浠堕€夋嫨 APK",
+            "姝ｅ湪璇诲彇搴旂敤鍒楄〃",
+            "娌℃湁鎵惧埌鍙€夋嫨鐨勫凡瀹夎搴旂敤銆備綘浠嶅彲浠庢枃浠堕€夋嫨 APK銆?,
+            "姝ｅ湪璇诲彇搴旂敤瀹夎鍖呪€?,
+            "姝ｅ湪璇诲彇宸插畨瑁呭簲鐢ㄧ殑 APK...",
+            "閲嶆柊鍔犺浇",
+            "鎼滅储搴旂敤鍚嶇О鎴栧寘鍚?,
         ):
             self.assertIn(token, js)
         self.assertEqual(js.count("loadSelectedApk=window.__slgLoadSelectedApk"), 1)
@@ -334,7 +334,7 @@ function renderInstalledApps(){{renderedStates.push({{loading:installedLoading,e
 let closed=0;
 function closeInstalledApps(){{closed+=1}}
 const document={{querySelectorAll(){{return[]}}}};
-function sourceText(){{return`已选择：Broken.apk`}} function readProgressLog(){{return{{raw:``,latest:``}}}}
+function sourceText(){{return`宸查€夋嫨锛欱roken.apk`}} function readProgressLog(){{return{{raw:``,latest:``}}}}
 function textNode(tag,cls,text){{return{{tag,cls,text,children:[],dataset:{{}},style:{{}},setAttribute(){{}},append(...children){{this.children.push(...children)}}}}}}
 function fileRow(){{return textNode(`div`,`file-row`,`file`)}} function detailToggle(raw){{return textNode(`div`,`details`,raw)}}
 function actionButton(label,handler,secondary=false){{return{{tag:`button`,label,handler,secondary,children:[]}}}}
@@ -355,7 +355,7 @@ async function main(){{
   E.listApkEntries=async input=>{{calls.push([`list`,input.uri]);return{{entries:[],scanDurationMs:5}}}};
   let splitError=``;
   try{{await loadSelectedApk({{uri:`file://split.apk`,label:`Split`,splitApk:true,splitCount:2}})}}catch(error){{splitError=error.message}}
-  check(splitError===`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`,`dedicated split error`);
+  check(splitError===`璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛屽熀纭€ APK 涓病鏈夊彲缈昏瘧鏂囦欢銆傝鏀圭敤鈥滀粠鏂囦欢閫夋嫨 APK鈥濄€俙,`dedicated split error`);
   check(scanning.at(-1)===false,`error clears scanning`);
   E.listApkEntries=async()=>({{entries:[{{fileType:`rpy`}}]}});
   await loadSelectedApk({{uri:`file://retry.apk`,name:`Retry.apk`}});
@@ -399,8 +399,8 @@ async function main(){{
   check(calls.at(-1)[0]===`list`&&calls.at(-1)[1]===installed.uri,`installed selection enters real shared scanner`);
   check(uri===installed.uri&&name===installed.name&&packageName===installed.packageName,`installed metadata survives real loader`);
   check(window.__slgSelectionMeta===installed,`installed split metadata preserved by identity`);
-  check(logs.some(([message])=>message===`正在读取已安装应用的 APK...`),`installed selection uses dedicated loading log`);
-  check(logs.some(([message])=>message===`该应用使用拆分安装包（3 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`),`split warning`);
+  check(logs.some(([message])=>message===`姝ｅ湪璇诲彇宸插畨瑁呭簲鐢ㄧ殑 APK...`),`installed selection uses dedicated loading log`);
+  check(logs.some(([message])=>message===`璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛? 涓媶鍒嗗寘锛夛紝褰撳墠鍏堟壂鎻忓熀纭€ APK锛岄儴鍒嗚祫婧愬彲鑳芥棤娉曡鍙栥€俙),`split warning`);
 
   let resolveOldScan,resolveNewScan;
   E.listApkEntries=input=>new Promise(resolve=>{{if(input.uri===`file://old.apk`)resolveOldScan=resolve;else resolveNewScan=resolve}});
@@ -482,8 +482,8 @@ renderInstalledApps();
 check(search.focusCalls===1,`loading state restores focus to search`);
 installedLoading=false;installedError=`native failed`;renderInstalledApps();
 check(search.focusCalls===2,`error replacement restores focus`);
-const retry=content.children.find(node=>node.textContent===`重新加载`);
-const fallback=content.children.find(node=>node.textContent===`从文件选择 APK`);
+const retry=content.children.find(node=>node.textContent===`閲嶆柊鍔犺浇`);
+const fallback=content.children.find(node=>node.textContent===`浠庢枃浠堕€夋嫨 APK`);
 check(retry&&fallback,`error state exposes retry and file fallback`);
 retry.onclick();check(retries===1,`retry action is executable`);
 modalHistoryArmed=false;
@@ -618,7 +618,7 @@ async function main(){{
  if(window.__slgScanTimeoutMs!==65000)throw new Error(`production deadline is not observable`);
  window.__slgScanTimeoutMs=10;
  let timeout=``;try{{await loadSelectedApk({{uri:`pending`,name:`Pending.apk`}})}}catch(e){{timeout=e.message}}
- if(!/timed out|超时/i.test(timeout)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
+ if(!/timed out|瓒呮椂/i.test(timeout)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
  mode=`reject`;let rejected=``;try{{await loadSelectedApk({{uri:`reject`,name:`Reject.apk`}})}}catch(e){{rejected=e.message}}
  if(rejected!==`native reject`||scanning.at(-1)!==false)throw new Error(`reject contract`);
  mode=`resolve`;await loadSelectedApk({{uri:`fresh`,name:`Fresh.apk`}});lateResolve({{entries:[{{name:`late`,fileType:`rpy`}}]}});await new Promise(resolve=>setTimeout(resolve,0));
@@ -731,7 +731,7 @@ async function main(){
   check(attrs[`aria-busy`]===`true`,`choose marks dialog aria busy`);
   check(findNodes(content.children,node=>node.tag===`button`).every(button=>button.disabled),`busy disables rows and source operations`);
   check(cancelAction.disabled,`busy disables modal source cancellation action`);
-  check(findNode(content.children,node=>node.textContent===`正在读取应用安装包…`),`busy copy is visible`);
+  check(findNode(content.children,node=>node.textContent===`姝ｅ湪璇诲彇搴旂敤瀹夎鍖呪€),`busy copy is visible`);
   chooseResolvers[`two.pkg`].resolve({uri:`file://two.apk`,name:`Two.apk`,packageName:`two.pkg`,source:`installed`});await chooseTwo;
   chooseResolvers[`one.pkg`].resolve({uri:`file://one.apk`,name:`One.apk`,packageName:`one.pkg`,source:`installed`});await chooseOne;
   check(loaded.join(`,`)===`two.pkg`,`stale choose success cannot close or load`);
@@ -742,8 +742,8 @@ async function main(){
   check(installedDialog.hidden&&!modalHistoryArmed,`stale choose failure cannot rearm or reopen after close`);
 
   installedDialog.hidden=false;installedApps=[];installedLoading=false;installedError=``;installedBusy=false;renderInstalledApps();
-  check(findNode(content.children,node=>node.textContent===`没有找到可选择的已安装应用。你仍可从文件选择 APK。`),`complete empty guidance`);
-  const fallback=findNode(content.children,node=>node.textContent===`从文件选择 APK`);check(fallback,`empty state file fallback exists`);fallback.onclick();
+  check(findNode(content.children,node=>node.textContent===`娌℃湁鎵惧埌鍙€夋嫨鐨勫凡瀹夎搴旂敤銆備綘浠嶅彲浠庢枃浠堕€夋嫨 APK銆俙),`complete empty guidance`);
+  const fallback=findNode(content.children,node=>node.textContent===`浠庢枃浠堕€夋嫨 APK`);check(fallback,`empty state file fallback exists`);fallback.onclick();
   check(fallbackClicks===1&&installedDialog.hidden,`empty fallback executes React file picker bridge`);
 }
 main().catch(error=>{console.error(error);process.exitCode=1});
@@ -763,11 +763,11 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
         for copy in (
-            "让喜欢的故事，用中文继续。",
-            "选择 APK 文件",
-            "处理详情",
-            "立即安装",
-            "保存 APK",
+            "璁╁枩娆㈢殑鏁呬簨锛岀敤涓枃缁х画銆?,
+            "閫夋嫨 APK 鏂囦欢",
+            "澶勭悊璇︽儏",
+            "绔嬪嵆瀹夎",
+            "淇濆瓨 APK",
         ):
             self.assertIn(copy, js)
         compact_css = "".join(css.split())
@@ -798,13 +798,13 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             "workshop-state-completed",
             "workshop-state-failed",
             "setWorkshopState",
-            "处理详情",
-            "正在检查文件",
-            "可以开始了",
-            "手机空间不足",
-            "首页",
-            "安装包",
-            "我的",
+            "澶勭悊璇︽儏",
+            "姝ｅ湪妫€鏌ユ枃浠?,
+            "鍙互寮€濮嬩簡",
+            "鎵嬫満绌洪棿涓嶈冻",
+            "棣栭〉",
+            "瀹夎鍖?,
+            "鎴戠殑",
         ):
             self.assertIn(token, js)
         self.assertIn('sourceButton.classList.add("workshop-source-button")', js)
@@ -917,10 +917,10 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
         # while the raw diagnostic remains behind the details disclosure.
         self.assertIn('ENOSPC|No space left', js)
         self.assertIn('return{state:"failed",reason:"space",raw:failed.textContent}', js)
-        self.assertIn('手机空间不足', js)
-        self.assertIn('释放空间后重试', js)
+        self.assertIn('鎵嬫満绌洪棿涓嶈冻', js)
+        self.assertIn('閲婃斁绌洪棿鍚庨噸璇?, js)
         self.assertIn('detailToggle(payload.raw||"ENOSPC|No space left")', js)
-        self.assertIn('actionButton("释放空间后重试",()=>retryTask({fileName:payload.fileName,raw:""}))', js)
+        self.assertIn('actionButton("閲婃斁绌洪棿鍚庨噸璇?,()=>retryTask({fileName:payload.fileName,raw:""}))', js)
 
         # Keep React-managed controls mounted and avoid direct click shortcuts;
         # the shell may only dispatch events to those existing nodes.
@@ -961,7 +961,7 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
             'option.value="deepseek"',
             'option.value="custom"',
             'https://your-api.com/v1',
-            '已保存：',
+            '宸蹭繚瀛橈細',
         ):
             self.assertIn(token, js)
             self.assertIn('min-height:48px', ''.join(css.split()))
@@ -984,10 +984,10 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
             "plugin.deleteSaveArchive",
             "plugin.listSaveGameApps",
             "plugin.listInstalledApps",
-            "选择游戏",
-            "保存存档",
-            "导入存档",
-            "导入分享存档",
+            "閫夋嫨娓告垙",
+            "淇濆瓨瀛樻。",
+            "瀵煎叆瀛樻。",
+            "瀵煎叆鍒嗕韩瀛樻。",
             "importSelectedPkg",
             "importGameSelect",
             "renderImportArchiveRows",
@@ -1000,7 +1000,7 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
         start = js.index("const savesTop=textNode(")
         end = js.index("const cleanupTop=textNode(", start)
         saves_runtime = js[start:end]
-        self.assertNotIn("备份当前存档", saves_runtime)
+        self.assertNotIn("澶囦唤褰撳墠瀛樻。", saves_runtime)
         self.assertNotIn("manageBtn", saves_runtime)
         self.assertNotIn("importGoBtn", saves_runtime)
 
@@ -1033,16 +1033,16 @@ async function main(){
   check(exportBtn.disabled,"save button is disabled before picking a game");
   const topButtons=[...savesCard.children].filter(el=>el.tag==="button"&&!el.hidden);
   check(topButtons.length===2,"save page keeps only game picker and save buttons");
-  check(topButtons.some(el=>el.textContent==="选择游戏")&&topButtons.some(el=>el.textContent==="保存存档"),"save page exposes picker and export intents");
+  check(topButtons.some(el=>el.textContent==="閫夋嫨娓告垙")&&topButtons.some(el=>el.textContent==="淇濆瓨瀛樻。"),"save page exposes picker and export intents");
   check(typeof backupBtn==="undefined","backup button is removed from save page");
   savesSelectedPkg="com.sample.game";savesSelectedLabel="Sample Game";updateSavesState();
   check(!exportBtn.disabled,"save-to-download enabled when a game is selected");
   await refreshSaves();
   check(savesList.children.length===1,"list renders one backup row");
   const actions=savesList.children[0].children.find(el=>el.cls==="workshop-save-actions");
-  const restore=actions.children.find(el=>el.textContent==="恢复");
-  const del=actions.children.find(el=>el.textContent==="删除");
-  const share=actions.children.find(el=>el.textContent==="分享");
+  const restore=actions.children.find(el=>el.textContent==="鎭㈠");
+  const del=actions.children.find(el=>el.textContent==="鍒犻櫎");
+  const share=actions.children.find(el=>el.textContent==="鍒嗕韩");
   check(restore&&share&&del,"row exposes restore, share and delete buttons");
   globalThis.confirm=()=>true;
   await restore.onclick();
@@ -1051,11 +1051,11 @@ async function main(){
   check(calls.share.length===1&&calls.share[0].backupDir==="/backups/1","share calls native plugin with backupDir");
   await del.onclick();
   check(calls.delete.length===1&&calls.delete[0].backupDir==="/backups/1","delete calls native plugin with backupDir");
-  check(savesList.children.length===1&&savesList.children[0].textContent==="暂无备份。","delete refreshes the list");
+  check(savesList.children.length===1&&savesList.children[0].textContent==="鏆傛棤澶囦唤銆?,"delete refreshes the list");
   await exportBtn.onclick();
   check(calls.export.length===1&&calls.export[0].packageName==="com.sample.game","save to download calls native plugin with packageName");
-  check(exportBtn.textContent==="保存存档"&&!exportBtn.disabled,"save button resets after completion");
-  check(permissionNote.textContent.includes("所有文件访问"),"Android 11+ shows permission guidance");
+  check(exportBtn.textContent==="淇濆瓨瀛樻。"&&!exportBtn.disabled,"save button resets after completion");
+  check(permissionNote.textContent.includes("鎵€鏈夋枃浠惰闂?),"Android 11+ shows permission guidance");
   console.log("ok");
 }
 '''
@@ -1081,7 +1081,7 @@ Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},con
 const calls={listInstalled:0,listGames:0,listBackups:0};
 window.Capacitor={Plugins:{FileManager:{
   listInstalledApps:async()=>{calls.listInstalled++;return{apps:[{label:"Chrome",packageName:"com.android.chrome"}]}},
-  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"恶女2.2",packageName:"zitao.mbml"},{label:"异世界",packageName:"cim.isekai.game"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"},{label:"寮備笘鐣?,packageName:"cim.isekai.game"}]}},
   listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
   restoreSaves:async()=>({}),
   deleteBackup:async()=>({}),
@@ -1100,7 +1100,7 @@ async function main(){
   check(gameSelect.children.length===3,"game picker renders placeholder plus apps");
   gameSelect.value="zitao.mbml";gameSelect.onchange();
   check(savesSelectedPkg==="zitao.mbml","picking a game updates the save page local state");
-  check(gameLabel.textContent.includes("恶女2.2"),"picked game name is visible");
+  check(gameLabel.textContent.includes("鎭跺コ2.2"),"picked game name is visible");
   check(!exportBtn.disabled,"picking a game enables save actions");
   check(calls.listBackups>=1,"picking a game refreshes the backup list");
   console.log("ok");
@@ -1128,7 +1128,7 @@ Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},con
 const calls={listArchives:0,imports:[],deleteArchive:[],listGames:0,listBackups:0};
 window.Capacitor={Plugins:{FileManager:{
   listSaveArchives:async()=>{calls.listArchives++;return{archives:[{name:"zitao.mbml-20260805-120000.zip",path:"/downloads/1.zip",size:2048},{name:"renamed.zip",path:"/downloads/2.zip",size:1024}]}},
-  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"恶女2.2",packageName:"zitao.mbml"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"}]}},
   importSaveBackup:async input=>{calls.imports.push(input);return{backupDir:"/backups/imported",name:"imported",fileCount:2,packageName:"zitao.mbml"}},
   deleteSaveArchive:async input=>{calls.deleteArchive.push(input);return{deleted:true}},
   listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
@@ -1151,23 +1151,23 @@ async function main(){
   const archiveRows=(archiveSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
   check(archiveRows.length===2,"all downloaded archives are shown as importable rows");
   globalThis.confirm=()=>true;
-  const delArchive=archiveRows[0].children.find(el=>el.textContent==="删除");
+  const delArchive=archiveRows[0].children.find(el=>el.textContent==="鍒犻櫎");
   check(delArchive,"each archive row exposes a delete action");
   await delArchive.onclick();
   check(calls.deleteArchive.length===1&&calls.deleteArchive[0].path==="/downloads/1.zip","delete calls native plugin with selected archive path");
   const remainingSection=importList.children.find(el=>el.cls==="workshop-archive-section"&&!el.hidden);
   const remainingRows=(remainingSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
   check(remainingRows.length===1,"deleted archive is removed from the panel");
-  const importOne=remainingRows[0].children.find(el=>el.textContent==="导入");
+  const importOne=remainingRows[0].children.find(el=>el.textContent==="瀵煎叆");
   check(importOne,"remaining archive row exposes an import action");
   await importOne.onclick();
   check(calls.imports.length===1&&calls.imports[0].path==="/downloads/2.zip","import calls native plugin with selected path");
   check(importSelectedPkg==="zitao.mbml","import auto-selects the game from the archive");
   check(importGameSelect.value==="zitao.mbml","import updates the import page game picker");
-  check(importGameLabel.textContent.includes("恶女2.2"),"import page shows the auto-selected game label");
+  check(importGameLabel.textContent.includes("鎭跺コ2.2"),"import page shows the auto-selected game label");
   check(importList.children.length===0,"imported archive is removed from the downloaded panel");
-  check(importStatus.textContent.includes("已导入 zitao.mbml 的存档。"),"import success message is visible");
-  check(importArchiveBtn.textContent==="重新选择存档"&&!importArchiveBtn.disabled,"import button resets after completion");
+  check(importStatus.textContent.includes("宸插鍏?zitao.mbml 鐨勫瓨妗ｃ€?),"import success message is visible");
+  check(importArchiveBtn.textContent==="閲嶆柊閫夋嫨瀛樻。"&&!importArchiveBtn.disabled,"import button resets after completion");
   check(calls.listBackups===0,"import page does not refresh the transfer page backup list");
   console.log("ok");
 }
@@ -1192,7 +1192,7 @@ function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
 Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
 window.Capacitor={Plugins:{FileManager:{
-  listSaveGameApps:async()=>({apps:[{label:"恶女2.2",packageName:"zitao.mbml"},{label:"异世界",packageName:"cim.isekai.game"}]}),
+  listSaveGameApps:async()=>({apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"},{label:"寮備笘鐣?,packageName:"cim.isekai.game"}]}),
   listSaveBackups:async()=>({backups:[]}),
   restoreSaves:async()=>({}),
   deleteBackup:async()=>({}),
@@ -1214,8 +1214,8 @@ async function main(){
   importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
   check(savesSelectedPkg==="zitao.mbml","save page keeps its own selected game");
   check(importSelectedPkg==="cim.isekai.game","import page keeps its own selected game");
-  check(gameLabel.textContent.includes("恶女2.2"),"save page shows its own game label");
-  check(importGameLabel.textContent.includes("异世界"),"import page shows its own game label");
+  check(gameLabel.textContent.includes("鎭跺コ2.2"),"save page shows its own game label");
+  check(importGameLabel.textContent.includes("寮備笘鐣?),"import page shows its own game label");
   check(gameSelect.value==="zitao.mbml"&&importGameSelect.value==="cim.isekai.game","both selectors preserve independent values");
   console.log("ok");
 }
@@ -1248,11 +1248,11 @@ let lastSnapshot=`completed`;
 let refreshes=0;
 function refresh(){refreshes+=1}
 const startButton={textContent:`start`,disabled:false,dispatchEvent(){dispatched.push(`start`)}};
-const staleInstall={textContent:`安装补丁版`,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
-const freshInstall={textContent:`安装补丁版`,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
+const staleInstall={textContent:`瀹夎琛ヤ竵鐗坄,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
+const freshInstall={textContent:`瀹夎琛ヤ竵鐗坄,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
 let installButton=staleInstall;
 let currentInstall=freshInstall;
-function findButton(label){return label===`安装补丁版`?currentInstall:null}
+function findButton(label){return label===`瀹夎琛ヤ竵鐗坄?currentInstall:null}
 function readTaskSnapshot(){return{state:`completed`}}
 function setWorkshopState(){throw new Error(`unexpected state change`)}
 function textNode(tag,cls,text){return{tag,cls,text,children:[],append(...children){this.children.push(...children)}}}
@@ -1291,7 +1291,9 @@ check(refreshes===1,`refresh requested`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        self.assertIn('installAvailable:!!installButton?.isConnected', js)
+        self.assertIn('const currentInstall=findButton("', js)
+        self.assertIn('installButton=currentInstall', js)
+        self.assertIn('const installAvailable=!!currentInstall?.isConnected', js)
         self.assertIn('renpyLang:window.__slgRenpyLang||\'\'', js)
         self.assertIn('renpyMenuType:window.__slgRenpyMenuType||\'\'', js)
         self.assertIn('window.__slgRenpyLanguages=t.renpyLanguages||[]', js)
@@ -1380,8 +1382,8 @@ check(bo===!1,`preserved v2 is not marked dirty`);
             'if(isNetworkFailure(e))throw e',
             'b=y.length',
             'P=providerLabel(i)',
-            '无法连接 ${P}',
-            '前往“我的”切换供应商',
+            '鏃犳硶杩炴帴 ${P}',
+            '鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢',
         ):
             self.assertIn(token, js)
         self.assertNotIn('maxRetries:2', js)
@@ -1414,7 +1416,7 @@ async function main(){
   check(!isNetworkFailure(new Error(`network glossary entry is invalid`)),`arbitrary network classification`);
   check(providerLabel(`https://api.deepseek.com/v1`)===`DeepSeek`,`DeepSeek label`);
   check(providerLabel(`https://api.openai.com/v1`)===`OpenAI`,`OpenAI label`);
-  check(providerLabel(`https://example.invalid/v1`)===`自定义接口`,`custom label`);
+  check(providerLabel(`https://example.invalid/v1`)===`鑷畾涔夋帴鍙,`custom label`);
 
   for(const message of [
     `API returned empty content`,
@@ -1479,7 +1481,7 @@ async function main(){
   const result=await task;
   check(started.join(`,`)===`network,inflight`,`no later batch starts after in-flight settles`);
   check(result.successCount===2,`cache and in-flight partial results survive`);
-  check(result.error===`无法连接 DeepSeek。请检查网络，或前往“我的”切换供应商。`,`actionable fatal error survives partial results`);
+  check(result.error===`鏃犳硶杩炴帴 DeepSeek銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙,`actionable fatal error survives partial results`);
 }
 main().catch(error=>{console.error(error);process.exitCode=1});
 '''
@@ -1500,7 +1502,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         )
         self.assertIn('async function runFileTasksParallel(e,t,concurrency=3)', js)
         self.assertIn('N=await runFileTasksParallel(ae,async(o,c)=>{', js)
-        self.assertIn('...r?{error:N||`部分文件处理失败，请查看日志`}:{}', js)
+        self.assertIn('...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悊澶辫触锛岃鏌ョ湅鏃ュ織`}:{}', js)
 
         start = js.index('async function runFileTasksParallel(e,t,concurrency=3)')
         end = js.index('async function Lo(e){', start)
@@ -1508,7 +1510,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 async function main(){
-  const fatal=`无法连接 OpenAI。请检查网络，或前往“我的”切换供应商。`;
+  const fatal=`鏃犳硶杩炴帴 OpenAI銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙;
   const started=[];
   const result=await runFileTasksParallel([`file-1`,`file-2`,`file-3`],async file=>{
     started.push(file);
@@ -1601,8 +1603,8 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         )
         self.assertIn('reason:"network"', js)
         self.assertIn('if(payload.reason==="network")', js)
-        self.assertIn('actionButton("前往“我的”切换供应商",openSettings)', js)
-        self.assertIn('actionButton("重试翻译",()=>retryTask(', js)
+        self.assertIn('actionButton("鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢",openSettings)', js)
+        self.assertIn('actionButton("閲嶈瘯缈昏瘧",()=>retryTask(', js)
 
         snapshot_start = js.index('function readTaskSnapshot(){')
         snapshot_end = js.index('function detailToggle(', snapshot_start)
@@ -1613,10 +1615,11 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
-const fatal=`无法连接 DeepSeek。请检查网络，或前往“我的”切换供应商。`;
-function sourceText(){return `正在处理脚本 1 / 2\n翻译中\n翻译失败: ${fatal}`}
+const fatal=`鏃犳硶杩炴帴 DeepSeek銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙;
+function sourceText(){return `姝ｅ湪澶勭悊鑴氭湰 1 / 2\n缈昏瘧涓璡n缈昏瘧澶辫触: ${fatal}`}
 function readProgressLog(){return{raw:`stale translating log`,latest:`stale translating log`}}
 const document={querySelectorAll(){return[]}};
+globalThis.findButton=()=>null;
 const snapshot=readTaskSnapshot();
 check(snapshot.state===`failed`,`network failure beats stale translating state`);
 check(snapshot.reason===`network`,`network failure reason`);
@@ -1633,8 +1636,8 @@ const body=renderStateBody(`failed`,{reason:`network`,raw:fatal,fileName:`game.a
 const buttons=[];
 function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
 visit(body);
-const settings=buttons.find(button=>button.label===`前往“我的”切换供应商`);
-const retry=buttons.find(button=>button.label===`重试翻译`);
+const settings=buttons.find(button=>button.label===`鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢`);
+const retry=buttons.find(button=>button.label===`閲嶈瘯缈昏瘧`);
 check(settings&&retry,`network failure renders recovery actions`);
 settings.handler();retry.handler();
 check(opened===1&&retried===1,`recovery actions are wired`);
@@ -1659,13 +1662,13 @@ check(opened===1&&retried===1,`recovery actions are wired`);
             r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=',
             js,
         )
-        self.assertIn('const progress=text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)
+        self.assertIn('const progress=text.match(/姝ｅ湪澶勭悊鑴氭湰\\s*(\\d+)\\s*\\/\\s*(\\d+)/)', js)
         self.assertIn('if(state==="translating")', js)
-        self.assertIn('正在翻译文本', js)
+        self.assertIn('姝ｅ湪缈昏瘧鏂囨湰', js)
         self.assertIn('if(state==="patching")', js)
-        self.assertIn('正在生成补丁 APK', js)
+        self.assertIn('姝ｅ湪鐢熸垚琛ヤ竵 APK', js)
         self.assertIn('if(state==="completed")', js)
-        self.assertIn('补丁 APK 已生成', js)
+        self.assertIn('琛ヤ竵 APK 宸茬敓鎴?, js)
         self.assertIn('actionButton("\u4fdd\u5b58\u8865\u4e01 APK"', js)
         self.assertIn('state==="scanning"?startScanClock():stopScanClock()', js)
         self.assertIn('characterData:true', ''.join(js.split()))
@@ -1689,11 +1692,11 @@ window.__slgSelectionError=null;
 window.__slgSelectionEpoch=7;
 window.__slgSelectionMeta={splitApk:true,splitCount:4};
 window.__slgScanWatchdog={epoch:7,timerFired:false,settled:true,applied:false};
-function sourceText(){return `SLG 文本翻译 计算器.apk · 0 个脚本 已选择：计算器.apk`}
+function sourceText(){return `SLG 鏂囨湰缈昏瘧 璁＄畻鍣?apk 路 0 涓剼鏈?宸查€夋嫨锛氳绠楀櫒.apk`}
 function readProgressLog(){return {raw:``,latest:``}}
 globalThis.document={querySelectorAll(){return []}};
 const result=readTaskSnapshot();
-if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`||!result.splitApk||result.splitCount!==4){
+if(result.state!==`empty`||result.count!==`0`||result.fileName!==`璁＄畻鍣?apk`||!result.splitApk||result.splitCount!==4){
   throw new Error(`settled zero-entry scan misclassified: ${JSON.stringify(result)}`)
 }
 '''
@@ -1705,8 +1708,8 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`计算器.apk`
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('split?"该应用使用拆分安装包"', js)
-        self.assertIn('共 ${payload.splitCount||0} 个拆分包', js)
+        self.assertIn('split?"璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘"', js)
+        self.assertIn('鍏?${payload.splitCount||0} 涓媶鍒嗗寘', js)
 
     def test_translation_logs_are_mirrored_into_the_visible_shell(self):
         module = self.load_patch()
@@ -1921,11 +1924,11 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`
             "  {name:'assets/x-game/x-special.rpy',fileType:'rpy'}\n"
             "];\n"
             "const result=Jo(entries,`all`,`zh`);\n"
-            "check(result.length===5,`story + translation buckets kept: `+result.length);\n"
-            "check(result.some(e=>e.name.includes(`x-00gamemenu.rpyc`)),`engine common kept`);\n"
-            "check(result.every(e=>e.fileType===`rpyc`),`compiled variant wins`);\n"
-            "check(result.some(e=>e.name.includes(`x-tl/x-chinese/x-ch1ep1.rpyc`)),`chinese tl bucket kept as corpus`);\n"
-            "check(result.some(e=>e.name.includes(`x-tl/x-english/x-ch1ep1.rpyc`)),`english tl bucket kept as corpus`);\n"
+             "check(result.length===4,`story + source translation bucket kept: `+result.length);\n"
+             "check(result.some(e=>e.name.includes(`x-00gamemenu.rpyc`)),`engine common kept`);\n"
+             "check(result.every(e=>e.fileType===`rpyc`),`compiled variant wins`);\n"
+             "check(result.every(e=>!e.name.includes(`x-tl/x-chinese/x-ch1ep1.rpyc`)),`chinese tl bucket skipped as target`);\n"
+             "check(result.some(e=>e.name.includes(`x-tl/x-english/x-ch1ep1.rpyc`)),`english tl bucket kept as corpus`);\n"
             "check(result.every(e=>!e.name.includes(`x-tl/x-german`)),`unrelated german tl bucket excluded`);\n"
             "check(result.every(e=>!e.name.includes(`x-slgtranslated`)),`slgtranslated bucket excluded`);\n"
             "check(result.some(e=>e.name.includes(`x-ch1ep1.rpyc`)),`story kept`);\n"
@@ -1951,11 +1954,11 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`
         self.assertIn("let i=r.text,a=e.trim();", js)
         self.assertNotIn("let i=r.text.trim(),a=e.trim();", js)
         self.assertIn("cleanupStorage", js)
-        self.assertIn("清理安装包与旧缓存", js)
+        self.assertIn("娓呯悊瀹夎鍖呬笌鏃х紦瀛?, js)
         self.assertIn("workshop-settings-cleanup", js)
         self.assertIn("workshop-settings-cleanup", js)
-        self.assertIn("存档转移", js)
-        self.assertIn("继续上次只翻译新增文本（推荐）", js)
+        self.assertIn("瀛樻。杞Щ", js)
+        self.assertIn("缁х画涓婃鍙炕璇戞柊澧炴枃鏈紙鎺ㄨ崘锛?, js)
         self.assertIn("return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}", js)
         self.assertNotIn("return`tl/${t}/${n.at(-1)||`strings`}.rpy`}", js)
         lines = [
@@ -2046,7 +2049,7 @@ const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
 const document={querySelectorAll(){return[]}};
 let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0;
-function sourceText(){return`已选择：Broken.apk发现 5 个可翻译文件`}
+function sourceText(){return`宸查€夋嫨锛欱roken.apk鍙戠幇 5 涓彲缈昏瘧鏂囦欢`}
 function readProgressLog(){return{raw:"",latest:""}}
 function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
 function fileRow(){return textNode(`div`,`file-row`,`file`)}
@@ -2063,12 +2066,12 @@ function collectButtons(node,acc){if(!node)return acc;if(node.tag===`button`)acc
 sessionRestoredAt=123;
 refresh();
 let buttons=collectButtons(shell.rendered[1],[]);
-const dismiss=buttons.find(b=>(b.label||b.text)===`放弃恢复`);
+const dismiss=buttons.find(b=>(b.label||b.text)===`鏀惧純鎭㈠`);
 check(dismiss,`recovery banner offers dismiss`);
-check(collectText(shell.rendered[1]).includes(`上次翻译中断`),`banner visible before dismiss`);
+check(collectText(shell.rendered[1]).includes(`涓婃缈昏瘧涓柇`),`banner visible before dismiss`);
 dismiss.onclick();
 check(sessionRestoredAt===0,`dismiss clears restored marker`);
-check(!collectText(shell.rendered[1]).includes(`上次翻译中断`),`dismiss must re-render immediately without banner`);
+check(!collectText(shell.rendered[1]).includes(`涓婃缈昏瘧涓柇`),`dismiss must re-render immediately without banner`);
 '''
         result = subprocess.run(
             ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + behavior_contract],
@@ -2141,7 +2144,7 @@ const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
 const document={querySelectorAll(){return[]}};
 let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionLastBeat=0;
-function sourceText(){return`正在处理脚本 1/5`}
+function sourceText(){return`姝ｅ湪澶勭悊鑴氭湰 1/5`}
 function readProgressLog(){return{raw:"",latest:""}}
 const shell={};
 let states=[];function setWorkshopState(state,payload){states.push([state,payload])}
@@ -2256,12 +2259,68 @@ check(out[1].text === realNewline, 'Ne preserves real newline: ' + JSON.stringif
 check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
 '''
         result = subprocess.run(
-            ["node", "-e", ue + ke + ne + skip + contract],
+           ["node", "-e", ue + ke + ne + skip + contract],
+           capture_output=True,
+           text=True,
+           encoding="utf-8",
+       )
+       self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translating_state_does_not_replay_card_entrance_animation(self):
+        module = self.load_patch()
+        _, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertIn(
+            '.workshop-task-shell[data-workshop-state="translating"] .workshop-task-card{animation:none}',
+            compact_css,
+        )
+        self.assertIn("animation:workshopRise", compact_css)
+
+    def test_translation_progress_emits_starting_batch_before_request(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        helpers_start = js.index("function isNetworkFailure(e)")
+        coordinator_end = js.index("function Ro(e)", helpers_start)
+        coordinator = js[helpers_start:coordinator_end]
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+async function main(){
+  globalThis.Co=async()=>{};
+  globalThis.No=texts=>texts;
+  globalThis.xo=()=>`scope`;
+  globalThis.Se=()=>null;
+  globalThis.To=()=>null;
+  globalThis.Wo=()=>{};
+  globalThis.Eo=()=>{};
+  globalThis.wo=async()=>{};
+  globalThis.H=class{};
+  globalThis.zo=items=>items.map(item=>[item]);
+  globalThis.Ro=item=>item;
+  globalThis.Ao=4;
+  globalThis.jo=1;
+  globalThis.Ko=()=>0;
+  globalThis.Vo=async(_client,_model,batch)=>new Map(batch.map((_,i)=>[i,`ok`]));
+  const progress=[];
+  const result=await Lo({texts:[{id:`a`,text:`A`,duplicateKeys:[]},{id:`b`,text:`B`,duplicateKeys:[]}],sourceLang:`en`,targetLang:`zh`,baseURL:`https://api.openai.com/v1`,apiKey:`key`,model:`m`,batchSize:1,onProgress:(e,t,n,r)=>progress.push({e,t,n,r})});
+  check(result.successCount===2,`both batches translate`);
+  check(progress.some(p=>p.r&&p.r.stage===`start`&&p.r.currentBatch===1&&p.r.totalBatches===2),`coordinator reports starting batch before request`);
+  check(progress.some(p=>p.r&&p.r.stage==="completed"&&p.r.completedBatches===2),`coordinator still reports completed batches`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", coordinator + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

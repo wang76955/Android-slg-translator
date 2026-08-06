@@ -65,12 +65,19 @@ async function localTranslate({texts,sourceLang,targetLang,onProgress,engine}){
   if(items.length===0)return {translations:new Map(),successCount:0,warnings:[]};
   try{
     if(typeof onProgress==="function")onProgress(0,items.length,"translating");
-    const res=await plugin.translateLocal({texts:items,sourceLang:sourceLang||"en",targetLang:targetLang||"zh",engine:activeEngine});
-    const map=new Map();
-    const entries=res&&res.translations?Object.entries(res.translations):[];
-    for(const[k,v]of entries){if(v&&String(v).trim().length>0)map.set(k,String(v))}
-    if(typeof onProgress==="function")onProgress(map.size,items.length,"translating");
-    return {translations:map,successCount:map.size,warnings:Array.isArray(res&&res.warnings)?res.warnings:[]};
+    const chunks=[];for(let i=0;i<items.length;i+=20)chunks.push(items.slice(i,i+20));
+    const map=new Map();const warnings=[];let failedBatches=0,splitBatches=0;
+    for(let b=0;b<chunks.length;b++){
+      const chunk=chunks[b];
+      if(typeof onProgress==="function")onProgress(map.size,items.length,"translating",{stage:"start",currentBatch:b+1,totalBatches:chunks.length,batchSize:chunk.length});
+      let res=null;try{res=await plugin.translateLocal({texts:chunk,sourceLang:sourceLang||"en",targetLang:targetLang||"zh",engine:activeEngine})}catch(e){failedBatches++;window.__slgLocalLastError=e&&e.message||String(e);if(typeof onProgress==="function")onProgress(map.size,items.length,"translating",{stage:"failed",currentBatch:b+1,totalBatches:chunks.length,batchSize:chunk.length,failedBatches});continue}
+      const entries=res&&res.translations?Object.entries(res.translations):[];
+      for(const[k,v]of entries){if(v&&String(v).trim().length>0)map.set(k,String(v))}
+      if(Array.isArray(res&&res.warnings))warnings.push(...res.warnings);
+      if(typeof onProgress==="function")onProgress(map.size,items.length,"translating");
+      if(typeof onProgress==="function")onProgress(map.size,items.length,"translating",{stage:"completed",completedBatches:b+1,totalBatches:chunks.length,currentBatch:b+1,batchSize:chunk.length,failedBatches,splitBatches});
+    }
+    return {translations:map,successCount:map.size,warnings};
   }catch(e){
     window.__slgLocalLastError=e&&e.message||String(e);
     throw e;
@@ -78,6 +85,18 @@ async function localTranslate({texts,sourceLang,targetLang,onProgress,engine}){
 }
 window.__slgLocalTranslateImpl=localTranslate;
 function formatLocalBytes(bytes){const value=Number(bytes)||0;if(value<1024)return value+" B";const units=["KB","MB","GB"];let n=value/1024,unit=0;while(n>=1024&&unit<units.length-1){n/=1024;unit+=1}return `${n>=100?Math.round(n):Math.round(n*10)/10} ${units[unit]}`}
+function variantLabel(v){return v==="0.5b"?"Qwen2.5 0.5B":"Qwen2.5 1.5B"}
+function variantSize(v){return v==="0.5b"?"约 470MB":"约 1.1GB"}
+function buildVariantSelect(){
+  const field=textNode("label","workshop-settings-field");
+  field.append(textNode("span","","模型规格"));
+  const select=document.createElement("select");
+  select.id="settingsLocalLlmVariant";select.className="workshop-settings-input";
+  for(const [value,label] of [["0.5b","Qwen2.5 0.5B（约 470MB，更快）"],["1.5b","Qwen2.5 1.5B（约 1.1GB，更准）"]]){
+    const option=document.createElement("option");option.value=value;option.textContent=label;select.append(option);
+  }
+  select.value="1.5b";field.append(select);return {field,select};
+}
 function buildLocalEngineSection(){
   const wrap=textNode("div","workshop-settings-conditional");
   wrap.hidden=true;
@@ -94,7 +113,11 @@ function buildLocalEngineSection(){
   const llBtn=textNode("button","workshop-settings-save","下载模型（约 1.1GB）");
   llBtn.type="button";
   const llNote=textNode("p","workshop-settings-helper","基于 Qwen2.5 本地大模型，质量接近云端，适合视觉小说对话。中低端手机每条约 3-8 秒。");
-  llCard.append(llStatus,llBtn,llNote);
+  let variantTouched=false;
+  let llState={installed:false,variant:"1.5b"};
+  const llVariant=buildVariantSelect();
+  llVariant.select.onchange=()=>{variantTouched=true;const selected=llVariant.select.value||"1.5b";if(llState.installed&&llState.variant===selected){llBtn.textContent="删除模型";llBtn.disabled=false}else if(llState.installed){llBtn.textContent=`切换为${variantLabel(selected)}（${variantSize(selected)}）`;llBtn.disabled=false}else{llBtn.textContent=`下载模型${variantLabel(selected)}（${variantSize(selected)}）`;llBtn.disabled=false}};
+  llCard.append(llStatus,llVariant.field,llBtn,llNote);
   let polling=null;
   const stopPoll=()=>{if(polling){clearInterval(polling);polling=null}};
   const render=async()=>{
@@ -103,6 +126,9 @@ function buildLocalEngineSection(){
     try{
       const s=await plugin.localStatus();
       const mk=s&&s.mlkit||{};const ll=s&&s.llm||{};
+      llState.installed=!!ll.installed;llState.variant=ll.variant||"1.5b";
+      if(!ll.downloading&&!variantTouched){try{llVariant.select.value=ll.variant||"1.5b"}catch(_e){}}
+      llVariant.select.disabled=!!(ll.downloading||ll.loading);
       if(mk.downloading){mlStatus.textContent=`下载中… 已下载 ${formatLocalBytes(mk.downloadedBytes)}`;mlBtn.disabled=true;mlBtn.textContent="下载中…"}
       else if(mk.downloaded){mlStatus.textContent="模型已下载，可离线使用";mlBtn.textContent="删除模型";mlBtn.disabled=false}
       else{mlStatus.textContent="模型未下载";mlBtn.textContent="下载模型（约 30-60MB）";mlBtn.disabled=false}
@@ -110,6 +136,7 @@ function buildLocalEngineSection(){
       else if(ll.loading){llStatus.textContent="模型加载中…";llBtn.disabled=true}
       else if(ll.installed){llStatus.textContent=`已安装（${formatLocalBytes(ll.sizeBytes)}）`;llBtn.textContent="删除模型";llBtn.disabled=false}
       else{llStatus.textContent="模型未安装";llBtn.textContent="下载模型（约 1.1GB）";llBtn.disabled=false}
+      if(!ll.downloading&&!ll.loading){const activeVariant=ll.variant||"1.5b";const selectedVariant=llVariant.select.value||"1.5b";if(ll.installed&&activeVariant===selectedVariant){llBtn.textContent="删除模型";llBtn.disabled=false}else if(ll.installed){llBtn.textContent=`切换为${variantLabel(selectedVariant)}（${variantSize(selectedVariant)}）`;llBtn.disabled=false}else{llBtn.textContent=`下载模型${variantLabel(selectedVariant)}（${variantSize(selectedVariant)}）`;llBtn.disabled=false}}
     }catch(e){mlStatus.textContent="状态查询失败";llStatus.textContent="状态查询失败"}
   };
   mlBtn.onclick=async()=>{
@@ -124,9 +151,9 @@ function buildLocalEngineSection(){
     const plugin=window.Capacitor?.Plugins?.FileManager;
     if(!plugin||typeof plugin.llmDownload!=="function")return;
     if(llBtn.textContent.includes("删除")){llBtn.disabled=true;try{await plugin.llmDelete();llStatus.textContent="已删除"}catch(e){llStatus.textContent="删除失败："+(e&&e.message||e)}finally{llBtn.disabled=false;render();return}}
-    llBtn.disabled=true;llBtn.textContent="下载中…";llStatus.textContent="正在下载（约 1.1GB，请保持网络连接）…";
+    llBtn.disabled=true;llBtn.textContent="下载中…";llStatus.textContent="正在下载（"+variantSize(llVariant.select.value||"1.5b")+"，请保持网络连接）…";
     stopPoll();polling=setInterval(()=>render(),1500);
-    try{const r=await plugin.llmDownload({variant:"1.5b"});llStatus.textContent="模型已安装"}catch(e){llStatus.textContent="下载失败："+(e&&e.message||e)}finally{stopPoll();llBtn.disabled=false;render()}
+    try{const r=await plugin.llmDownload({variant:llVariant.select.value||"1.5b"});llStatus.textContent="模型已安装"}catch(e){llStatus.textContent="下载失败："+(e&&e.message||e)}finally{stopPoll();llBtn.disabled=false;render()}
   };
   wrap.refreshLocal=async()=>{await render()};
   wrap.append(mlCard,llCard);
