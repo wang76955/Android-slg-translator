@@ -76,8 +76,8 @@ def build_menu_fixture_rpyc() -> bytes:
     p += pickle_short("what") + pickle_short("Hello, world!")
     # Screen text marked with _("...") and a Character("Name") definition
     # (inside a PyCode-style source payload).
-    p += pickle_short('_("Start")')
-    p += pickle_short('Character("Sky", color = "#fff")')
+    p += pickle_short("source") + pickle_short('_("Start")')
+    p += pickle_short("source") + pickle_short('Character("Sky", color = "#fff")')
     p += pickle_short("items")
     # Screen text marked with _("...") and a Character("Name") definition
     # (inside a PyCode-style source payload).
@@ -162,11 +162,11 @@ def build_source_call_fixture_rpyc() -> bytes:
     p += pickle_short("filename") + pickle_short("game/fixture.rpy")
     p += pickle_short("what") + pickle_short("Hello, world!")
     # Source payloads: message-style calls (phone) and Ren'Py preference calls.
-    p += pickle_short('send_phone_message("Aine", "Hello there.", "aine_dm")')
-    p += pickle_short('send_phone_message(sender, message_text, channel_name)')
-    p += pickle_short('send_phone_message("Aine", "images/ch2ep1_1042.jpg", "aine_dm", 2)')
-    p += pickle_short("_VolumePreference(u\"Music Volume\", 'music', 'config.has_music')")
-    p += pickle_short("_SliderPreference(u'Auto-Forward Time', \"afm_time\", 40, 'config.has_afm')")
+    p += pickle_short("source") + pickle_short('send_phone_message("Aine", "Hello there.", "aine_dm")')
+    p += pickle_short("source") + pickle_short('send_phone_message(sender, message_text, channel_name)')
+    p += pickle_short("source") + pickle_short('send_phone_message("Aine", "images/ch2ep1_1042.jpg", "aine_dm", 2)')
+    p += pickle_short("source") + pickle_short("_VolumePreference(u\"Music Volume\", 'music', 'config.has_music')")
+    p += pickle_short("source") + pickle_short("_SliderPreference(u'Auto-Forward Time', \"afm_time\", 40, 'config.has_afm')")
     p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
     p += b"\x65"  # APPENDS
     p += b"."  # STOP
@@ -278,14 +278,15 @@ def build_structured_records_fixture_rpyc() -> bytes:
     p += pickle_short("who") + pickle_short("Narrator")
     p += pickle_short("caption") + pickle_short("A menu caption.")
     p += pickle_short("what") + pickle_short("A structurally unowned line.")
+    p += pickle_short("what") + pickle_short("Literal _('not a source call')")
     p += pickle_short("old") + pickle_short("Save{#menu}")
     p += pickle_short("new") + pickle_short("\u4fdd\u5b58")
-    p += pickle_short('_("Start")')
-    p += pickle_short('_("Repeat me")')
-    p += pickle_short('_("Repeat me")')
-    p += pickle_short('_("Shared hint")')
-    p += pickle_short('Character("Sky", color = "#fff")')
-    p += pickle_short('send_phone_message("Aine", "Shared hint", "aine_dm")')
+    p += pickle_short("source") + pickle_short('_("Start")')
+    p += pickle_short("source") + pickle_short('_("Repeat me")')
+    p += pickle_short("source") + pickle_short('_("Repeat me")')
+    p += pickle_short("source") + pickle_short('_("Shared hint")')
+    p += pickle_short("source") + pickle_short('Character("Sky", color = "#fff")')
+    p += pickle_short("source") + pickle_short('send_phone_message("Aine", "Shared hint", "aine_dm")')
     p += pickle_short("items")
     p += b"\x5d\x94\x28"  # EMPTY_LIST MEMOIZE MARK
     for label in ("First choice", "Second{#x}"):
@@ -2368,6 +2369,9 @@ public final class StructuredRecordsHarness {
         require(find(records, "A structurally unowned line.", RenpyTextRecord.Kind.DIALOGUE,
                 sourcePath, 1, ""),
                 "dialogue after another structural field must not inherit a stale speaker");
+        require(!find(records, "not a source call", RenpyTextRecord.Kind.UI_STRING,
+                sourcePath, 1, ""),
+                "literal marked-call text inside what must not be rescanned as source");
         require(find(records, "First choice", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),
                 "menu label must be a structured menu record");
         require(find(records, "Second{#x}", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),

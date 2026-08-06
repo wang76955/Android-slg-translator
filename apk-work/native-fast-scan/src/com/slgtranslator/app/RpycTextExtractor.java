@@ -31,7 +31,7 @@ public final class RpycTextExtractor {
             "linenumber", "col_offset", "filename", "name_version", "name_serial",
             "who", "what", "caption", "items", "arguments", "with", "attributes",
             "multiple", "rollback", "tag", "value", "label", "code", "language",
-            "old", "new", "newloc", "store", "varname", "hide", "parameters",
+            "source", "old", "new", "newloc", "store", "varname", "hide", "parameters",
             "expression", "block", "priority", "next", "parsed", "init_offset",
             "init_priority", "style_name", "properties", "type", "target",
             "global_label", "paired", "text", "text_value", "identifier",
@@ -124,6 +124,9 @@ public final class RpycTextExtractor {
             } else if (code == 0x75 || code == 0x65 || code == 0x61 || code == 0x73
                     || code == 0x62 || code == 0x31) { // SETITEMS/APPENDS/APPEND/SETITEM/BUILD/POP_MARK
                 state.lastKey = null;
+                if (code == 0x62) {
+                    state.pyCodeObject = false;
+                }
             } else if (code == 0x87) { // TUPLE3 ends a (label, condition, block) menu item
                 state.afterTuple3 = true;
             }
@@ -143,6 +146,7 @@ public final class RpycTextExtractor {
         String lastString;
         String lastKey;
         String pendingSpeaker = "";
+        boolean pyCodeObject;
         boolean itemsMode;
         boolean afterTuple3;
 
@@ -155,6 +159,12 @@ public final class RpycTextExtractor {
             if (value == null) {
                 afterTuple3 = false;
                 return;
+            }
+            String fieldKey = lastKey;
+            boolean sourceField = "source".equals(fieldKey) || "code".equals(fieldKey);
+            boolean visibleTextField = fieldKey != null && TEXT_KEYS.contains(fieldKey);
+            if ("PyCode".equals(value)) {
+                pyCodeObject = true;
             }
             if (!onlyOld && "items".equals(lastKey)) {
                 if (isChoiceLabel(value)) {
@@ -187,7 +197,12 @@ public final class RpycTextExtractor {
                 lastKey = null;
             }
             lastString = value;
-            if (!onlyOld) {
+            // Marked-string helpers and source-call arguments are only valid
+            // inside an explicit source/code field or a serialized PyCode
+            // object. In particular, ordinary what/caption/text values may
+            // contain the characters _("...") as literal prose and must not
+            // be scanned as executable source.
+            if (!onlyOld && !visibleTextField && (sourceField || pyCodeObject)) {
                 collectExtraRecords(value, this);
             }
             afterTuple3 = false;
