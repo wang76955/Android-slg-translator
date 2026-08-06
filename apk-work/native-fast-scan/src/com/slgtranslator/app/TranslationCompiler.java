@@ -66,8 +66,9 @@ public final class TranslationCompiler {
             call.reject("apkUri required");
             return;
         }
+        File apk = null;
         try {
-            File apk = fileFrom(apkUri);
+            apk = fileFrom(apkUri);
             if (apk == null || !apk.isFile()) {
                 call.reject("\u8865\u4e01\u6e90 APK \u4e0d\u5b58\u5728: " + apkUri);
                 return;
@@ -82,6 +83,13 @@ public final class TranslationCompiler {
             result.put("files", compiled.files);
             call.resolve(result);
         } catch (Exception e) {
+            if (apk != null && apk.isFile()) {
+                try {
+                    cleanupGeneratedTranslationArtifacts(apk);
+                } catch (IOException ignored) {
+                    // Preserve the original compiler error for the UI.
+                }
+            }
             String message = e.getMessage();
             call.reject("\u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: " + (message == null ? e.toString() : message));
         }
@@ -129,6 +137,7 @@ public final class TranslationCompiler {
         }
         List<File> rpyFiles = selectTranslationFiles(outputDir, requestedPaths);
         if (rpyFiles.isEmpty()) {
+            cleanupGeneratedTranslationArtifacts(apk);
             return new CompileResult(0, 0, 0);
         }
 
@@ -153,6 +162,7 @@ public final class TranslationCompiler {
             }
         }
         if (language == null || language.isEmpty() || merged.isEmpty()) {
+            cleanupGeneratedTranslationArtifacts(apk);
             return new CompileResult(0, 0, rpyFiles.size());
         }
 
@@ -648,6 +658,8 @@ public final class TranslationCompiler {
 
     static TemplateMeta readTemplateMeta(File apk) throws IOException {
         TemplateMeta fallback = null;
+        TemplateMeta preferred = null;
+        int preferredScore = -1;
         try (ZipFile zip = new ZipFile(apk)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -660,7 +672,8 @@ public final class TranslationCompiler {
                     continue;
                 }
                 byte[] bytes = readEntry(zip, entry);
-                if (!startsWith(bytes, RPC2_MAGIC)) {
+                boolean rpc2 = startsWith(bytes, RPC2_MAGIC);
+                if (isGeneratedTranslationTemplate(name)) {
                     continue;
                 }
                 byte[] pickle = readSlot(bytes, 2);
@@ -675,9 +688,12 @@ public final class TranslationCompiler {
                         if (found[1] != null) {
                             meta.key = (String) found[1];
                         }
-                        meta.trailer = slice(bytes, Math.max(0, bytes.length - 16), bytes.length);
-                        if (isRenpyTranslationTemplate(name)) {
-                            return meta;
+                        meta.trailer = rpc2 && bytes.length >= 16
+                                ? slice(bytes, bytes.length - 16, bytes.length) : null;
+                        int score = templateScore(name);
+                        if (score > preferredScore) {
+                            preferred = meta;
+                            preferredScore = score;
                         }
                         if (fallback == null) {
                             fallback = meta;
@@ -685,6 +701,9 @@ public final class TranslationCompiler {
                     }
                 }
             }
+        }
+        if (preferred != null) {
+            return preferred;
         }
         if (fallback != null) {
             return fallback;
@@ -695,6 +714,29 @@ public final class TranslationCompiler {
     private static boolean isRenpyTranslationTemplate(String path) {
         String normalized = path.replace('\\', '/').toLowerCase(Locale.US);
         return normalized.contains("/x-tl/") || normalized.contains("/tl/");
+    }
+
+    private static boolean isGeneratedTranslationTemplate(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.US);
+        return normalized.contains("/x-tl/x-slgtranslated/")
+                || normalized.contains("/tl/slgtranslated/");
+    }
+
+    private static int templateScore(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.US);
+        if (isGeneratedTranslationTemplate(normalized)) {
+            return -1;
+        }
+        if (normalized.contains("/x-tl/x-chinese/")
+                || normalized.contains("/tl/chinese/")
+                || normalized.contains("/x-tl/x-schinese/")
+                || normalized.contains("/tl/schinese/")) {
+            return 3;
+        }
+        if (isRenpyTranslationTemplate(normalized)) {
+            return 2;
+        }
+        return 1;
     }
 
     /**
@@ -740,8 +782,25 @@ public final class TranslationCompiler {
     // Zip rewriting
     // ------------------------------------------------------------------
 
+    /**
+     * Removes only recently generated translator RPYC entries from a reused
+     * source APK. This is deliberately narrower than a normal compile rewrite:
+     * when there are no valid translation pairs, raw source .rpy files must not
+     * be deleted just because a previous compile attempt left stale output.
+     */
+    private static void cleanupGeneratedTranslationArtifacts(File apk) throws IOException {
+        rewriteApkWithEntries(apk, Collections.<String[]>emptyList(),
+                Collections.<byte[]>emptyList(), false);
+    }
+
     private static void rewriteApkWithEntries(File apk, List<String[]> entries, List<byte[]> contents)
             throws IOException {
+        rewriteApkWithEntries(apk, entries, contents, true);
+    }
+
+    private static void rewriteApkWithEntries(File apk, List<String[]> entries,
+                                              List<byte[]> contents,
+                                              boolean removeLegacyRpy) throws IOException {
         File temporary = new File(apk.getAbsolutePath() + ".tl.tmp");
         byte[] buffer = new byte[65536];
         try (ZipFile zip = new ZipFile(apk);
@@ -760,7 +819,7 @@ public final class TranslationCompiler {
                     out.write(contents.get(replaceIndex), 0, contents.get(replaceIndex).length);
                     written.add(name);
                 } else {
-                    if (isStaleTranslationRpy(name)) {
+                    if (removeLegacyRpy && isStaleTranslationRpy(name)) {
                         continue; // drop stale .rpy translations; compiled .rpyc are authoritative
                     }
                     if (isStaleGeneratedRpyc(name, entry.getTime())) {

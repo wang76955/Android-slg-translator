@@ -1002,10 +1002,9 @@ async function Lo(e){'''
     # so plain .rpy files in the patch were never picked up by the game.
     build_gate = 'return N},2);if(!N&&(a.length>0||oe)){O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
     build_gate_compiled = (
-        'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk('
+        'return N},2);window.__slgCompiledCount=0;if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk('
         '{apkUri:(window.__slgSelectionMeta?.uri||n),items:a.map(_x=>({path:_x.path}))}).then('
-        '_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;(_r&&_r.compiled>0)?O(`  \u5df2\u7f16\u8bd1\u5e76\u5408\u5e76\u53bb\u91cd ${_r.compiled} \u6761\u8bd1\u6587\uff0c\u6e38\u620f\u5c06\u76f4\u63a5\u52a0\u8f7d\u7f16\u8bd1\u7248\u672c`,`success`):O(`  \u6ca1\u6709\u53ef\u7f16\u8bd1\u7684 Ren\'Py \u7ffb\u8bd1\u8d44\u6e90`,`info`)}).catch('
-        '_e=>{O(`  \u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: ${_e&&_e.message||_e}`,`error`)});'
+        '_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;(_r&&_r.compiled>0)?O(`  \u5df2\u7f16\u8bd1\u5e76\u5408\u5e76\u53bb\u91cd ${_r.compiled} \u6761\u8bd1\u6587\uff0c\u6e38\u620f\u5c06\u76f4\u63a5\u52a0\u8f7d\u7f16\u8bd1\u7248\u672c`,`success`):O(`  \u6ca1\u6709\u53ef\u7f16\u8bd1\u7684 Ren\'Py \u7ffb\u8bd1\u8d44\u6e90`,`info`)}).catch(_e=>{r=!0;O(`  \u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: ${_e&&_e.message||_e}`,`error`)});'
         'O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
     )
     if js.count(build_gate) != 1:
@@ -1231,8 +1230,8 @@ def patch_speed_tuning(js: str) -> str:
     if js.count(old_parallel) != 1:
         raise ValueError("File task concurrency signature not found")
     js = js.replace(old_parallel, new_parallel, 1)
-    old_call = 'return N},2);if(!N&&(a.length>0||oe)){'
-    new_call = 'return N},(window.__slgLocalSelected?2:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){'
+    old_call = 'return N},2);window.__slgCompiledCount=0;if(!N&&(a.length>0||oe)){'
+    new_call = 'return N},(window.__slgLocalSelected?2:6));window.__slgCompiledCount=0;if(!N)await wo(!0);if(!N&&(a.length>0||oe)){'
     if js.count(old_call) != 1:
         raise ValueError("File controller concurrency call signature not found")
     js = js.replace(old_call, new_call, 1)

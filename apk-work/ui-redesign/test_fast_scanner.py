@@ -1282,6 +1282,83 @@ public final class LegacyRpycHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_translation_compiler_reads_legacy_zlib_template_metadata(self):
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+public final class LegacyTemplateHarness {
+    public static void main(String[] args) throws Exception {
+        File apk = new File(args[0]);
+        List<String[]> pairs = new ArrayList<>();
+        pairs.add(new String[]{"old", "new"});
+        byte[] pickle = TranslationCompiler.buildPickle(
+                "chinese", "game/tl/chinese/template.rpy", pairs, 5, "legacy-key");
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (DeflaterOutputStream out = new DeflaterOutputStream(compressed)) {
+            out.write(pickle);
+        }
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(apk))) {
+            ZipEntry entry = new ZipEntry("assets/x-game/x-tl/x-chinese/template.rpyc");
+            zip.putNextEntry(entry);
+            zip.write(compressed.toByteArray());
+            zip.closeEntry();
+        }
+        TranslationCompiler.TemplateMeta meta = TranslationCompiler.readTemplateMeta(apk);
+        require(meta.version == 5, "legacy template version missing: " + meta.version);
+        require("legacy-key".equals(meta.key), "legacy template key missing: " + meta.key);
+        require(meta.trailer == null, "legacy zlib template must not copy a fake trailer");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        sources = [
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java",
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "LanguageMenuSupport.java",
+        ]
+        with tempfile.TemporaryDirectory(prefix="legacy-template-test-") as temporary:
+            temporary_path = Path(temporary)
+            package_dir = temporary_path / "com" / "slgtranslator" / "app"
+            package_dir.mkdir(parents=True)
+            harness_path = package_dir / "LegacyTemplateHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "legacy-template.apk"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs), *map(str, sources), str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [
+                    str(JAVA), "-cp", str(classes),
+                    "com.slgtranslator.app.LegacyTemplateHarness",
+                    str(fixture),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
     def test_local_llm_placeholder_guard_preserves_markup_and_format(self):
         harness = r"""
 import com.slgtranslator.app.LocalLlmEngine;
@@ -2308,10 +2385,16 @@ public final class TranslationCompilerApkHarness {
         commonMeta.trailer = new byte[16];
         byte[] commonTemplate = TranslationCompiler.compileRpyc(
                 "common", "game/common/common.rpy", templatePairs, commonMeta);
+        TranslationCompiler.TemplateMeta staleMeta = new TranslationCompiler.TemplateMeta();
+        staleMeta.version = 77;
+        staleMeta.key = "stale-key";
+        staleMeta.trailer = new byte[16];
+        byte[] staleTemplate = TranslationCompiler.compileRpyc(
+                "slgtranslated", "game/tl/slgtranslated/x-translations.rpy", templatePairs, staleMeta);
         try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(apk))) {
+            add(zip, BUCKET + "x-translations.rpyc", staleTemplate, System.currentTimeMillis());
             add(zip, "assets/x-renpy/x-common/common.rpyc", commonTemplate, 0L);
             add(zip, "assets/x-game/x-tl/x-chinese/template.rpyc", template, 0L);
-            add(zip, BUCKET + "x-translations.rpyc", template, System.currentTimeMillis());
             add(zip, BUCKET + "original-epoch.rpyc", template, 0L);
         }
 
@@ -2422,6 +2505,107 @@ public final class TranslationCompilerApkHarness {
         source = patcher.read_text("utf-8")
         self.assertIn("items:a.map(_x=>({path:_x.path}))", source)
         self.assertNotIn("items:a.map(_x=>({path:_x.path,content:_x.content}))", source)
+        self.assertIn("window.__slgCompiledCount=0", source)
+        self.assertIn(".catch(_e=>{r=!0;O(", source)
+
+    def test_translation_compiler_cleans_stale_rpyc_when_no_pairs_exist(self):
+        """A reused source APK must not retain a previous monolithic translation."""
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
+
+public final class TranslationCompilerCleanupHarness {
+    private static final String BUCKET = "assets/x-game/x-tl/x-slgtranslated/";
+
+    public static void main(String[] args) throws Exception {
+        File base = new File(args[0]);
+        File output = new File(base, "output");
+        output.mkdirs();
+        File apk = new File(base, "input.apk");
+        byte[] stale = "old-monolithic".getBytes(StandardCharsets.UTF_8);
+        byte[] original = "original-epoch".getBytes(StandardCharsets.UTF_8);
+        byte[] source = "translate chinese strings:\n".getBytes(StandardCharsets.UTF_8);
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(apk))) {
+            add(zip, BUCKET + "x-translations.rpyc", stale, System.currentTimeMillis());
+            add(zip, BUCKET + "original-epoch.rpyc", original, 0L);
+            add(zip, BUCKET + "source.rpy", source, System.currentTimeMillis());
+        }
+
+        TranslationCompiler.CompileResult result =
+                TranslationCompiler.compileTranslationArtifacts(
+                        apk, output, Collections.<String>emptyList());
+        require(result.compiled == 0, "empty compile must report zero pairs");
+        try (ZipFile zip = new ZipFile(apk)) {
+            require(zip.getEntry(BUCKET + "x-translations.rpyc") == null,
+                    "stale monolithic translation must be removed on an empty retry");
+            require(zip.getEntry(BUCKET + "original-epoch.rpyc") != null,
+                    "epoch-dated original must remain");
+            require(zip.getEntry(BUCKET + "source.rpy") != null,
+                    "raw source must remain during stale-only cleanup");
+        }
+    }
+
+    private static void add(ZipOutputStream zip, String name, byte[] bytes, long time)
+            throws Exception {
+        ZipEntry entry = new ZipEntry(name);
+        entry.setTime(time);
+        zip.putNextEntry(entry);
+        zip.write(bytes);
+        zip.closeEntry();
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        sources = [
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java",
+            FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "LanguageMenuSupport.java",
+        ]
+        with tempfile.TemporaryDirectory(prefix="translation-compiler-cleanup-test-") as temporary:
+            temporary_path = Path(temporary)
+            package_dir = temporary_path / "com" / "slgtranslator" / "app"
+            package_dir.mkdir(parents=True)
+            harness_path = package_dir / "TranslationCompilerCleanupHarness.java"
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            fixture.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    *map(str, stubs), *map(str, sources), str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                subprocess.run(
+                    [
+                        str(JAVA), "-cp", str(classes),
+                        "com.slgtranslator.app.TranslationCompilerCleanupHarness",
+                        str(fixture),
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as error:
+                raise AssertionError(error.stderr.decode("utf-8", "replace")) from error
 
 
     def test_save_export_zips_directory_and_counts_files(self):

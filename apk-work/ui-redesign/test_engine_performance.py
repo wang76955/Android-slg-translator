@@ -71,7 +71,7 @@ Promise.all(tasks).then(() => {{
 
     def test_file_controller_uses_six_workers_and_final_flush(self):
         self.assertIn(
-            "return N},(window.__slgLocalSelected?2:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){",
+            "return N},(window.__slgLocalSelected?2:6));window.__slgCompiledCount=0;if(!N)await wo(!0);if(!N&&(a.length>0||oe)){",
             self.js,
         )
         self.assertNotIn(
