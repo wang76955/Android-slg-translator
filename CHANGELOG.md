@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.8] - 2026-08-06
+
+### Fixed
+
+- Live translation progress now refreshes periodically, so script and batch details no longer stay on stale snapshots
+- Selecting an app no longer leaves the panel showing "尚未选择 APK" when the React summary uses a different label format
+
+### Changed
+
+- Release version bumped to 1.0.8 (versionCode 8); About screen now shows Android v1.0.8
+
 ## [1.0.6] - 2026-08-06
 
 ### Added

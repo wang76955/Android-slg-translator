@@ -492,6 +492,18 @@ def enhance_runtime(runtime: str) -> str:
         "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0;\nfunction textNode",
         1,
     )
+
+    selection_fallback_old = 'const fileName=selected?.[1]?.trim()||"";'
+    selection_fallback_new = 'const fileName=selected?.[1]?.trim()||selectionMeta?.name||selectionMeta?.label||selectionMeta?.fileName||"";'
+    if runtime.count(selection_fallback_old) != 1:
+        raise ValueError("Selection fallback signature not found")
+    runtime = runtime.replace(selection_fallback_old, selection_fallback_new, 1)
+
+    about_version_old = '\u7248\u672c\uff1aAndroid v1.0.7'
+    about_version_new = '\u7248\u672c\uff1aAndroid v1.0.8'
+    if runtime.count(about_version_old) != 1:
+        raise ValueError("About version signature not found")
+    runtime = runtime.replace(about_version_old, about_version_new, 1)
     runtime = runtime.replace(
         "function setReactInputValue(input,value)",
         """function updateScanClock(){const elapsed=shell?.querySelector(\".workshop-scan-elapsed\");if(elapsed&&scanStartedAt)elapsed.textContent=`已用时 ${Math.floor((Date.now()-scanStartedAt)/1000)} 秒`}
@@ -722,6 +734,12 @@ function setReactInputValue(input,value)""",
         raise ValueError("Mount source-button wait signature not found")
     runtime = runtime.replace(mount_wait_old, mount_wait_new, 1)
     runtime = enhance_local_runtime(runtime)
+
+    refresh_poll_old = 'function schedule(){clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)}'
+    refresh_poll_new = refresh_poll_old + '\nif(!window.__slgRefreshTimer){window.__slgRefreshTimer=window.setInterval(()=>{if(!document.hidden&&!settingsOpen&&!retrying)refresh()},600)}'
+    if runtime.count(refresh_poll_old) != 1:
+        raise ValueError("Refresh poll signature not found")
+    runtime = runtime.replace(refresh_poll_old, refresh_poll_new, 1)
 
     return runtime
 
