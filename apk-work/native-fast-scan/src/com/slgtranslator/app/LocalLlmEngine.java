@@ -103,11 +103,15 @@ public final class LocalLlmEngine {
                 return null;
             }
         }
-        String result = translated;
-        for (int i = 0; i < guard.placeholders.length; i++) {
-            String token = sentinel(i);
-            result = result.replace(token, guard.placeholders[i]);
+        Matcher restoreMatcher = SENTINEL.matcher(translated);
+        StringBuffer restored = new StringBuffer(translated.length());
+        int index = 0;
+        while (restoreMatcher.find()) {
+            restoreMatcher.appendReplacement(restored,
+                    Matcher.quoteReplacement(guard.placeholders[index++]));
         }
+        restoreMatcher.appendTail(restored);
+        String result = restored.toString();
         return SENTINEL.matcher(result).find() ? null : result;
     }
 

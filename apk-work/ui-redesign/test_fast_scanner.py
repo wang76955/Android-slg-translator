@@ -2031,6 +2031,10 @@ public final class PlaceholderHarness {
         require(LocalLlmEngine.restorePlaceholders(reordered, formatGuard) == null, "reordered sentinel must reject");
         require(LocalLlmEngine.restorePlaceholders("bad __SLGPH0__", new LocalLlmEngine.PlaceholderGuard("bad", new String[0])) == null,
                 "unrestored sentinel must reject");
+        String replacementChars = "{tag=$1\\\\x} and %s";
+        LocalLlmEngine.PlaceholderGuard replacementGuard = LocalLlmEngine.protectPlaceholders(replacementChars);
+        require(replacementChars.equals(LocalLlmEngine.restorePlaceholders(replacementGuard.protectedText, replacementGuard)),
+                "placeholder replacement characters must round-trip");
 
         require(RenpyTextValidator.validate(original, expected).valid, "valid Ren'Py text must pass");
         require(RenpyTextValidator.validate("{b}{i}x{/b}{/i}", "{b}{i}x{/b}{/i}").codes.contains("tag_misnested"),
@@ -2039,6 +2043,18 @@ public final class PlaceholderHarness {
                 "changed interpolation must be diagnosed");
         require(RenpyTextValidator.validate("Score %s", "Score %d").codes.contains("printf_changed"),
                 "changed printf must be diagnosed");
+        require(RenpyTextValidator.validate("__SLGPH0__ __SLGPH1__", "__SLGPH0__").codes.contains("sentinel_missing"),
+                "missing validator sentinel must be diagnosed");
+        require(RenpyTextValidator.validate("__SLGPH0__ __SLGPH1__", "__SLGPH0__ __SLGPH2__").codes.contains("sentinel_extra"),
+                "extra validator sentinel must be diagnosed");
+        require(RenpyTextValidator.validate("__SLGPH0__ __SLGPH1__", "__SLGPH1__ __SLGPH0__").codes.contains("sentinel_reordered"),
+                "reordered validator sentinel must be diagnosed");
+        require(RenpyTextValidator.validate("Hello", "Hello __SLGPH0__").codes.contains("unrestored_sentinel"),
+                "unrestored validator sentinel must be diagnosed");
+        require(RenpyTextValidator.validate("{font=DejaVuSans.ttf}x{/font}", "{font=DejaVuSans.ttf}中{/font}").valid,
+                "font markup must round-trip");
+        require(RenpyTextValidator.validate("{b}x{/b}", "{b}x").codes.contains("tag_unbalanced"),
+                "unbalanced markup must be diagnosed");
         require(RenpyTextValidator.validate("Hello", "").codes.contains("empty_translation"),
                 "empty translation must be diagnosed");
     }

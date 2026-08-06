@@ -18,7 +18,10 @@ documents were left untouched.
   sanitized rejected-record list containing `old`, `new`, `codes`, and `source`.
 - Added both merge-time and artifact-time compiler gates. Invalid pairs are
   rejected before RPYC generation or APK rewrite, with the source path and
-  stable validation codes in the failure message.
+  stable validation codes in the failure message. The follow-up review also
+  required keeping the existing translation-cache namespace and using a
+  single-pass sentinel restoration so replacement text cannot be interpreted
+  as another replacement expression.
 - Documented the lint contract and rejection record requirements in
   `docs/translation-quality-rules.md`.
 
@@ -34,6 +37,6 @@ Ran 1 test ...
 OK
 ```
 
-The full scanner and quality suites were run after the final changes; their
-results are recorded in the handoff message and must remain green before the
-commit is created.
+The focused guard and compiler-gate tests passed after the follow-up fix. The
+full scanner and quality suites must remain green before the fix commit is
+considered complete.
