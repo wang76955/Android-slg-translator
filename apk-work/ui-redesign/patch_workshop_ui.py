@@ -501,7 +501,7 @@ def enhance_runtime(runtime: str) -> str:
     runtime = runtime.replace(selection_fallback_old, selection_fallback_new, 1)
 
     about_version_old = '\u7248\u672c\uff1aAndroid v1.0.7'
-    about_version_new = '\u7248\u672c\uff1aAndroid v1.0.9'
+    about_version_new = '\u7248\u672c\uff1aAndroid v1.0.10'
     if runtime.count(about_version_old) != 1:
         raise ValueError("About version signature not found")
     runtime = runtime.replace(about_version_old, about_version_new, 1)
@@ -1386,7 +1386,7 @@ def patch_translation_quality(js: str) -> str:
 
     # 0b) 缓存键版本：质量策略升级后旧缓存自动失效
     old_o = r'''var _o=`slg-translator-cache:`,vo={}'''
-    new_o = r'''var _o=`slg-translator-cache:v2:`,vo={}'''
+    new_o = r'''var _o=`slg-translator-cache:v3:`,vo={}'''
     if js.count(old_o) != 1:
         raise ValueError("Cache namespace signature not found")
     js = js.replace(old_o, new_o, 1)
@@ -1542,6 +1542,47 @@ def patch_start_handler(js: str) -> str:
     return js.replace(start_old, start_new, 1)
 
 
+def patch_runtime_progress_parsing(runtime: str) -> str:
+    old_source_tail = 'return clone.textContent||""}'
+    new_source_tail = (
+        'const out=[],BLOCK=/^(?:ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DIV|DL|FIELDSET|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|UL)$/;'
+        'const walk=el=>{const kids=el.childNodes||[];if(!kids.length){out.push(el.textContent||"");return}'
+        'for(const child of kids){if(child.nodeType===3){out.push(child.textContent)}else if(child.nodeType===1){'
+        'if(BLOCK.test(child.tagName)&&out.length&&out.at(-1)!=="\\n")out.push("\\n");walk(child);'
+        'if(BLOCK.test(child.tagName)&&out.at(-1)!=="\\n")out.push("\\n")}}};'
+        'walk(clone);return out.join("").replace(/\\n{3,}/g,"\\n\\n")}'
+    )
+    if runtime.count(old_source_tail) != 1:
+        raise ValueError("sourceText tail signature not found")
+    runtime = runtime.replace(old_source_tail, new_source_tail, 1)
+
+    old_progress = (
+        'const progress=text.match(/翻译进度\\s*([\\d,]+)\\s*\\/\\s*([\\d,]+)/)||'
+        '(readProgressLog().latest.match(/\\[(\\d+)\\/(\\d+)\\]/))||'
+        'text.match(/正在处理脚本\\s*(\\d+)\\s*\\/\\s*(\\d+)/);'
+    )
+    new_progress = (
+        'const progress=text.match(/正在处理脚本\\s*([\\d,]+)(?!\\d)\\s*\\/\\s*([\\d,]+)(?!\\d)/)||'
+        'text.match(/翻译进度\\s*([\\d,]+)(?!\\d)\\s*\\/\\s*([\\d,]+)(?!\\d)/)||'
+        '(readProgressLog().latest.match(/\\[(\\d+)\\/(\\d+)\\](?!\\d)/));'
+    )
+    if runtime.count(old_progress) != 1:
+        raise ValueError("progress parse signature not found")
+    return runtime.replace(old_progress, new_progress, 1)
+
+
+def patch_interpolation_guard(js: str) -> str:
+    old_fo = r'''function Fo(e){let t=[];return{text:e.replace(/(\{[^{}\n]{1,80}\}|\[[A-Za-z_][\w.]{0,80}\]|%\d*\$?[sdif]|%[sdif]|\$\{[^}\n]{1,80}\})/g,e=>{let n=`__PH${t.length}__`;return t.push(e),n}),placeholders:t}}'''
+    new_fo = r'''function Fo(e){let t=[];return{text:(function(s){let out='',i=0;while(i<s.length){let c=s[i];if(c==='['||c==='{'){let j=i+1,d=1,q=null;for(;j<s.length&&d>0;j++){let x=s[j];if(q){if(x===q&&s[j-1]!=='\\')q=null}else if(x==='\''||x==='"')q=x;else if(x===c)d++;else if((c==='['&&x===']')||(c==='{'&&x==='}'))d--}if(d===0){let raw=s.slice(i,j),n='__PH'+t.length+'__';t.push(raw);out+=n;i=j;continue}}out+=c;i++}return out})(e).replace(/%\d*\$?[sdif]|%[sdif]/g,m=>{let n='__PH'+t.length+'__';return t.push(m),n}),placeholders:t}}'''
+    if js.count(old_fo) != 1:
+        raise ValueError("Interpolation placeholder signature not found")
+    return js.replace(old_fo, new_fo, 1)
+
+def patch_cache_v3(js: str) -> str:
+    if js.count("_o+`v2|`") < 3:
+        raise ValueError("Cache v2 suffix signature not found")
+    return js.replace("_o+`v2|`", "_o+`v3|`")
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     verify_canonical_base_text(js, css)
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
@@ -1559,8 +1600,10 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_output_write_cache(patched)
     patched = patch_candidate_filter(patched)
     patched = patch_translation_quality(patched)
+    patched = patch_interpolation_guard(patched)
     patched = patch_cache_memory(patched)
-    return patched + copy_contract + enhance_runtime(patch_saves_runtime(WORKSHOP_RUNTIME)), css + "\n" + WORKSHOP_CSS
+    patched = patch_cache_v3(patched)
+    return patched + copy_contract + enhance_runtime(patch_saves_runtime(patch_runtime_progress_parsing(WORKSHOP_RUNTIME))), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:

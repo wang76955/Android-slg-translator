@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.10] - 2026-08-06
+
+### Fixed
+
+- Live script progress no longer misreads concatenated block text as a fake total: block-level DOM nodes are separated with newlines, and the parser prefers the current "正在处理脚本 n / total" line over stale `[n/n]` log entries
+- Patched Ren'Py games no longer crash when switching to translated text: balanced `[ ]` / `{ }` interpolation and `%` format placeholders are protected, including `[int(...)]` and nested `[persistent.stats[0]]`
+
+### Changed
+
+- Translation cache namespace bumped to v3 so stale v2 text caches are ignored for clean retranslations
+- Release version bumped to 1.0.10 (versionCode 10); About screen now shows Android v1.0.10
+
 ## [1.0.9] - 2026-08-06
 
 ### Fixed

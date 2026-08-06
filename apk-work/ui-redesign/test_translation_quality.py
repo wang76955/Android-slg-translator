@@ -107,7 +107,13 @@ async function runVo(items) {{
   ]);
   // 修复点：ke 调用带文件名前缀 + 缓存版本
   out.keCallPatched = js.includes('l=ke(i,s,o.name+`::`,g)');
-  out.cacheVersion = js.includes('var _o=`slg-translator-cache:v2:`');
+  const complex = '对话框不透明度：[int(persistent.dialogue_box_opacity * 100)]%';
+  const complexP = api.Fo(complex);
+  out.foComplex = {{ protected: complexP.text, restored: api.Io(complexP.text, complexP), placeholders: complexP.placeholders }};
+  const nested = '[persistent.stats[0]]';
+  const nestedP = api.Fo(nested);
+  out.foNested = {{ protected: nestedP.text, restored: api.Io(nestedP.text, nestedP), placeholders: nestedP.placeholders }};
+  out.cacheVersion = js.includes('var _o=`slg-translator-cache:v3:`');
   process.stdout.write(JSON.stringify(out));
 }})();
 """
@@ -133,10 +139,17 @@ class TranslationQualityPatchTest(unittest.TestCase):
     def test_keypath_prefix_and_cache_version_patches(self):
         # 修复 P0-1：提取时把文件路径写入 keyPath（真实格式 file::seq）
         self.assertEqual(self.js.count("l=ke(i,s,o.name+`::`,g)"), 1)
-        # 修复 P0-2：缓存键加 v2 版本，旧缓存自动失效
-        self.assertEqual(self.js.count("var _o=`slg-translator-cache:v2:`"), 1)
-        self.assertNotIn("slg-translator-cache:", self.js.replace("slg-translator-cache:v2:", ""))
+        # 修复 P0-2：缓存键加 v3 版本，旧缓存自动失效
+        self.assertEqual(self.js.count("var _o=`slg-translator-cache:v3:`"), 1)
+        self.assertNotIn("slg-translator-cache:", self.js.replace("slg-translator-cache:v3:", ""))
 
+    def test_interpolation_expressions_are_protected(self):
+        out = run_behavior_probe(self.js)
+        self.assertEqual(out["foComplex"]["protected"], "对话框不透明度：__PH0__%")
+        self.assertEqual(out["foComplex"]["restored"], "对话框不透明度：[int(persistent.dialogue_box_opacity * 100)]%")
+        self.assertEqual(out["foComplex"]["placeholders"], ["[int(persistent.dialogue_box_opacity * 100)]"])
+        self.assertEqual(out["foNested"]["protected"], "__PH0__")
+        self.assertEqual(out["foNested"]["restored"], "[persistent.stats[0]]")
     def test_behavior_speaker_dedupe_and_conditional_fields(self):
         out = run_behavior_probe(self.js)
         le_items = {item["text"]: item for item in out["le"]}
@@ -247,7 +260,7 @@ const out = {{}};
 out.countAfter = v2keys.length;
 out.oldestAlive = Math.min(...v2keys.map(k => api.vo[k].updatedAt));
 // cacheIndex 同步：任何 cacheIndex 引用都必须存在于 vo
-out.orphanIndex = Object.keys(api.cacheIndex).filter(id => !api.vo[api._o + 'v2|' + id]).length;
+out.orphanIndex = Object.keys(api.cacheIndex).filter(id => !api.vo[api._o + 'v3|' + id]).length;
 // 被淘汰的旧条目在 To 中不可命中
 out.toOld = api.To(scope, 'text0');
 out.toNew = api.To(scope, 'text30999');

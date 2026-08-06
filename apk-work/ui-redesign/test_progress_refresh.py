@@ -44,6 +44,54 @@ class ProgressRefreshContractTest(unittest.TestCase):
         )
         self.assertIn("setInterval(", js)
 
+    def test_progress_prefers_live_script_progress_and_separates_blocks(self):
+        js, _ = self.patch_assets()
+        helpers = "\n".join(
+            extract_function(js, name)
+            for name in ("sourceText", "readProgressLog", "readTaskSnapshot")
+        )
+        code = r"""
+globalThis.window = {
+  __slgSelectionError: null,
+  __slgSelectionMeta: { name: "ECHOES.apk" },
+  __slgScanWatchdog: { epoch: 1, settled: true, timerFired: false }
+};
+globalThis.__slgSelectionEpoch = 1;
+globalThis.sessionRestoredAt = 0;
+const logSource = {
+  closest: () => null,
+  children: [
+    { innerText: "21:20:00 [14/108] old line" },
+    { innerText: "21:21:00 [108/108] stale completed line" },
+  ],
+};
+const liveText = { nodeType: 3, textContent: "正在处理脚本 14 / 108" };
+const liveBlock = { nodeType: 1, tagName: "SECTION", childNodes: [liveText] };
+const logText = { nodeType: 3, textContent: "21:21:00 [108/108] stale" };
+const logBlock = { nodeType: 1, tagName: "DIV", childNodes: [logText] };
+const clone = {
+  querySelector: () => null,
+  childNodes: [liveBlock, logBlock],
+  textContent: "正在处理脚本 14 / 10821:21:00 [108/108] stale",
+};
+const root = { cloneNode: () => clone, textContent: clone.textContent };
+globalThis.document = {
+  querySelector: () => root,
+  querySelectorAll: (sel) => sel.includes("font-mono") ? [logSource] : [],
+};
+const snap = readTaskSnapshot();
+if (snap.state !== "translating") throw new Error("state=" + snap.state);
+if (snap.current !== "14") throw new Error("current=" + snap.current);
+if (snap.total !== "108") throw new Error("total=" + snap.total);
+"""
+        result = subprocess.run(
+            ["node", "-e", helpers + "\n" + code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
     def test_selected_file_name_falls_back_to_selection_meta(self):
         js, _ = self.patch_assets()
         self.assertIn(
