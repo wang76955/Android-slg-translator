@@ -59,6 +59,27 @@ public final class FastApkScanner {
     private FastApkScanner() {}
 
     /**
+     * Single scanner entry point for exact-old occurrence coverage.  The UI
+     * supplies only validator-approved translations; cached failures stay in
+     * rejectedTranslations and therefore cannot be counted as translated.
+     */
+    public static TranslationCoverageReport coverageReport(
+            List<RenpyTextRecord> exactOldOccurrences,
+            Map<String, String> validatorApprovedTranslations,
+            Set<String> rejectedTranslations,
+            Map<String, List<String>> candidateTranslations,
+            Set<String> uncertainTranslations,
+            Map<String, String> classificationReasons) {
+        return TranslationCoverageReport.build(
+                exactOldOccurrences,
+                validatorApprovedTranslations,
+                rejectedTranslations,
+                candidateTranslations,
+                uncertainTranslations,
+                classificationReasons);
+    }
+
+    /**
      * Reads one APK entry and, for Ren'Py compiled scripts, returns the
      * structurally extracted user-visible texts as RPYC_STRING lines so the
      * UI can translate dialogue, menu choices and screen text reliably.
@@ -83,6 +104,7 @@ public final class FastApkScanner {
             String content = "";
             String fileType = "unknown";
             JSArray renpyRecords = new JSArray();
+            List<RenpyTextRecord> exactOldOccurrences = new ArrayList<>();
             try (ZipFile zip = new ZipFile(apk)) {
                 byte[] bytes = readEntryData(zip, entryName, Long.MAX_VALUE);
                 if (bytes == null) {
@@ -96,6 +118,7 @@ public final class FastApkScanner {
                             || lower.contains("/tl/");
                     List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
                             bytes, entryName, translationBucket);
+                    exactOldOccurrences.addAll(records);
                     for (RenpyTextRecord record : records) {
                         String text = record.text;
                         // The line protocol splits on newlines, so embedded
@@ -122,6 +145,17 @@ public final class FastApkScanner {
             result.put("content", content);
             result.put("fileType", fileType);
             result.put("renpyRecords", renpyRecords);
+            TranslationCoverageReport initialCoverage = coverageReport(
+                    exactOldOccurrences,
+                    Collections.<String, String>emptyMap(),
+                    Collections.<String>emptySet(),
+                    Collections.<String, List<String>>emptyMap(),
+                    Collections.<String>emptySet(),
+                    Collections.<String, String>emptyMap());
+            result.put("coverageReport", initialCoverage.toSanitizedJson());
+            result.put("coverageOccurrenceCount", initialCoverage.occurrenceCount);
+            result.put("coverageUniqueSourceCount", initialCoverage.uniqueSourceCount);
+            result.put("coverageGate", initialCoverage.shouldBlockCompleteBuild() ? "blocked" : "clear");
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();
