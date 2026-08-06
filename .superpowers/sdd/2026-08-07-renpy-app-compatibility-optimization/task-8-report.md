@@ -14,6 +14,8 @@ Implemented only the Task 8 corpus, local translation support, workshop patch, a
 - Added bounded context prompt output (up to three representative contexts).
 - Added local translation collision detection that rejects multiple different translations for one exact old string with `translation_collision_conflict`.
 - Added sanitized UI collision reporting with unique-old, occurrence, duplicate, and collision counts plus JSON export.
+- Wired the collision gate into both the translation-file merge path and `TranslationCompiler.compileTranslationArtifact`, so conflicting pairs cannot reach RPYC writing.
+- Wired the workshop batch path to accumulate sanitized record contexts, render a visible diagnostic panel, and offer a JSON download using DOM text nodes rather than raw HTML.
 - Added Java corpus and UI/coverage regression assertions already present in the Task 8 test modules.
 
 ## Verification
@@ -22,7 +24,7 @@ Command run from `apk-work/ui-redesign`:
 
 ```text
 python -m unittest test_translation_quality.py test_translation_coverage.py -v
-Ran 17 tests in 2.595s
+Ran 19 tests in 7.069s
 OK (skipped=1)
 ```
 
@@ -31,3 +33,5 @@ The one skipped test requires an audit APK and extracted-text dump that are not 
 ## Commit
 
 `feat: report renpy translation context collisions`
+
+Integration fix: `fix: wire renpy collision gate and visible report`. The full scanner regression also remained green: `python -m unittest test_fast_scanner.py -v` — 49 tests, OK.

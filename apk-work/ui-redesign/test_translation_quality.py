@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_fast_scanner import third_party_classpath
+
 
 ROOT = Path(__file__).parent
 BASE_JS = ROOT.parent / "extracted" / "assets" / "public" / "assets" / "index-CJtfdHOF.js"
@@ -240,6 +242,94 @@ public final class Task8CorpusHarness {
         self.assertIn("duplicateCount", self.js)
         self.assertIn("translationCollisionReport", self.js)
         self.assertIn("JSON.stringify", self.js)
+        self.assertIn("slg-translation-collision-report", self.js)
+        self.assertIn("导出碰撞 JSON", self.js)
+
+    def test_task8_ui_report_renders_counts_and_sanitizes_export(self):
+        with tempfile.TemporaryDirectory(prefix="task8-ui-report-") as directory:
+            js_path = Path(directory) / "patched.js"
+            js_path.write_text(self.js, encoding="utf-8")
+            js_literal = json.dumps(str(js_path))
+            script = f"""
+const fs = require('fs');
+const js = fs.readFileSync({js_literal}, 'utf-8');
+const start = js.indexOf('(function(){{/* up to 3 representative contexts */const root=typeof window');
+const end = js.indexOf('}})()', start) + 4;
+if (start < 0 || end <= start) throw new Error('collision report IIFE missing');
+const nodes = {{}};
+function node(tag) {{ return {{tag, id:'', children:[], hidden:false, style:{{}}, textContent:'',
+  append(...items) {{ for (const item of items) {{ this.children.push(item); if (item && item.id) nodes[item.id] = item; }} }},
+  replaceChildren(...items) {{ this.children=[]; this.append(...items); }},
+  setAttribute() {{}},
+  click() {{}}
+}}; }}
+const host = node('main');
+globalThis.window = globalThis;
+globalThis.document = {{
+  querySelector: () => host,
+  getElementById: id => nodes[id] || null,
+  createElement: tag => node(tag),
+}};
+eval(js.slice(start, end));
+const report = globalThis.__slgTranslationCollisionReport([
+  {{exactOld:'OK{{#menu}}', sourcePath:'game/a.rpyc', kind:'MENU', speaker:''}},
+  {{exactOld:'OK{{#menu}}', sourcePath:'game/a.rpyc', kind:'MENU', speaker:''}},
+  {{exactOld:'Fine.', sourcePath:'game/a.rpyc', kind:'DIALOGUE', speaker:'alice', apiKey:'secret'}},
+  {{exactOld:'Fine.', sourcePath:'game/b.rpyc', kind:'DIALOGUE', speaker:'bob'}},
+]);
+const panel = nodes['slg-translation-collision-report'];
+if (!panel) throw new Error('collision report panel not rendered');
+process.stdout.write(JSON.stringify({{report, summary:panel.children[1].textContent, json:globalThis.__slgTranslationCollisionReportJson}}));
+"""
+            result = json.loads(run_node(script, ROOT))
+        self.assertEqual(result["report"]["uniqueOldCount"], 2)
+        self.assertEqual(result["report"]["occurrenceCount"], 4)
+        self.assertEqual(result["report"]["duplicateCount"], 2)
+        self.assertEqual(result["report"]["collisionCount"], 1)
+        self.assertIn("唯一原文 2", result["summary"])
+        self.assertIn("总出现 4", result["summary"])
+        self.assertNotIn("secret", result["json"])
+
+    def test_task8_compile_gate_rejects_conflicting_pairs_before_writing(self):
+        harness = r'''
+package com.slgtranslator.app;
+import java.util.*;
+public final class Task8CompileGateHarness {
+  public static void main(String[] args) throws Exception {
+    List<String[]> conflict = Arrays.asList(
+        new String[] {"Fine.", "好。"}, new String[] {"Fine.", "行。"});
+    String direct = LocalTranslationSupport.translationCollisionConflict(conflict);
+    if (direct == null || !direct.contains("translation_collision_conflict")) throw new AssertionError("support gate");
+    try {
+      TranslationCompiler.compileTranslationArtifact("selectable", conflict, null);
+      throw new AssertionError("compiler accepted collision");
+    } catch (Exception expected) {
+      if (!String.valueOf(expected.getMessage()).contains("translation_collision_conflict")) throw expected;
+    }
+    List<String[]> same = Arrays.asList(
+        new String[] {"Fine.", "好。"}, new String[] {"Fine.", "好。"});
+    if (LocalTranslationSupport.translationCollisionConflict(same) != null) throw new AssertionError("same translation rejected");
+  }
+}
+'''
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="task8-compile-gate-") as directory:
+            directory_path = Path(directory)
+            source = directory_path / "Task8CompileGateHarness.java"
+            classes = directory_path / "classes"
+            source.write_text(harness, encoding="utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(source)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.Task8CompileGateHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
 
     def test_task8_prompt_limits_contexts_and_compile_rejects_conflicting_translations(self):
         self.assertIn("up to 3 representative contexts", self.js)

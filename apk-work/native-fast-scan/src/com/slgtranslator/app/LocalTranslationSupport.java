@@ -42,10 +42,14 @@ public final class LocalTranslationSupport {
             if (pair == null || pair.length < 2 || pair[0] == null) continue;
             String old = pair[0];
             String next = pair[1] == null ? "" : pair[1];
-            String previous = translations.putIfAbsent(old, next);
-            if (previous != null && !previous.equals(next)) {
-                return "translation_collision_conflict: conflicting translations for exactOld '"
-                        + old + "': '" + previous + "' vs '" + next + "'";
+            if (translations.containsKey(old)) {
+                String previous = translations.get(old);
+                if (!previous.equals(next)) {
+                    return "translation_collision_conflict: conflicting translations for exactOld '"
+                            + old + "': '" + previous + "' vs '" + next + "'";
+                }
+            } else {
+                translations.put(old, next);
             }
         }
         return null;

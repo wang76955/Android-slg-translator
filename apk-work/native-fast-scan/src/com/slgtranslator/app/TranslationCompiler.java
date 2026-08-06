@@ -81,9 +81,15 @@ public final class TranslationCompiler {
                     if (pair[0] == null || pair[0].isEmpty()) {
                         continue;
                     }
-                    if (!merged.containsKey(pair[0])) {
-                        merged.put(pair[0], pair[1]);
+                    String oldText = pair[0];
+                    String newText = pair[1] == null ? "" : pair[1];
+                    if (merged.containsKey(oldText)
+                            && !merged.get(oldText).equals(newText)) {
+                        call.reject("translation_collision_conflict: conflicting translations for exactOld '"
+                                + oldText + "'");
+                        return;
                     }
+                    merged.put(oldText, newText);
                 }
             }
             if (language == null || language.isEmpty() || merged.isEmpty()) {
@@ -202,6 +208,10 @@ public final class TranslationCompiler {
                                                             List<String[]> pairs,
                                                             TemplateMeta meta)
             throws CompilationValidationException {
+        String collision = LocalTranslationSupport.translationCollisionConflict(pairs);
+        if (collision != null) {
+            throw new CompilationValidationException("translation_collision_conflict", collision);
+        }
         String normalized = normalizeActivationMode(activationMode);
         String translatorLanguage = translatorLanguageFor(normalized);
         String compiledPath = compiledPathFor(normalized);
