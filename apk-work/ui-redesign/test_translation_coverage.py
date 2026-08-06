@@ -160,6 +160,11 @@ public final class CoverageReportHarness {
             "TranslationCoverageReport", "missingCount", "rejectedCount", "uncertainCount",
             "topMissing", "x-common", "coverage", "incomplete", "__slgBuildCoverage",
             "__slgIncompleteTestPatch", "__slgTranslationCoverageReportJson",
+            "__slgRecordValidatorApprovedTranslations?.(t,_lr.translations)",
+            "__slgRecordValidatorApprovedTranslations?.(t,d)",
+            "__slgRecordRejectedTranslations?.(_lr.rejected)",
+            "__slgResetTranslationCoverage",
+            "function exact(value)",
         ):
             self.assertIn(token, source)
         self.assertIn("slg-translator-cache:", source)

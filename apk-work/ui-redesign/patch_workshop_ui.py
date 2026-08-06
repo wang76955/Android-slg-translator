@@ -745,6 +745,24 @@ function setReactInputValue(input,value)""",
         raise ValueError("Mount source-button wait signature not found")
     runtime = runtime.replace(mount_wait_old, mount_wait_new, 1)
     runtime = enhance_local_runtime(runtime)
+    local_rejected_anchor = 'const map=new Map();const warnings=[];let failedBatches=0,splitBatches=0;'
+    local_rejected_replacement = 'const map=new Map();const warnings=[],rejected=[];let failedBatches=0,splitBatches=0;'
+    if runtime.count(local_rejected_anchor) != 1:
+        raise ValueError("Local translation result state signature not found")
+    runtime = runtime.replace(local_rejected_anchor, local_rejected_replacement, 1)
+    local_rejected_push = 'if(Array.isArray(res&&res.warnings))warnings.push(...res.warnings);'
+    local_rejected_push_new = (
+        'if(Array.isArray(res&&res.warnings))warnings.push(...res.warnings);'
+        'if(Array.isArray(res&&res.rejected))rejected.push(...res.rejected);'
+    )
+    if runtime.count(local_rejected_push) != 1:
+        raise ValueError("Local translation rejection signature not found")
+    runtime = runtime.replace(local_rejected_push, local_rejected_push_new, 1)
+    local_return = 'return {translations:map,successCount:map.size,warnings};'
+    local_return_new = 'return {translations:map,successCount:map.size,warnings,rejected};'
+    if runtime.count(local_return) != 1:
+        raise ValueError("Local translation return signature not found")
+    runtime = runtime.replace(local_return, local_return_new, 1)
 
     return runtime
 
@@ -819,6 +837,7 @@ def patch_local_engine(js: str) -> str:
         "if(_engine){let _lr=null,_le=null;try{"
         "_lr=await (globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl)("
         "{texts:t,sourceLang:n,targetLang:r,onProgress:l,engine:_engine});"
+        "_lr?.translations&&globalThis.__slgRecordValidatorApprovedTranslations?.(t,_lr.translations);"
         "_lr?.rejected&&globalThis.__slgRecordRejectedTranslations?.(_lr.rejected);"
         "}catch(e){_le=e}if(_lr)return _lr;"
         "if(_le)return {translations:new Map(),successCount:0,"
@@ -896,19 +915,19 @@ async function Lo(e){'''
     js = js.replace(old_progress_start, new_progress_start, 1)
 
     old_return_empty = 'm.length===0)return await wo(),{translations:d,successCount:d.size};'
-    new_return_empty = 'm.length===0)return wo(!0),{translations:d,successCount:d.size};'
+    new_return_empty = 'm.length===0)return globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size};'
     if js.count(old_return_empty) != 1:
         raise ValueError("Translation cache-only return signature not found")
     js = js.replace(old_return_empty, new_return_empty, 1)
 
     old_return_no_key = 'if(!a)return await wo(),{translations:d,successCount:d.size,error:'
-    new_return_no_key = 'if(!a)return wo(!0),{translations:d,successCount:d.size,error:'
+    new_return_no_key = 'if(!a)return globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size,error:'
     if js.count(old_return_no_key) != 1:
         raise ValueError("Translation no-key return signature not found")
     js = js.replace(old_return_no_key, new_return_no_key, 1)
 
     old_return_final = 'return await Promise.all(ne),await wo(),{translations:d,successCount:d.size'
-    new_return_final = 'return await Promise.all(ne),wo(!0),{translations:d,successCount:d.size'
+    new_return_final = 'return await Promise.all(ne),globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size'
     if js.count(old_return_final) != 1:
         raise ValueError("Translation final return signature not found")
     js = js.replace(old_return_final, new_return_final, 1)
@@ -929,7 +948,7 @@ async function Lo(e){'''
     # directory before translating so a cleared cache cannot break patch builds.
     old_start = "Ce=async()=>{if(!n||ae.length===0||!te&&!oe)return;"
     new_start = (
-        "Ce=async()=>{globalThis.__slgResetTranslationCollisionReport?.();if(!n||ae.length===0||!te&&!oe)return;"
+        "Ce=async()=>{globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
         "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri)}"
@@ -1488,7 +1507,7 @@ Return only JSON: {"translations":["..."]}`),i}'''
     coverage_report = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;
 function asMap(value){return value instanceof Map?value:new Map(Object.entries(value||{}))}
-function safe(value){return String(value??``).replace(/[\u0000-\u001f]/g,` `).slice(0,400)}
+function safe(value){return String(value??``).replace(/[\u0000-\u001f]/g,` `)}
 function isSkipReason(reason){return /developer_console|internal_error|expired_text|settings_optional/i.test(String(reason||``))}
 function incremental(values,validated,failed,retry){let v=asMap(validated),out=new Set;for(const value of values||[]){let old=safe(value);if(old&&!v.has(old))out.add(old)}for(const value of failed||[])out.add(safe(value));for(const value of retry||[])out.add(safe(value));return Array.from(out)}
 function render(report){if(typeof document===`undefined`)return;const host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;let panel=document.getElementById(`slg-translation-coverage-report`);if(!panel){panel=document.createElement(`section`);panel.id=`slg-translation-coverage-report`;panel.className=`workshop-translation-coverage-report`;panel.style.cssText=`margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,#b45309 42%,transparent);border-radius:12px;background:color-mix(in srgb,#b45309 8%,transparent)`;host.append(panel)}panel.hidden=false;panel.replaceChildren();const title=document.createElement(`h3`),summary=document.createElement(`p`),status=document.createElement(`p`);title.textContent=`Ren'Py 翻译覆盖率`;summary.textContent=`唯一原文 ${report.uniqueSourceCount} · 总出现 ${report.occurrenceCount} · 已验证 ${report.translatedCount} · 缺失 ${report.missingCount} · 拒绝 ${report.rejectedCount} · 不确定 ${report.uncertainCount}`;status.textContent=report.blocking?`完整构建已阻断：必须补齐缺失或被拒绝的翻译。可显式选择不完整测试补丁。`:`覆盖率通过，可生成完整构建。`;status.style.color=report.blocking?`#b45309`:`#15803d`;const exportButton=document.createElement(`button`);exportButton.type=`button`;exportButton.textContent=`导出覆盖率 JSON`;exportButton.onclick=()=>{const blob=new Blob([root.__slgTranslationCoverageReportJson||JSON.stringify(report)],{type:`application/json`}),url=URL.createObjectURL(blob),a=document.createElement(`a`);a.href=url;a.download=`renpy-translation-coverage.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),0)};const incomplete=document.createElement(`button`);incomplete.type=`button`;incomplete.textContent=root.__slgIncompleteTestPatchSelected?`已选择不完整测试补丁`:`允许不完整测试补丁`;incomplete.disabled=!report.blocking;incomplete.onclick=()=>{root.__slgIncompleteTestPatchSelected=true;root.__slgIncompleteTestPatch=true;incomplete.textContent=`已选择不完整测试补丁`;render(report)};const list=document.createElement(`ol`);for(const item of report.topMissingFiles||[]){const row=document.createElement(`li`);row.textContent=`${item.filePath} · 缺失 ${item.missingCount} · 来源 ${item.sourceCount}`;list.append(row)}panel.append(title,summary,status,exportButton,incomplete,list)}
@@ -1499,7 +1518,10 @@ root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations|
     # silently turned into missing coverage or a fabricated zero.
     coverage_report = coverage_report.replace("else{missingCount++;", "else if(!group.uncertain){missingCount++;")
     coverage_report = coverage_report.replace("else file.missingCount++;", "else if(!group.uncertain)file.missingCount++;")
-    js += collision_report + coverage_report
+    coverage_runtime_fix = r'''
+(function(){const root=typeof window!==`undefined`?window:globalThis;function exact(value){return String(value??``)}root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{const map=translations instanceof Map?translations:null;for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text),value=map?.get(i)??map?.get(item.keyPath)??map?.get(item.text)??translations?.[item.keyPath]??translations?.[item.text]??translations?.[i];if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=exact(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgResetTranslationCoverage=()=>{root.__slgCoverageRecords=[];root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgIncompleteTestPatchSelected=false;root.__slgRefreshTranslationCoverage?.()}})()
+'''
+    js += collision_report + coverage_report + coverage_runtime_fix
     return js
 
 

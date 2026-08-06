@@ -40,3 +40,18 @@ Workshop UI 会累计扫描到的 exact-old occurrence、Task 9/本地引擎返�
 - `git diff --check`：通过。
 
 本报告对应提交消息：`feat: gate renpy builds on validated translation coverage`。
+
+## 任务 10 集成复核修复
+
+对首次实现进行本地集成复核后，补齐了以下边界：
+
+- 本地缓存和本地 LLM 的 `Map` 结果现在通过同一个 validator-approved 入口计入覆盖率；本地 LLM 返回的 rejected entries 会向上汇总并计入拒绝数。
+- 每次开始新的翻译轮次都会清空上一轮的 coverage records、validated map、rejected set 和不完整测试补丁选择，避免跨游戏或跨轮次污染。
+- 覆盖率统计不再把原文截断为 400 个字符；脱敏仍通过 JSON 序列化和 UI `textContent` 完成，因此长 exact-old 不会被错误合并。
+
+复核后的验证结果：
+
+- `python -m py_compile test_translation_coverage.py patch_workshop_ui.py`：通过。
+- `python -m unittest test_translation_coverage.py test_translation_quality.py -v`：24 tests，`OK`，1 个缺少审计夹具的测试明确 skip。
+- `python -m unittest test_fast_scanner.py -v`：49 tests，`OK`。
+- `git diff --check`：通过。
