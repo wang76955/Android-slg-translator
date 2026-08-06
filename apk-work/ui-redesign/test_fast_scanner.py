@@ -274,10 +274,18 @@ def build_structured_records_fixture_rpyc() -> bytes:
     p += pickle_short("filename") + pickle_short("game/chapter1.rpy")
     p += pickle_short("who") + pickle_short("Narrator")
     p += pickle_short("what") + pickle_short("Hello, world!")
+    p += pickle_short("what") + pickle_short("A quiet line.")
+    p += pickle_short("who") + pickle_short("Narrator")
+    p += pickle_short("caption") + pickle_short("A menu caption.")
+    p += pickle_short("what") + pickle_short("A structurally unowned line.")
     p += pickle_short("old") + pickle_short("Save{#menu}")
     p += pickle_short("new") + pickle_short("\u4fdd\u5b58")
     p += pickle_short('_("Start")')
+    p += pickle_short('_("Repeat me")')
+    p += pickle_short('_("Repeat me")')
+    p += pickle_short('_("Shared hint")')
     p += pickle_short('Character("Sky", color = "#fff")')
+    p += pickle_short('send_phone_message("Aine", "Shared hint", "aine_dm")')
     p += pickle_short("items")
     p += b"\x5d\x94\x28"  # EMPTY_LIST MEMOIZE MARK
     for label in ("First choice", "Second{#x}"):
@@ -2259,12 +2267,25 @@ public final class StructuredRecordsHarness {
         List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(bytes, sourcePath, false);
         require(find(records, "Hello, world!", RenpyTextRecord.Kind.DIALOGUE, sourcePath, 1, "Narrator"),
                 "dialogue record must keep kind/sourcePath/occurrence/speaker");
+        require(find(records, "A quiet line.", RenpyTextRecord.Kind.DIALOGUE, sourcePath, 1, ""),
+                "dialogue without who must not inherit a stale speaker");
+        require(find(records, "A structurally unowned line.", RenpyTextRecord.Kind.DIALOGUE,
+                sourcePath, 1, ""),
+                "dialogue after another structural field must not inherit a stale speaker");
         require(find(records, "First choice", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),
                 "menu label must be a structured menu record");
         require(find(records, "Second{#x}", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),
                 "tagged menu label must keep its exact text key");
         require(find(records, "Start", RenpyTextRecord.Kind.UI_STRING, sourcePath, 1, ""),
                 "_() text must be a structured UI string");
+        require(find(records, "Repeat me", RenpyTextRecord.Kind.UI_STRING, sourcePath, 1, ""),
+                "first repeated heuristic record must keep occurrence 1");
+        require(find(records, "Repeat me", RenpyTextRecord.Kind.UI_STRING, sourcePath, 2, ""),
+                "repeated heuristic text must produce a second occurrence");
+        require(find(records, "Shared hint", RenpyTextRecord.Kind.UI_STRING, sourcePath, 1, ""),
+                "UI heuristic text must survive even when another heuristic kind reuses it");
+        require(find(records, "Shared hint", RenpyTextRecord.Kind.CUSTOM_STATEMENT, sourcePath, 2, ""),
+                "same heuristic text under a different kind must remain distinct and increment occurrence");
         require(find(records, "Sky", RenpyTextRecord.Kind.CHARACTER_NAME, sourcePath, 1, ""),
                 "Character() name must be a structured name record");
         require(find(records, "Save{#menu}", RenpyTextRecord.Kind.TRANSLATION_OLD, sourcePath, 1, ""),
@@ -2404,7 +2425,9 @@ public final class MarkupExtractorHarness {
         scanner = SCANNER.read_text("utf-8")
         self.assertIn("RpycTextExtractor.extractRecords", scanner)
         self.assertIn("translationBucket", scanner)
-        self.assertIn("x-tl", scanner)
+        self.assertIn("String lower = entryName.toLowerCase(Locale.ROOT);", scanner)
+        self.assertIn('lower.contains("/x-tl/")', scanner)
+        self.assertIn('lower.contains("/tl/")', scanner)
 
     def test_cleanup_storage_keeps_newest_patch_and_selection_source(self):
         cleanup = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "CleanupSupport.java"

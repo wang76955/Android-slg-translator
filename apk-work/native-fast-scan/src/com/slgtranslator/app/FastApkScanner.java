@@ -92,8 +92,8 @@ public final class FastApkScanner {
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
                     StringBuilder out = new StringBuilder();
-                    boolean translationBucket = entryName.contains("/x-tl/")
-                            || entryName.contains("/tl/");
+                    boolean translationBucket = lower.contains("/x-tl/")
+                            || lower.contains("/tl/");
                     List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
                             bytes, entryName, translationBucket);
                     for (RenpyTextRecord record : records) {

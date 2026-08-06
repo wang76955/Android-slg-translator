@@ -135,13 +135,12 @@ public final class RpycTextExtractor {
     private static final class ExtractState {
         final List<RenpyTextRecord> records = new ArrayList<>();
         final List<String> choices = new ArrayList<>();
-        final Set<String> extraSeen = new HashSet<>();
         final Map<String, Integer> occurrences = new HashMap<>();
         final String sourcePath;
         final boolean onlyOld;
         String lastString;
         String lastKey;
-        String lastSpeaker = "";
+        String pendingSpeaker = "";
         boolean itemsMode;
         boolean afterTuple3;
 
@@ -164,17 +163,25 @@ public final class RpycTextExtractor {
                 choices.add(value);
             }
             if ("who".equals(lastKey)) {
-                lastSpeaker = value;
+                pendingSpeaker = value;
                 lastKey = null;
             } else if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
                 if (isUserText(value)) {
+                    String speaker = "what".equals(lastKey) ? pendingSpeaker : "";
                     addRecord(value, kindFor(lastKey),
-                            "what".equals(lastKey) ? lastSpeaker : "", true);
+                            speaker, true);
+                }
+                if ("what".equals(lastKey)) {
+                    pendingSpeaker = "";
                 }
                 lastKey = null;
             } else if (KEY_NAMES.contains(value)) {
+                if (!"what".equals(value)) {
+                    pendingSpeaker = "";
+                }
                 lastKey = value;
             } else {
+                pendingSpeaker = "";
                 lastKey = null;
             }
             lastString = value;
@@ -226,7 +233,7 @@ public final class RpycTextExtractor {
         java.util.regex.Matcher marked = MARKED_TEXT.matcher(s);
         while (marked.find()) {
             String text = marked.group(1);
-            if (isMarkedText(text) && state.extraSeen.add(text)) {
+            if (isMarkedText(text)) {
                 state.addRecord(text, RenpyTextRecord.Kind.UI_STRING, "", false);
             }
         }
@@ -234,7 +241,7 @@ public final class RpycTextExtractor {
             java.util.regex.Matcher names = CHARACTER_NAME.matcher(s);
             while (names.find()) {
                 String name = names.group(1);
-                if (isCharacterName(name) && state.extraSeen.add(name)) {
+                if (isCharacterName(name)) {
                     state.addRecord(name, RenpyTextRecord.Kind.CHARACTER_NAME, "", false);
                 }
             }
@@ -274,7 +281,7 @@ public final class RpycTextExtractor {
             int collected = 0;
             for (String arg : splitCallArgs(args)) {
                 String value = unquoteLiteral(arg);
-                if (value != null && isUserText(value) && state.extraSeen.add(value)) {
+                if (value != null && isUserText(value)) {
                     state.addRecord(value, RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", false);
                     collected++;
                     if (collected >= limit) {
