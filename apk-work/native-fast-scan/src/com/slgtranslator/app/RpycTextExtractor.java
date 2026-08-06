@@ -488,6 +488,9 @@ public final class RpycTextExtractor {
     // ------------------------------------------------------------------
 
     private static byte[] readSlot(byte[] rpyc, int slotId) {
+        if (slotId == 1 && !startsWith(rpyc, RPC2_MAGIC)) {
+            return inflateWhole(rpyc);
+        }
         int pos = RPC2_MAGIC.length;
         while (pos + 12 <= rpyc.length) {
             int id = le32(rpyc, pos);
@@ -523,5 +526,31 @@ public final class RpycTextExtractor {
                 | ((data[pos + 1] & 0xff) << 8)
                 | ((data[pos + 2] & 0xff) << 16)
                 | ((data[pos + 3] & 0xff) << 24);
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix) {
+        if (data == null || data.length < prefix.length) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length; i++) {
+            if (data[i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static byte[] inflateWhole(byte[] data) {
+        try (InputStream in = new InflaterInputStream(new ByteArrayInputStream(data));
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            return null;
+        }
     }
 }

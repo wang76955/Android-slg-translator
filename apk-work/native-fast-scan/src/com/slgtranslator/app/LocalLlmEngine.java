@@ -50,6 +50,55 @@ public final class LocalLlmEngine {
     private static final int BATCH_SIZE = 5;
     private static final int BATCH_MAX_TOKENS = 768;
     private static final Pattern NUMBERED_LINE = Pattern.compile("^\\s*(?:\\d+)[.):\\-]\\s*(.*)$");
+    private static final Pattern PLACEHOLDER = Pattern.compile(
+        "\\{\\{|\\[\\[|\\{[^}]*\\}|\\[[^]]*\\]|%\\d*\\$?[sdif]|\\$[A-Za-z_][A-Za-z0-9_]*");
+
+    public static final class PlaceholderGuard {
+        public final String protectedText;
+        public final String[] placeholders;
+
+        PlaceholderGuard(String protectedText, String[] placeholders) {
+            this.protectedText = protectedText == null ? "" : protectedText;
+            this.placeholders = placeholders == null ? new String[0] : placeholders;
+        }
+    }
+
+    public static PlaceholderGuard protectPlaceholders(String text) {
+        if (text == null || text.length() == 0) {
+            return new PlaceholderGuard(text == null ? "" : text, new String[0]);
+        }
+        Matcher matcher = PLACEHOLDER.matcher(text);
+        List<String> found = new ArrayList<>();
+        StringBuilder protectedText = new StringBuilder(text.length() + 16);
+        int last = 0;
+        while (matcher.find()) {
+            protectedText.append(text, last, matcher.start());
+            protectedText.append(sentinel(found.size()));
+            found.add(matcher.group());
+            last = matcher.end();
+        }
+        protectedText.append(text, last, text.length());
+        return new PlaceholderGuard(protectedText.toString(), found.toArray(new String[found.size()]));
+    }
+
+    public static String restorePlaceholders(String translated, PlaceholderGuard guard) {
+        if (translated == null || guard == null) {
+            return null;
+        }
+        String result = translated;
+        for (int i = 0; i < guard.placeholders.length; i++) {
+            String token = sentinel(i);
+            if (!result.contains(token)) {
+                return null;
+            }
+            result = result.replace(token, guard.placeholders[i]);
+        }
+        return result;
+    }
+
+    private static String sentinel(int index) {
+        return "__SLGPH" + index + "__";
+    }
 
     private static volatile LlamaModel loadedModel;
     private static volatile String loadedModelPath;
@@ -400,22 +449,41 @@ public final class LocalLlmEngine {
     private static int translateBatch(LlamaModel model, List<LocalTranslationSupport.TextItem> batch,
                                       String sourceLang, String targetLang, JSObject translations,
                                       List<String> warnings, int[] warned) {
-        List<String> parsed = batchCompletion(model, batch, sourceLang, targetLang);
+        List<PlaceholderGuard> guards = new ArrayList<>();
+        List<LocalTranslationSupport.TextItem> protectedItems = new ArrayList<>();
+        for (LocalTranslationSupport.TextItem item : batch) {
+            PlaceholderGuard guard = protectPlaceholders(item.text);
+            guards.add(guard);
+            protectedItems.add(new LocalTranslationSupport.TextItem(item.keyPath, guard.protectedText));
+        }
+        List<String> parsed = batchCompletion(model, protectedItems, sourceLang, targetLang);
         if (parsed != null && parsed.size() == batch.size()) {
             int count = 0;
             for (int i = 0; i < batch.size(); i++) {
-                if (acceptTranslation(batch.get(i), parsed.get(i), translations, warnings, warned)) {
+                String restored = restorePlaceholders(parsed.get(i), guards.get(i));
+                if (restored == null) {
+                    addWarning(warnings, warned, batch.get(i).keyPath + ": placeholder lost, skipped");
+                    continue;
+                }
+                if (acceptTranslation(batch.get(i), restored, translations, warnings, warned)) {
                     count++;
                 }
             }
             return count;
         }
         int count = 0;
-        for (LocalTranslationSupport.TextItem item : batch) {
+        for (int i = 0; i < batch.size(); i++) {
+            LocalTranslationSupport.TextItem item = batch.get(i);
+            PlaceholderGuard guard = guards.get(i);
             try {
                 String systemPrompt = buildSystemPrompt(sourceLang, targetLang, 1);
-                LlamaResult result = completeSync(model, item.text, systemPrompt, maxTokensForText(item.text));
-                if (acceptTranslation(item, cleanOutput(result.getText()), translations, warnings, warned)) {
+                LlamaResult result = completeSync(model, guard.protectedText, systemPrompt, maxTokensForText(item.text));
+                String restored = restorePlaceholders(cleanOutput(result.getText()), guard);
+                if (restored == null) {
+                    addWarning(warnings, warned, item.keyPath + ": placeholder lost, skipped");
+                    continue;
+                }
+                if (acceptTranslation(item, restored, translations, warnings, warned)) {
                     count++;
                 }
             } catch (Exception e) {

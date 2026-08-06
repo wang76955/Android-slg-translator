@@ -82,12 +82,11 @@ public final class FastApkScanner {
             String content = "";
             String fileType = "unknown";
             try (ZipFile zip = new ZipFile(apk)) {
-                ZipEntry entry = zip.getEntry(entryName);
-                if (entry == null) {
+                byte[] bytes = readEntryData(zip, entryName, Long.MAX_VALUE);
+                if (bytes == null) {
                     call.reject("Entry not found: " + entryName);
                     return;
                 }
-                byte[] bytes = readEntryBytes(zip, entry);
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
                     StringBuilder out = new StringBuilder();
@@ -270,6 +269,10 @@ public final class FastApkScanner {
                 }
                 String name = entry.getName();
                 String extension = extensionOf(name);
+                if ("rpa".equals(extension) || "rpi".equals(extension)) {
+                    addRpaEntries(zip, entry, name, extension, entries, deadline);
+                    continue;
+                }
                 if (!TEXT_EXTENSIONS.contains(extension)) {
                     continue;
                 }
@@ -347,11 +350,11 @@ public final class FastApkScanner {
                     && !lower.contains("gamemenu") && !lower.contains("mainmenu")) {
                 continue;
             }
-            if (entry.compressedSize <= 0 || entry.compressedSize > 400_000L) continue;
+            if ((entry.compressedSize <= 0 && !name.contains("!/"))
+                    || entry.compressedSize > 400_000L) continue;
             if (scanned++ >= 6) break;
-            ZipEntry zipEntry = zip.getEntry(name);
-            if (zipEntry == null) continue;
-            byte[] bytes = readEntry(zip, zipEntry, deadline);
+            byte[] bytes = readEntryData(zip, name, deadline);
+            if (bytes == null) continue;
             String text = new String(bytes, StandardCharsets.ISO_8859_1);
             haystack.append(text);
             if (text.contains("Language")) {
@@ -390,6 +393,62 @@ public final class FastApkScanner {
         return sawRenpyBucket ? "renpy" : "none";
     }
 
+    private static void addRpaEntries(
+        ZipFile zip,
+        ZipEntry entry,
+        String name,
+        String extension,
+        List<ApkEntry> entries,
+        long deadline
+    ) throws IOException {
+        if ("rpa".equals(extension)) {
+            List<String> scripts = RpaArchive.listEntriesFromZip(zip, entry, name);
+            for (String script : scripts) {
+                entries.add(new ApkEntry(RpaArchive.virtualName(name, script), 0L, 0L, "rpyc"));
+            }
+            return;
+        }
+        String dataName = rpaDataName(name);
+        ZipEntry dataEntry = dataName == null ? null : zip.getEntry(dataName);
+        if (dataEntry == null) {
+            return;
+        }
+        byte[] index = readEntry(zip, entry, deadline);
+        List<String> scripts = RpaArchive.listEntries(index, name);
+        for (String script : scripts) {
+            entries.add(new ApkEntry(RpaArchive.virtualName(dataName, script), 0L, 0L, "rpyc"));
+        }
+    }
+
+    private static String rpaDataName(String name) {
+        if (name.toLowerCase(Locale.ROOT).endsWith(".rpi")) {
+            return name.substring(0, name.length() - 4) + ".rpa";
+        }
+        return null;
+    }
+
+    private static byte[] readEntryData(ZipFile zip, String entryName, long deadline) throws IOException {
+        String[] parts = RpaArchive.splitVirtual(entryName);
+        if (parts.length == 2) {
+            ZipEntry archive = zip.getEntry(parts[0]);
+            if (archive == null) {
+                return null;
+            }
+            String lower = parts[0].toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".rpi")) {
+                String dataName = rpaDataName(parts[0]);
+                ZipEntry data = dataName == null ? null : zip.getEntry(dataName);
+                if (data == null) {
+                    return null;
+                }
+                byte[] index = readEntry(zip, archive, deadline);
+                return RpaArchive.readEntryFromZip(zip, data, dataName, parts[1], index);
+            }
+            return RpaArchive.readEntryFromZip(zip, archive, parts[0], parts[1]);
+        }
+        ZipEntry entry = zip.getEntry(entryName);
+        return entry == null ? null : readEntry(zip, entry, deadline);
+    }
     private static byte[] readEntry(ZipFile zip, ZipEntry entry, long deadline) throws IOException {
         try (
             InputStream input = zip.getInputStream(entry);

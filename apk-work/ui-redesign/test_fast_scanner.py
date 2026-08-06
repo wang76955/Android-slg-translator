@@ -260,6 +260,80 @@ def build_translate_fixture_rpyc() -> bytes:
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
 
+def build_rpa3_fixture() -> bytes:
+    import pickle
+    import zlib
+    key = 0x42424242
+    content = build_menu_fixture_rpyc()
+    header_len = 34
+    body = bytearray()
+    index = {}
+    for name, data in (("game/chapter1.rpyc", content), ("game/notes.txt", b"ignore")):
+        body += b"Made with Ren'Py."
+        offset = header_len + len(body)
+        index[name] = [(offset ^ key, len(data) ^ key, b"")]
+        body += data
+    index_offset = header_len + len(body)
+    index_bytes = zlib.compress(pickle.dumps(index, protocol=2))
+    return b"RPA-3.0 %016x %08x\n" % (index_offset, key) + bytes(body) + index_bytes
+
+
+def build_rpa2_fixture() -> bytes:
+    import pickle
+    import zlib
+    content = build_menu_fixture_rpyc()
+    header_len = 25
+    body = bytearray()
+    index = {}
+    for name, data in (("game/chapter1.rpyc", content), ("game/notes.txt", b"ignore")):
+        body += b"Made with Ren'Py."
+        offset = header_len + len(body)
+        index[name] = [(offset, len(data))]
+        body += data
+    index_offset = header_len + len(body)
+    index_bytes = zlib.compress(pickle.dumps(index, protocol=2))
+    return b"RPA-2.0 %016x\n" % index_offset + bytes(body) + index_bytes
+
+
+def build_rpa1_fixture():
+    import pickle
+    import zlib
+    content = build_menu_fixture_rpyc()
+    body = bytearray()
+    index = {}
+    for name, data in (("game/chapter1.rpyc", content), ("game/notes.txt", b"ignore")):
+        body += b"Made with Ren'Py."
+        offset = len(body)
+        index[name] = [(offset, len(data))]
+        body += data
+    rpi = zlib.compress(pickle.dumps(index, protocol=2))
+    return rpi, bytes(body)
+
+
+def build_legacy_rpyc_fixture() -> bytes:
+    import zlib
+    p = bytearray()
+    p += b"\x80\x02"
+    p += b"\x5d"
+    p += b"\x28"
+    p += pickle_short("renpy.ast") + pickle_short("Menu") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("linenumber") + pickle_int1(1)
+    p += pickle_short("filename") + pickle_short("game/fixture.rpy")
+    p += pickle_short("what") + pickle_short("Hello, world!")
+    p += pickle_short("items")
+    p += b"\x5d\x94\x28"
+    for label, money in (("First choice", False), ("$1100", True)):
+        p += pickle_short(label) + b"\x94"
+        p += b"\x4e"
+        p += b"\x5d\x28\x65"
+        p += b"\x87\x94"
+    p += b"\x75\x86\x62"
+    p += b"\x65"
+    p += b"."
+    return zlib.compress(bytes(p))
+
+
 def java_block_after(source, marker):
     start = source.index(marker)
     opening = source.index("{", start + len(marker))
@@ -1078,6 +1152,196 @@ public final class CacheOwnershipHarness {
             "LanguageMenuSupport;->injectTranslatorMenu",
         ):
             self.assertIn(token, builder)
+
+    def test_rpa_archive_lists_and_reads_rpyc_entries(self):
+        rpa3 = build_rpa3_fixture()
+        rpa2 = build_rpa2_fixture()
+        rpi, rpa1 = build_rpa1_fixture()
+        harness = r"""
+import com.slgtranslator.app.RpaArchive;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
+
+public final class RpaHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] rpa3 = Files.readAllBytes(Paths.get(args[0]));
+        List<String> names3 = RpaArchive.listEntries(rpa3, "game/archive.rpa");
+        require(names3.contains("game/chapter1.rpyc"), "RPA-3 must list rpyc");
+        require(!names3.contains("game/notes.txt"), "RPA-3 must not list non-script");
+        byte[] content3 = RpaArchive.readEntry(rpa3, "game/archive.rpa", "game/chapter1.rpyc");
+        require(RpycTextExtractor.extractTexts(content3).contains("Hello, world!"), "RPA-3 content must extract");
+        require(RpaArchive.virtualName("game/archive.rpa", "game/chapter1.rpyc").equals("game/archive.rpa!/game/chapter1.rpyc"), "virtual name");
+        String[] split = RpaArchive.splitVirtual("game/archive.rpa!/game/chapter1.rpyc");
+        require(split.length == 2 && split[0].equals("game/archive.rpa") && split[1].equals("game/chapter1.rpyc"), "virtual split");
+
+        byte[] rpa2 = Files.readAllBytes(Paths.get(args[1]));
+        List<String> names2 = RpaArchive.listEntries(rpa2, "game/archive2.rpa");
+        require(names2.contains("game/chapter1.rpyc"), "RPA-2 must list rpyc");
+        byte[] content2 = RpaArchive.readEntry(rpa2, "game/archive2.rpa", "game/chapter1.rpyc");
+        require(RpycTextExtractor.extractTexts(content2).contains("Hello, world!"), "RPA-2 content must extract");
+
+        byte[] rpi = Files.readAllBytes(Paths.get(args[2]));
+        byte[] rpa1 = Files.readAllBytes(Paths.get(args[3]));
+        List<String> names1 = RpaArchive.listEntries(rpi, "game/archive1.rpi");
+        require(names1.contains("game/chapter1.rpyc"), "RPA-1 must list rpyc");
+        byte[] content1 = RpaArchive.readEntry(rpa1, "game/archive1.rpa", "game/chapter1.rpyc", rpi);
+        require(RpycTextExtractor.extractTexts(content1).contains("Hello, world!"), "RPA-1 content must extract");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="rpa-test-") as temporary:
+            temporary_path = Path(temporary)
+            rpa3_path = temporary_path / "archive3.rpa"
+            rpa2_path = temporary_path / "archive2.rpa"
+            rpi_path = temporary_path / "archive1.rpi"
+            rpa1_path = temporary_path / "archive1.rpa"
+            harness_path = temporary_path / "RpaHarness.java"
+            classes = temporary_path / "classes"
+            rpa3_path.write_bytes(rpa3)
+            rpa2_path.write_bytes(rpa2)
+            rpi_path.write_bytes(rpi)
+            rpa1_path.write_bytes(rpa1)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "RpaHarness", str(rpa3_path), str(rpa2_path), str(rpi_path), str(rpa1_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_legacy_zlib_rpyc_falls_back_to_slot_one(self):
+        fixture = build_legacy_rpyc_fixture()
+        harness = r"""
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
+
+public final class LegacyRpycHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(Paths.get(args[0]));
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        require(texts.contains("Hello, world!"), "legacy rpyc dialogue must extract");
+        require(texts.contains("First choice"), "legacy rpyc menu label must extract");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="legacy-rpyc-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "legacy.rpyc"
+            harness_path = temporary_path / "LegacyRpycHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "LegacyRpycHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_local_llm_placeholder_guard_preserves_markup_and_format(self):
+        harness = r"""
+import com.slgtranslator.app.LocalLlmEngine;
+
+public final class PlaceholderHarness {
+    public static void main(String[] args) {
+        String original = "{b}Hello{/b} [name]!";
+        LocalLlmEngine.PlaceholderGuard guard = LocalLlmEngine.protectPlaceholders(original);
+        String modelOutput = guard.protectedText.replace("Hello", "\u4f60\u597d");
+        String restored = LocalLlmEngine.restorePlaceholders(modelOutput, guard);
+        String expected = "{b}\u4f60\u597d{/b} [name]!";
+        require(expected.equals(restored), "markup/interpolation must round-trip: " + restored);
+
+        String format = "Score: %s / %d";
+        LocalLlmEngine.PlaceholderGuard formatGuard = LocalLlmEngine.protectPlaceholders(format);
+        String formatRestored = LocalLlmEngine.restorePlaceholders(formatGuard.protectedText, formatGuard);
+        require(format.equals(formatRestored), "format placeholders must round-trip");
+
+        String mangled = formatGuard.protectedText.replace("__SLGPH0__", "");
+        require(LocalLlmEngine.restorePlaceholders(mangled, formatGuard) == null, "missing sentinel must reject");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="placeholder-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "PlaceholderHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", os.pathsep.join([str(classes), third_party_classpath()]), "PlaceholderHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_fast_scanner_wires_rpa_virtual_entries(self):
+        scanner = SCANNER.read_text("utf-8")
+        self.assertIn("RpaArchive.listEntries", scanner)
+        self.assertIn("RpaArchive.readEntry", scanner)
+        self.assertIn("\"!/\"", scanner)
 
     def test_language_menu_injects_underscore_labels_after_language_action(self):
         fixture = build_underscore_menu_fixture_rpyc()

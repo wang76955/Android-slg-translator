@@ -85,6 +85,13 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         self.assertIn("\uff08\u672c\u6279 ${r.batchSize} \u6761\uff09", js)
         self.assertIn("{stage:`completed`,cachedCount:h,localRuleCount:g,completedBatches:x", js)
 
+    def test_progress_panel_is_read_directly_from_react_log(self):
+        js, _ = self.patch_assets()
+        self.assertIn("querySelectorAll(\"#root [class*='font-mono']\")", js)
+        self.assertNotIn("querySelectorAll(\"#root details\")", js)
+        self.assertIn(r"翻译进度\s*([\d,]+)", js)
+        self.assertIn(r"\[(\d+)\/(\d+)\]", js)
+
     def test_local_translate_reports_start_and_completed_batch(self):
         import patch_local_ui
         code = r'''
@@ -181,7 +188,7 @@ globalThis.window={Capacitor:{Plugins:{FileManager:{
         self.assertIn("private static final int BATCH_MAX_TOKENS = 768;", java)
         self.assertIn("private static int translateBatch(LlamaModel model", java)
         self.assertIn("completeSync(model, userPrompt, systemPrompt, batchMaxTokens(batch))", java)
-        self.assertIn("completeSync(model, item.text, systemPrompt, maxTokensForText(item.text))", java)
+        self.assertIn("completeSync(model, guard.protectedText, systemPrompt, maxTokensForText(item.text))", java)
         self.assertIn("private static int maxTokensForText(String text)", java)
         self.assertIn("private static List<String> parseBatchOutput(String raw, int count)", java)
         self.assertIn("qwen2.5-0.5b-instruct-q4_k_m.gguf", java)

@@ -569,6 +569,9 @@ public final class TranslationCompiler {
      */
 
     private static byte[] readSlot(byte[] rpyc, int slotId) {
+        if (slotId == 1 && !startsWith(rpyc, RPC2_MAGIC)) {
+            return inflate(rpyc);
+        }
         int pos = RPC2_MAGIC.length;
         while (pos + 12 <= rpyc.length) {
             int id = le32(rpyc, pos);

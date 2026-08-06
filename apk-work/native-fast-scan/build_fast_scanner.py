@@ -711,13 +711,13 @@ def patch_version_manifest(manifest: Path) -> None:
 
     apktool restores versionCode/versionName from original/AndroidManifest.xml
     when the decoded XML omits them, so write them explicitly here to pin the
-    release version (1.0.6 / versionCode 6).
+    release version (1.0.7 / versionCode 7).
     """
     ET.register_namespace("android", ANDROID_NAMESPACE)
     tree = ET.parse(manifest)
     root = tree.getroot()
-    root.set("{" + ANDROID_NAMESPACE + "}versionCode", "6")
-    root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.6")
+    root.set("{" + ANDROID_NAMESPACE + "}versionCode", "7")
+    root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.7")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
 
