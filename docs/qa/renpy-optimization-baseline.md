@@ -58,3 +58,27 @@ python -m unittest test_fast_scanner.py test_translation_quality.py test_transla
 ## 基线限制
 
 本报告证明的是现有 Python 契约测试、Java/D8 构建链路和 GitHub 获取的翻译工具 APK 可复现；它不证明任何第三方 Ren'Py 游戏的语言激活、RPYC 可加载性、字体覆盖、完整翻译覆盖率或真机启动结果。批次 A 必须继续通过独立的激活、模板、能力、产物验证和资源预算测试后，才能把这些能力标记为已实现。
+
+## 批次 A 回归结果（2026-08-07）
+
+在完成 Task 1–5 后，重新运行同一套命令：
+
+```powershell
+python -m unittest test_fast_scanner.py test_translation_quality.py test_translation_coverage.py test_engine_performance.py -v
+```
+
+结果为 `62` 项运行、`0` 失败、`1` 跳过；新增的 RPYC 激活模式、模板优先级、能力分级、编译产物验证和资源预算测试均通过。跳过项仍为没有真实完整 Ren'Py 游戏 APK/完整语料的覆盖率审计，因此没有把真实游戏覆盖率标记为已证明。
+
+另外单独运行：
+
+```powershell
+python -m unittest test_fast_scanner.py -v
+```
+
+结果为 `45/45` 通过。`python build_fast_scanner.py` 也重新完成，当前原生生成物指纹为：
+
+| 文件 | 大小 | SHA-256 |
+|---|---:|---|
+| `apk-work/native-fast-scan/generated/classes6.dex` | 94,084 | `F991F783DB6072A708B46314D79C40606F75657A128240C5B9942830497CA981` |
+| `apk-work/native-fast-scan/generated/classes7.dex` | 1,970,820 | `D385E0B35743A79A51F7882666DD25ADD068E96D01FD5C89B69BA7C2807A5981` |
+| `apk-work/native-fast-scan/generated/AndroidManifest.xml` | 8,776 | `62442302BA758780254D181ADD7D0425582965B08EAD3AA830854E33E49FEB83` |
