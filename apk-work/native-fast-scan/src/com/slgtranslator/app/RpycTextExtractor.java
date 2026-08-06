@@ -67,7 +67,9 @@ public final class RpycTextExtractor {
         List<RenpyTextRecord> records = extractRecords(rpyc, "", onlyOld);
         List<String> out = new ArrayList<>(records.size());
         for (RenpyTextRecord record : records) {
-            out.add(record.text);
+            if (record.text != null && !record.text.isEmpty()) {
+                out.add(record.text);
+            }
         }
         return out;
     }
@@ -193,6 +195,11 @@ public final class RpycTextExtractor {
 
         void addRecord(String text, RenpyTextRecord.Kind kind, String speaker,
                        boolean coverageCertain) throws java.io.IOException {
+            addRecord(text, kind, speaker, "", coverageCertain);
+        }
+
+        void addRecord(String text, RenpyTextRecord.Kind kind, String speaker,
+                       String identifier, boolean coverageCertain) throws java.io.IOException {
             if (text == null || (onlyOld && kind != RenpyTextRecord.Kind.TRANSLATION_OLD)) {
                 return;
             }
@@ -202,8 +209,15 @@ public final class RpycTextExtractor {
             Integer previous = occurrences.get(occurrenceKey);
             int occurrence = previous == null ? 1 : previous + 1;
             occurrences.put(occurrenceKey, occurrence);
-            records.add(new RenpyTextRecord(text, kind, speaker, "", sourcePath,
+            records.add(new RenpyTextRecord(text, kind, speaker, identifier, sourcePath,
                     -1, occurrence, coverageCertain));
+        }
+
+        void addDiagnosticRecord(String identifier) throws java.io.IOException {
+            if (onlyOld) {
+                return;
+            }
+            addRecord("", RenpyTextRecord.Kind.UNKNOWN, "", identifier, false);
         }
     }
 
@@ -230,13 +244,7 @@ public final class RpycTextExtractor {
         if (s == null || s.isEmpty()) {
             return;
         }
-        java.util.regex.Matcher marked = MARKED_TEXT.matcher(s);
-        while (marked.find()) {
-            String text = marked.group(1);
-            if (isMarkedText(text)) {
-                state.addRecord(text, RenpyTextRecord.Kind.UI_STRING, "", false);
-            }
-        }
+        collectMarkedTextRecords(s, state);
         if (s.indexOf("Character(") >= 0 || s.indexOf("Character('") >= 0) {
             java.util.regex.Matcher names = CHARACTER_NAME.matcher(s);
             while (names.find()) {
@@ -246,7 +254,20 @@ public final class RpycTextExtractor {
                 }
             }
         }
+        collectUncertainStatements(s, state);
         collectSourceCallRecords(s, state);
+    }
+
+    private static void collectUncertainStatements(String s, ExtractState state)
+            throws java.io.IOException {
+        scanCalls(s, new CallConsumer() {
+            @Override
+            public void accept(String func, String args) throws IOException {
+                if ("UserStatement".equals(func)) {
+                    state.addDiagnosticRecord("unsupported-user-statement");
+                }
+            }
+        });
     }
 
     /**
@@ -263,41 +284,110 @@ public final class RpycTextExtractor {
         if (s == null || s.isEmpty()) {
             return;
         }
-        java.util.regex.Matcher call = SOURCE_CALL.matcher(s);
-        while (call.find()) {
-            String func = call.group(1);
-            String args = call.group(2);
-            if (func == null || args == null) {
-                continue;
-            }
-            String lower = func.toLowerCase(java.util.Locale.ROOT);
-            boolean messageStyle = lower.contains("message") || lower.contains("phone")
-                    || lower.contains("chat") || lower.contains("dm");
-            boolean preferenceStyle = lower.startsWith("_") && lower.endsWith("preference");
-            if (!messageStyle && !preferenceStyle) {
-                continue;
-            }
-            int limit = messageStyle ? 2 : 1;
-            int collected = 0;
-            for (String arg : splitCallArgs(args)) {
-                String value = unquoteLiteral(arg);
-                if (value != null && isUserText(value)) {
-                    state.addRecord(value, RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", false);
-                    collected++;
-                    if (collected >= limit) {
-                        break;
+        scanCalls(s, new CallConsumer() {
+            @Override
+            public void accept(String func, String args) throws IOException {
+                if (func == null || args == null) {
+                    return;
+                }
+                String lower = func.toLowerCase(java.util.Locale.ROOT);
+                boolean messageStyle = lower.contains("message") || lower.contains("phone")
+                        || lower.contains("chat") || lower.contains("dm");
+                boolean preferenceStyle = lower.startsWith("_") && lower.endsWith("preference");
+                if (!messageStyle && !preferenceStyle) {
+                    return;
+                }
+                int limit = messageStyle ? 2 : 1;
+                int collected = 0;
+                for (String arg : splitCallArgs(args)) {
+                    String value = unquoteLiteral(arg);
+                    if (value != null && isUserText(value)) {
+                        state.addRecord(value, RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", false);
+                        collected++;
+                        if (collected >= limit) {
+                            break;
+                        }
                     }
                 }
             }
+        });
+    }
+
+    private static void collectMarkedTextRecords(String s, ExtractState state)
+            throws java.io.IOException {
+        scanCalls(s, new CallConsumer() {
+            @Override
+            public void accept(String func, String args) throws IOException {
+                if (!isMarkedCall(func)) {
+                    return;
+                }
+                List<String> parts = splitCallArgs(args);
+                if ("_p".equals(func)) {
+                    if (parts.size() < 2) {
+                        state.addDiagnosticRecord("dynamic-marked-string:_p");
+                        return;
+                    }
+                    String context = unquoteLiteral(parts.get(0));
+                    String text = unquoteLiteral(parts.get(1));
+                    if (context != null && text != null && isMarkedText(text)) {
+                        state.addRecord(text, RenpyTextRecord.Kind.UI_STRING, "", context, false);
+                    } else {
+                        state.addDiagnosticRecord("dynamic-marked-string:_p");
+                    }
+                    return;
+                }
+                if (parts.isEmpty()) {
+                    state.addDiagnosticRecord("dynamic-marked-string:" + func);
+                    return;
+                }
+                String text = unquoteLiteral(parts.get(0));
+                if (text != null && isMarkedText(text)) {
+                    state.addRecord(text, RenpyTextRecord.Kind.UI_STRING, "", false);
+                } else {
+                    state.addDiagnosticRecord("dynamic-marked-string:" + func);
+                }
+            }
+        });
+    }
+
+    private interface CallConsumer {
+        void accept(String func, String args) throws IOException;
+    }
+
+    private static boolean isMarkedCall(String func) {
+        return "_".equals(func) || "__".equals(func) || "___".equals(func) || "_p".equals(func);
+    }
+
+    private static void scanCalls(String s, CallConsumer consumer) throws java.io.IOException {
+        for (int i = 0; i < s.length(); i++) {
+            RenpyResourceLimits.checkInterrupted();
+            char c = s.charAt(i);
+            if (c == '\'' || c == '"') {
+                i = skipQuoted(s, i);
+                continue;
+            }
+            if (!isIdentifierStart(c)) {
+                continue;
+            }
+            int start = i;
+            while (i + 1 < s.length() && isIdentifierPart(s.charAt(i + 1))) {
+                i++;
+            }
+            int open = skipWhitespace(s, i + 1);
+            if (open >= s.length() || s.charAt(open) != '(') {
+                continue;
+            }
+            int close = findClosingParen(s, open);
+            if (close < 0) {
+                continue;
+            }
+            consumer.accept(s.substring(start, i + 1), s.substring(open + 1, close));
+            i = close;
         }
     }
 
-    private static final java.util.regex.Pattern MARKED_TEXT = java.util.regex.Pattern.compile(
-            "_\\s*\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\)");
     private static final java.util.regex.Pattern CHARACTER_NAME = java.util.regex.Pattern.compile(
             "Character\\(\\s*[\"']([^\"']+)[\"']");
-    private static final java.util.regex.Pattern SOURCE_CALL = java.util.regex.Pattern.compile(
-            "([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^()]*)\\)");
 
     private static boolean isMarkedText(String s) {
         String trimmed = s.trim();
@@ -309,7 +399,7 @@ public final class RpycTextExtractor {
         }
         for (int i = 0; i < trimmed.length(); i++) {
             char c = trimmed.charAt(i);
-            if (c < 0x20 || c == 0x7f) {
+            if ((c < 0x20 && c != '\n' && c != '\r' && c != '\t') || c == 0x7f) {
                 return false;
             }
         }
@@ -436,76 +526,178 @@ public final class RpycTextExtractor {
         return true;
     }
 
+    private static boolean isIdentifierStart(char c) {
+        return Character.isLetter(c) || c == '_';
+    }
+
+    private static boolean isIdentifierPart(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    private static int skipWhitespace(String s, int index) {
+        int i = index;
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) {
+            i++;
+        }
+        return i;
+    }
+
+    private static int findClosingParen(String s, int open) {
+        int depth = 1;
+        for (int i = open + 1; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\'' || c == '"') {
+                i = skipQuoted(s, i);
+                continue;
+            }
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static int skipQuoted(String s, int quoteStart) {
+        char quote = s.charAt(quoteStart);
+        boolean triple = quoteStart + 2 < s.length()
+                && s.charAt(quoteStart + 1) == quote
+                && s.charAt(quoteStart + 2) == quote;
+        int i = quoteStart + (triple ? 3 : 1);
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '\\') {
+                if (i + 1 < s.length()) {
+                    i += 2;
+                    continue;
+                }
+                return s.length() - 1;
+            }
+            if (triple) {
+                if (i + 2 < s.length()
+                        && s.charAt(i) == quote
+                        && s.charAt(i + 1) == quote
+                        && s.charAt(i + 2) == quote) {
+                    return i + 2;
+                }
+                i++;
+                continue;
+            }
+            if (c == quote) {
+                return i;
+            }
+            i++;
+        }
+        return s.length() - 1;
+    }
+
 
     private static List<String> splitCallArgs(String args) {
         List<String> result = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        char quote = 0;
-        boolean escaped = false;
+        int start = 0;
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
         for (int i = 0; i < args.length(); i++) {
+            RenpyResourceLimits.checkInterrupted();
             char c = args.charAt(i);
-            if (escaped) {
-                current.append(c);
-                escaped = false;
+            if (c == '\'' || c == '"') {
+                i = skipQuoted(args, i);
                 continue;
             }
-            if (c == '\\') {
-                current.append(c);
-                escaped = true;
+            if (c == '(') {
+                parenDepth++;
                 continue;
             }
-            if (quote != 0) {
-                current.append(c);
-                if (c == quote) {
-                    quote = 0;
+            if (c == ')') {
+                if (parenDepth > 0) {
+                    parenDepth--;
                 }
                 continue;
             }
-            if (c == '\'' || c == '"') {
-                quote = c;
-                current.append(c);
+            if (c == '[') {
+                bracketDepth++;
                 continue;
             }
-            if (c == ',') {
-                result.add(current.toString());
-                current.setLength(0);
+            if (c == ']') {
+                if (bracketDepth > 0) {
+                    bracketDepth--;
+                }
                 continue;
             }
-            current.append(c);
+            if (c == '{') {
+                braceDepth++;
+                continue;
+            }
+            if (c == '}') {
+                if (braceDepth > 0) {
+                    braceDepth--;
+                }
+                continue;
+            }
+            if (c == ',' && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+                result.add(args.substring(start, i));
+                start = i + 1;
+            }
         }
-        result.add(current.toString());
+        result.add(args.substring(start));
         return result;
     }
 
     private static String unquoteLiteral(String arg) {
         String value = arg.trim();
-        int start = 0;
-        while (start < value.length()) {
-            char c = value.charAt(start);
-            if (c == 'u' || c == 'r' || c == 'b') {
-                start++;
-                continue;
-            }
-            break;
-        }
-        value = value.substring(start).trim();
-        if (value.length() < 2) {
+        ParsedStringLiteral literal = parseStringLiteral(value, 0);
+        if (literal == null) {
             return null;
         }
-        char quote = value.charAt(0);
+        int tail = skipWhitespace(value, literal.end);
+        if (tail != value.length()) {
+            return null;
+        }
+        return literal.value;
+    }
+
+    private static ParsedStringLiteral parseStringLiteral(String value, int offset) {
+        int start = skipWhitespace(value, offset);
+        int cursor = start;
+        while (cursor < value.length() && Character.isLetter(value.charAt(cursor))) {
+            cursor++;
+        }
+        String prefix = value.substring(start, cursor);
+        if (!isSupportedStringPrefix(prefix)) {
+            return null;
+        }
+        boolean raw = prefix.indexOf('r') >= 0 || prefix.indexOf('R') >= 0;
+        boolean formatted = prefix.indexOf('f') >= 0 || prefix.indexOf('F') >= 0;
+        if (formatted || cursor >= value.length()) {
+            return null;
+        }
+        char quote = value.charAt(cursor);
         if (quote != '\'' && quote != '"') {
             return null;
         }
-        if (value.charAt(value.length() - 1) != quote) {
-            return null;
-        }
-        String body = value.substring(1, value.length() - 1);
+        boolean triple = cursor + 2 < value.length()
+                && value.charAt(cursor + 1) == quote
+                && value.charAt(cursor + 2) == quote;
+        int bodyStart = cursor + (triple ? 3 : 1);
         StringBuilder out = new StringBuilder();
-        boolean escaped = false;
-        for (int i = 0; i < body.length(); i++) {
-            char c = body.charAt(i);
-            if (escaped) {
-                switch (c) {
+        for (int i = bodyStart; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\\') {
+                if (i + 1 >= value.length()) {
+                    return null;
+                }
+                char next = value.charAt(i + 1);
+                if (raw) {
+                    out.append(c).append(next);
+                    i++;
+                    continue;
+                }
+                switch (next) {
                     case 'n':
                         out.append('\n');
                         break;
@@ -518,21 +710,62 @@ public final class RpycTextExtractor {
                     case '\\':
                         out.append('\\');
                         break;
+                    case '\'':
+                        out.append('\'');
+                        break;
+                    case '"':
+                        out.append('"');
+                        break;
                     default:
-                        out.append(c);
+                        out.append(next);
                         break;
                 }
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else {
-                out.append(c);
+                i++;
+                continue;
             }
+            if (triple) {
+                if (i + 2 < value.length()
+                        && value.charAt(i) == quote
+                        && value.charAt(i + 1) == quote
+                        && value.charAt(i + 2) == quote) {
+                    return new ParsedStringLiteral(out.toString(), i + 3);
+                }
+                out.append(c);
+                continue;
+            }
+            if (c == quote) {
+                return new ParsedStringLiteral(out.toString(), i + 1);
+            }
+            out.append(c);
         }
-        if (escaped) {
-            out.append('\\');
+        return null;
+    }
+
+    private static boolean isSupportedStringPrefix(String prefix) {
+        String lower = prefix.toLowerCase(java.util.Locale.ROOT);
+        // Ren'Py scripts span Python 2 and Python 3. Keep the compatible
+        // literal prefixes, including the historical ur/ru forms, while
+        // rejecting duplicate or mixed-incompatible prefixes. Formatting
+        // prefixes are intentionally excluded because their expressions are
+        // not statically recoverable as exact translation keys.
+        return "".equals(lower)
+                || "r".equals(lower)
+                || "u".equals(lower)
+                || "b".equals(lower)
+                || "ur".equals(lower)
+                || "ru".equals(lower)
+                || "br".equals(lower)
+                || "rb".equals(lower);
+    }
+
+    private static final class ParsedStringLiteral {
+        final String value;
+        final int end;
+
+        ParsedStringLiteral(String value, int end) {
+            this.value = value;
+            this.end = end;
         }
-        return out.toString();
     }
 
     // ------------------------------------------------------------------

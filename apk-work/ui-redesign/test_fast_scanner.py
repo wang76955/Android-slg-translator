@@ -308,6 +308,102 @@ def build_structured_records_fixture_rpyc() -> bytes:
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
 
+def build_official_marked_string_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle embeds source payloads using the
+    official Ren'Py marked-string helper forms."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("PyCode") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("filename") + pickle_short("game/official_marked_strings.rpy")
+    p += pickle_short("line") + pickle_int1(1)
+    p += pickle_short("source") + pickle_short("_('single')")
+    p += pickle_short("source") + pickle_short('__("double")')
+    p += pickle_short("source") + pickle_short("___('''multi\\nline''')")
+    p += pickle_short("source") + pickle_short('_(r"raw text")')
+    p += pickle_short("source") + pickle_short('_p("menu-context", "Continue")')
+    p += b"\x75\x86\x62"
+    p += b"\x65"
+    p += b"."
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
+def build_marked_string_exact_key_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle contains exact-key and dynamic marked
+    string forms that must not be collapsed or misreported as certain."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("PyCode") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("filename") + pickle_short("game/exact_keys.rpy")
+    p += pickle_short("line") + pickle_int1(1)
+    p += pickle_short("source") + pickle_short('_("Save{#slot}")')
+    p += pickle_short("source") + pickle_short('_("Save{#menu}")')
+    p += pickle_short("source") + pickle_short("_(dynamic_label)")
+    p += pickle_short("source") + pickle_short('_p("menu-context", dynamic_label)')
+    p += b"\x75\x86\x62"
+    p += b"\x65"
+    p += b"."
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
+def build_marked_string_prefix_boundary_fixture_rpyc() -> bytes:
+    """Builds marked strings that exercise prefix legality and quote bounds."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("PyCode") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("filename") + pickle_short("game/prefix_boundaries.rpy")
+    p += pickle_short("line") + pickle_int1(1)
+    p += pickle_short("source") + pickle_short('_(u"unicode")')
+    p += pickle_short("source") + pickle_short('_(b"binary")')
+    p += pickle_short("source") + pickle_short('_(ur"unicode raw")')
+    p += pickle_short("source") + pickle_short('_(rb"binary raw")')
+    p += pickle_short("source") + pickle_short("_('''single triple''')")
+    p += pickle_short("source") + pickle_short('_("""double triple""")')
+    p += pickle_short("source") + pickle_short('_("""first""")_("after")')
+    p += pickle_short("source") + pickle_short("\"\"\"literal _('not a call')\"\"\"")
+    p += pickle_short("source") + pickle_short('_(ub"invalid prefix")')
+    p += pickle_short("source") + pickle_short("UserStatement(dynamic_statement)")
+    p += b"\x75\x86\x62"
+    p += b"\x65"
+    p += b"."
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
 def build_template_meta_fixture(version: int, key: str) -> bytes:
     p = bytearray(b"\x80\x02\x7d\x28")
     p += pickle_short("version") + pickle_int1(version)
@@ -2353,6 +2449,270 @@ public final class StructuredRecordsHarness {
             )
             subprocess.run(
                 [str(JAVA), "-cp", str(classes), "StructuredRecordsHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_extractor_matches_official_marked_string_forms(self):
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        for token in ("extractRecords", "coverageCertain", "identifier"):
+            self.assertIn(token, source)
+
+        fixture = build_official_marked_string_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyTextRecord;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class OfficialMarkedStringHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        String sourcePath = "assets/x-game/game/official_marked_strings.rpyc";
+        List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(bytes, sourcePath, false);
+        require(records.size() == 5, "official forms must yield five visible records: " + records.size());
+        require(find(records, "single", "", sourcePath, 1), "_('single') must be extracted");
+        require(find(records, "double", "", sourcePath, 1), "__(\"double\") must be extracted");
+        require(find(records, "multi\nline", "", sourcePath, 1), "triple-quoted ___() text must be extracted");
+        require(find(records, "raw text", "", sourcePath, 1), "raw-string _() text must be extracted");
+        require(find(records, "Continue", "menu-context", sourcePath, 1), "_p() must keep visible text tied to its context");
+        require(!containsText(records, "menu-context"), "_p context must not become visible text");
+        require(!containsText(records, "_('single')"), "source code must not leak as extracted text");
+
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.size() == 5, "legacy text API must keep five visible strings");
+        require(set.contains("single"), "legacy text API keeps single-quoted text");
+        require(set.contains("double"), "legacy text API keeps double-quoted text");
+        require(set.contains("multi\nline"), "legacy text API keeps triple-quoted text");
+        require(set.contains("raw text"), "legacy text API keeps raw-string text");
+        require(set.contains("Continue"), "legacy text API keeps _p visible text");
+        require(!set.contains("menu-context"), "legacy text API must not include _p context");
+    }
+
+    private static boolean find(List<RenpyTextRecord> records, String text, String identifier,
+                                String sourcePath, int occurrence) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)
+                    && record.kind == RenpyTextRecord.Kind.UI_STRING
+                    && identifier.equals(record.identifier)
+                    && sourcePath.equals(record.sourcePath)
+                    && record.occurrence == occurrence) {
+                require("".equals(record.speaker), "marked-string helper records must not invent speakers");
+                require(!record.coverageCertain, "marked-string helper coverage must stay conservative");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsText(List<RenpyTextRecord> records, String text) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="official-marked-string-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "OfficialMarkedStringHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "OfficialMarkedStringHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_extractor_preserves_exact_marked_string_keys_and_dynamic_uncertainty(self):
+        fixture = build_marked_string_exact_key_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyTextRecord;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class ExactMarkedKeyHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
+                bytes, "assets/x-game/game/exact_keys.rpyc", false);
+        require(find(records, "Save{#slot}", "", 1), "{#slot} key must stay exact");
+        require(find(records, "Save{#menu}", "", 1), "{#menu} key must stay exact");
+        require(!containsText(records, "dynamic_label"), "dynamic expression source must not become text");
+        require(countUnknown(records) >= 2, "dynamic marked-string forms must leave uncertainty diagnostics");
+
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("Save{#slot}"), "legacy text API keeps Save{#slot}");
+        require(set.contains("Save{#menu}"), "legacy text API keeps Save{#menu}");
+        require(!set.contains("dynamic_label"), "legacy text API must not leak dynamic expressions");
+    }
+
+    private static boolean find(List<RenpyTextRecord> records, String text, String identifier, int occurrence) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)
+                    && record.kind == RenpyTextRecord.Kind.UI_STRING
+                    && identifier.equals(record.identifier)
+                    && record.occurrence == occurrence) {
+                require(!record.coverageCertain, "marked-string helper coverage must stay conservative");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsText(List<RenpyTextRecord> records, String text) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int countUnknown(List<RenpyTextRecord> records) {
+        int count = 0;
+        for (RenpyTextRecord record : records) {
+            if (record.kind == RenpyTextRecord.Kind.UNKNOWN && !record.coverageCertain) {
+                count++;
+                require(record.text.isEmpty(), "uncertain diagnostics must not inject visible text");
+            }
+        }
+        return count;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="exact-marked-key-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "ExactMarkedKeyHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "ExactMarkedKeyHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_extractor_accepts_legal_prefixes_and_keeps_triple_quote_boundaries(self):
+        fixture = build_marked_string_prefix_boundary_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyTextRecord;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+public final class PrefixBoundaryHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
+                bytes, "assets/x-game/game/prefix_boundaries.rpyc", false);
+        Set<String> texts = new HashSet<>();
+        int unknown = 0;
+        for (RenpyTextRecord record : records) {
+            if (record.kind == RenpyTextRecord.Kind.UNKNOWN) {
+                unknown++;
+                require(!record.coverageCertain, "diagnostics must be uncertain");
+                require(record.text.isEmpty(), "diagnostics must not inject source text");
+            } else {
+                texts.add(record.text);
+            }
+        }
+        require(texts.contains("unicode"), "u prefix must be accepted");
+        require(texts.contains("binary"), "b prefix must be accepted");
+        require(texts.contains("unicode raw"), "ur prefix must be accepted");
+        require(texts.contains("binary raw"), "rb prefix must be accepted");
+        require(texts.contains("single triple"), "single triple quote must close exactly");
+        require(texts.contains("double triple"), "double triple quote must close exactly");
+        require(texts.contains("first"), "triple quote must not swallow the following call");
+        require(texts.contains("after"), "call after a triple-quoted string must be scanned");
+        require(!texts.contains("invalid prefix"), "illegal prefix must not become text");
+        require(!texts.contains("not a call"), "nested call text inside a quoted source must be ignored");
+        require(unknown >= 2, "illegal/dynamic forms must leave uncertainty diagnostics");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="prefix-boundary-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "PrefixBoundaryHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath", third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "PrefixBoundaryHarness", str(fixture_path)],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
