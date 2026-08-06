@@ -64,120 +64,150 @@ public final class RpycTextExtractor {
      */
     public static List<String> extractTexts(byte[] rpyc, boolean onlyOld)
             throws java.io.IOException {
-        List<String> out = new ArrayList<>();
+        List<RenpyTextRecord> records = extractRecords(rpyc, "", onlyOld);
+        List<String> out = new ArrayList<>(records.size());
+        for (RenpyTextRecord record : records) {
+            out.add(record.text);
+        }
+        return out;
+    }
+
+    /**
+     * Extracts user-visible records from one compiled rpyc script. The source
+     * path is supplied by the caller so paths inside RPA archives retain their
+     * virtual {@code archive.rpa!/game/script.rpyc} identity.
+     */
+    public static List<RenpyTextRecord> extractRecords(
+            byte[] rpyc, String sourcePath, boolean onlyOld) throws java.io.IOException {
+        ExtractState state = new ExtractState(sourcePath, onlyOld);
         byte[] pickle = readSlot(rpyc, 2);
         if (pickle == null) {
             pickle = readSlot(rpyc, 1);
         }
         if (pickle == null) {
-            return out;
+            return state.records;
         }
         List<int[]> ops = LanguageMenuSupport.walk(pickle);
         if (ops == null) {
-            return out;
+            return state.records;
         }
         Map<Integer, Object> memo = new HashMap<>();
         int memoTrack = 0;
-        String lastString = null;
-        String lastKey = null;
-        boolean itemsMode = false;
-        boolean afterTuple3 = false;
-        List<String> choices = new ArrayList<>();
-        Set<String> extraSeen = new HashSet<>();
         for (int i = 0; i < ops.size(); i++) {
             int[] op = ops.get(i);
             int code = op[0];
             if (code == 0x8c || code == 0x58) { // SHORT_BINUNICODE / BINUNICODE
                 String s = LanguageMenuSupport.stringPayload(pickle, ops, i);
-                if (s != null) {
-                    if ("items".equals(lastKey)) {
-                        if (isChoiceLabel(s)) {
-                            appendText(choices, s);
-                        }
-                        itemsMode = true;
-                    } else if (itemsMode && afterTuple3 && isChoiceLabel(s)) {
-                        appendText(choices, s);
-                    }
-                    if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
-                        if ((!onlyOld || "old".equals(lastKey)) && isUserText(s)) {
-                            appendText(out, s);
-                        }
-                        lastKey = null;
-                    } else if (KEY_NAMES.contains(s)) {
-                        lastKey = s;
-                    } else {
-                        lastKey = null;
-                    }
-                    lastString = s;
-                    if (!onlyOld) {
-                        collectExtraTexts(s, out, extraSeen);
-                    }
-                }
-                afterTuple3 = false;
+                state.consumeString(s);
             } else if (code == 0x68 || code == 0x6a) { // BINGET / LONG_BINGET
                 int index = code == 0x68
                         ? (pickle[op[1] + 1] & 0xff)
                         : le32(pickle, op[1] + 1);
                 Object v = memo.get(index);
                 if (v instanceof String) {
-                    String s = (String) v;
-                    if ("items".equals(lastKey)) {
-                        if (isChoiceLabel(s)) {
-                            appendText(choices, s);
-                        }
-                        itemsMode = true;
-                    } else if (itemsMode && afterTuple3 && isChoiceLabel(s)) {
-                        appendText(choices, s);
-                    }
-                    if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
-                        if ((!onlyOld || "old".equals(lastKey)) && isUserText(s)) {
-                            appendText(out, s);
-                        }
-                        lastKey = null;
-                    } else if (KEY_NAMES.contains(s)) {
-                        lastKey = s;
-                    } else {
-                        lastKey = null;
-                    }
-                    lastString = s;
-                    if (!onlyOld) {
-                        collectExtraTexts(s, out, extraSeen);
-                    }
+                    state.consumeString((String) v);
                 }
-                afterTuple3 = false;
             } else if (code == 0x71 || code == 0x72) { // BINPUT / LONG_BINPUT
                 int index = code == 0x71
                         ? (pickle[op[1] + 1] & 0xff)
                         : le32(pickle, op[1] + 1);
-                if (lastString != null) {
-                    memo.put(index, lastString);
+                if (state.lastString != null) {
+                    memo.put(index, state.lastString);
                 }
             } else if (code == 0x94) { // MEMOIZE
-                if (lastString != null) {
-                    memo.put(memoTrack, lastString);
+                if (state.lastString != null) {
+                    memo.put(memoTrack, state.lastString);
                 }
                 memoTrack++;
             } else if (code == 0x75 || code == 0x65 || code == 0x61 || code == 0x73
                     || code == 0x62 || code == 0x31) { // SETITEMS/APPENDS/APPEND/SETITEM/BUILD/POP_MARK
-                lastKey = null;
+                state.lastKey = null;
             } else if (code == 0x87) { // TUPLE3 ends a (label, condition, block) menu item
-                afterTuple3 = true;
+                state.afterTuple3 = true;
             }
         }
-        for (String choice : choices) {
-            appendText(out, choice);
+        for (String choice : state.choices) {
+            state.addRecord(choice, RenpyTextRecord.Kind.MENU, "", true);
         }
-        return out;
+        return state.records;
     }
 
-    private static void appendText(List<String> out, String value)
-            throws java.io.IOException {
-        if (value == null) {
-            return;
+    private static final class ExtractState {
+        final List<RenpyTextRecord> records = new ArrayList<>();
+        final List<String> choices = new ArrayList<>();
+        final Set<String> extraSeen = new HashSet<>();
+        final Map<String, Integer> occurrences = new HashMap<>();
+        final String sourcePath;
+        final boolean onlyOld;
+        String lastString;
+        String lastKey;
+        String lastSpeaker = "";
+        boolean itemsMode;
+        boolean afterTuple3;
+
+        ExtractState(String sourcePath, boolean onlyOld) {
+            this.sourcePath = sourcePath == null ? "" : sourcePath;
+            this.onlyOld = onlyOld;
         }
-        RenpyResourceLimits.checkTextLength(value.length());
-        RenpyResourceLimits.checkTextRecordCount((long) out.size() + 1L);
-        out.add(value);
+
+        void consumeString(String value) throws java.io.IOException {
+            if (value == null) {
+                afterTuple3 = false;
+                return;
+            }
+            if (!onlyOld && "items".equals(lastKey)) {
+                if (isChoiceLabel(value)) {
+                    choices.add(value);
+                }
+                itemsMode = true;
+            } else if (!onlyOld && itemsMode && afterTuple3 && isChoiceLabel(value)) {
+                choices.add(value);
+            }
+            if ("who".equals(lastKey)) {
+                lastSpeaker = value;
+                lastKey = null;
+            } else if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
+                if (isUserText(value)) {
+                    addRecord(value, kindFor(lastKey),
+                            "what".equals(lastKey) ? lastSpeaker : "", true);
+                }
+                lastKey = null;
+            } else if (KEY_NAMES.contains(value)) {
+                lastKey = value;
+            } else {
+                lastKey = null;
+            }
+            lastString = value;
+            if (!onlyOld) {
+                collectExtraRecords(value, this);
+            }
+            afterTuple3 = false;
+        }
+
+        void addRecord(String text, RenpyTextRecord.Kind kind, String speaker,
+                       boolean coverageCertain) throws java.io.IOException {
+            if (text == null || (onlyOld && kind != RenpyTextRecord.Kind.TRANSLATION_OLD)) {
+                return;
+            }
+            RenpyResourceLimits.checkTextLength(text.length());
+            RenpyResourceLimits.checkTextRecordCount((long) records.size() + 1L);
+            String occurrenceKey = sourcePath + '\u0000' + text;
+            Integer previous = occurrences.get(occurrenceKey);
+            int occurrence = previous == null ? 1 : previous + 1;
+            occurrences.put(occurrenceKey, occurrence);
+            records.add(new RenpyTextRecord(text, kind, speaker, "", sourcePath,
+                    -1, occurrence, coverageCertain));
+        }
+    }
+
+    private static RenpyTextRecord.Kind kindFor(String key) {
+        if ("what".equals(key)) {
+            return RenpyTextRecord.Kind.DIALOGUE;
+        }
+        if ("old".equals(key)) {
+            return RenpyTextRecord.Kind.TRANSLATION_OLD;
+        }
+        return RenpyTextRecord.Kind.UI_STRING;
     }
 
     /**
@@ -188,7 +218,7 @@ public final class RpycTextExtractor {
      * structural dialogue. Names with interpolation ([name]) or backslashes
      * are skipped.
      */
-    private static void collectExtraTexts(String s, List<String> out, Set<String> seen)
+    private static void collectExtraRecords(String s, ExtractState state)
             throws java.io.IOException {
         if (s == null || s.isEmpty()) {
             return;
@@ -196,20 +226,20 @@ public final class RpycTextExtractor {
         java.util.regex.Matcher marked = MARKED_TEXT.matcher(s);
         while (marked.find()) {
             String text = marked.group(1);
-            if (isMarkedText(text) && seen.add(text)) {
-                appendText(out, text);
+            if (isMarkedText(text) && state.extraSeen.add(text)) {
+                state.addRecord(text, RenpyTextRecord.Kind.UI_STRING, "", false);
             }
         }
         if (s.indexOf("Character(") >= 0 || s.indexOf("Character('") >= 0) {
             java.util.regex.Matcher names = CHARACTER_NAME.matcher(s);
             while (names.find()) {
                 String name = names.group(1);
-                if (isCharacterName(name) && seen.add(name)) {
-                    appendText(out, name);
+                if (isCharacterName(name) && state.extraSeen.add(name)) {
+                    state.addRecord(name, RenpyTextRecord.Kind.CHARACTER_NAME, "", false);
                 }
             }
         }
-        collectSourceCallTexts(s, out, seen);
+        collectSourceCallRecords(s, state);
     }
 
     /**
@@ -221,7 +251,7 @@ public final class RpycTextExtractor {
      * contribute their label. Variable arguments, paths and empty strings
      * are rejected by isUserText.
      */
-    private static void collectSourceCallTexts(String s, List<String> out, Set<String> seen)
+    private static void collectSourceCallRecords(String s, ExtractState state)
             throws java.io.IOException {
         if (s == null || s.isEmpty()) {
             return;
@@ -244,8 +274,8 @@ public final class RpycTextExtractor {
             int collected = 0;
             for (String arg : splitCallArgs(args)) {
                 String value = unquoteLiteral(arg);
-                if (value != null && isUserText(value) && seen.add(value)) {
-                    appendText(out, value);
+                if (value != null && isUserText(value) && state.extraSeen.add(value)) {
+                    state.addRecord(value, RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", false);
                     collected++;
                     if (collected >= limit) {
                         break;

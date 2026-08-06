@@ -82,6 +82,7 @@ public final class FastApkScanner {
             }
             String content = "";
             String fileType = "unknown";
+            JSArray renpyRecords = new JSArray();
             try (ZipFile zip = new ZipFile(apk)) {
                 byte[] bytes = readEntryData(zip, entryName, Long.MAX_VALUE);
                 if (bytes == null) {
@@ -93,10 +94,10 @@ public final class FastApkScanner {
                     StringBuilder out = new StringBuilder();
                     boolean translationBucket = entryName.contains("/x-tl/")
                             || entryName.contains("/tl/");
-                    List<String> texts = translationBucket
-                            ? RpycTextExtractor.extractTexts(bytes, true)
-                            : RpycTextExtractor.extractTexts(bytes);
-                    for (String text : texts) {
+                    List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
+                            bytes, entryName, translationBucket);
+                    for (RenpyTextRecord record : records) {
+                        String text = record.text;
                         // The line protocol splits on newlines, so embedded
                         // control characters are escaped and unescaped in JS.
                         // Escape backslashes first so a literal "\n" in the
@@ -107,6 +108,7 @@ public final class FastApkScanner {
                                 .replace("\r", "\\r")
                                 .replace("\t", "\\t");
                         out.append("RPYC_STRING\t").append(escaped).append('\n');
+                        renpyRecords.put(renpyRecordJson(record));
                     }
                     content = out.toString();
                     fileType = "rpyc";
@@ -119,11 +121,24 @@ public final class FastApkScanner {
             JSObject result = new JSObject();
             result.put("content", content);
             result.put("fileType", fileType);
+            result.put("renpyRecords", renpyRecords);
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();
             call.reject("Failed to read entry: " + (message == null ? e.toString() : message));
         }
+    }
+
+    private static JSObject renpyRecordJson(RenpyTextRecord record) {
+        return new JSObject()
+                .put("text", record.text)
+                .put("kind", record.kind.name())
+                .put("speaker", record.speaker)
+                .put("identifier", record.identifier)
+                .put("sourcePath", record.sourcePath)
+                .put("sourceLine", record.sourceLine)
+                .put("occurrence", record.occurrence)
+                .put("coverageCertain", record.coverageCertain);
     }
 
     private static File fileFrom(String value) {

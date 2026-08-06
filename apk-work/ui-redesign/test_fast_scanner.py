@@ -260,6 +260,46 @@ def build_translate_fixture_rpyc() -> bytes:
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
 
+def build_structured_records_fixture_rpyc() -> bytes:
+    """Builds an RPC2 rpyc whose pickle mixes dialogue, menu labels, static
+    UI text, Character() names, and translate old/new keys for the structured
+    extractor contract."""
+    p = bytearray()
+    p += b"\x80\x02"  # PROTO 2
+    p += b"\x5d"  # EMPTY_LIST
+    p += b"\x28"  # MARK
+    p += pickle_short("renpy.ast") + pickle_short("Menu") + b"\x93"  # STACK_GLOBAL
+    p += b"\x29\x81\x4e\x7d\x28"  # EMPTY_TUPLE NEWOBJ NONE EMPTY_DICT MARK
+    p += pickle_short("linenumber") + pickle_int1(7)
+    p += pickle_short("filename") + pickle_short("game/chapter1.rpy")
+    p += pickle_short("who") + pickle_short("Narrator")
+    p += pickle_short("what") + pickle_short("Hello, world!")
+    p += pickle_short("old") + pickle_short("Save{#menu}")
+    p += pickle_short("new") + pickle_short("\u4fdd\u5b58")
+    p += pickle_short('_("Start")')
+    p += pickle_short('Character("Sky", color = "#fff")')
+    p += pickle_short("items")
+    p += b"\x5d\x94\x28"  # EMPTY_LIST MEMOIZE MARK
+    for label in ("First choice", "Second{#x}"):
+        p += pickle_short(label) + b"\x94"
+        p += b"\x4e"
+        p += b"\x5d\x28\x65"
+        p += b"\x87\x94"
+    p += b"\x75\x86\x62"  # SETITEMS TUPLE2 BUILD
+    p += b"\x65"  # APPENDS
+    p += b"."  # STOP
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
 def build_template_meta_fixture(version: int, key: str) -> bytes:
     p = bytearray(b"\x80\x02\x7d\x28")
     p += pickle_short("version") + pickle_int1(version)
@@ -1997,7 +2037,7 @@ public final class UnderscoreMenuHarness {
         ):
             self.assertIn(token, source)
         scanner = SCANNER.read_text("utf-8")
-        for token in ("readRenpyTexts", "RpycTextExtractor.extractTexts", "RPYC_STRING\\t"):
+        for token in ("readRenpyTexts", "RpycTextExtractor.extractRecords", "RPYC_STRING\\t"):
             self.assertIn(token, scanner)
         builder = BUILDER.read_text("utf-8")
         for token in ("READ_TEXTS_SIGNATURE", "FastApkScanner;->readRenpyTexts"):
@@ -2074,7 +2114,7 @@ public final class MenuExtractorHarness {
     def test_rpyc_extractor_extracts_source_call_argument_texts(self):
         extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
         source = extractor.read_text("utf-8")
-        self.assertIn("collectSourceCallTexts", source)
+        self.assertIn("collectSourceCallRecords", source)
 
         fixture = build_source_call_fixture_rpyc()
         harness = r"""
@@ -2194,6 +2234,109 @@ public final class OldOnlyHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_rpyc_extractor_returns_structured_records_without_breaking_text_api(self):
+        record_model = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyTextRecord.java"
+        self.assertTrue(record_model.exists(), "RenpyTextRecord.java must exist")
+        extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
+        source = extractor.read_text("utf-8")
+        for token in ("extractRecords", "RenpyTextRecord", "sourcePath", "occurrence"):
+            self.assertIn(token, source)
+        scanner = SCANNER.read_text("utf-8")
+        for token in ('"renpyRecords"', 'result.put("content", content)', 'RPYC_STRING\\t'):
+            self.assertIn(token, scanner)
+
+        fixture = build_structured_records_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyTextRecord;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class StructuredRecordsHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        String sourcePath = "assets/x-game/archive.rpa!/game/chapter1.rpyc";
+        List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(bytes, sourcePath, false);
+        require(find(records, "Hello, world!", RenpyTextRecord.Kind.DIALOGUE, sourcePath, 1, "Narrator"),
+                "dialogue record must keep kind/sourcePath/occurrence/speaker");
+        require(find(records, "First choice", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),
+                "menu label must be a structured menu record");
+        require(find(records, "Second{#x}", RenpyTextRecord.Kind.MENU, sourcePath, 1, ""),
+                "tagged menu label must keep its exact text key");
+        require(find(records, "Start", RenpyTextRecord.Kind.UI_STRING, sourcePath, 1, ""),
+                "_() text must be a structured UI string");
+        require(find(records, "Sky", RenpyTextRecord.Kind.CHARACTER_NAME, sourcePath, 1, ""),
+                "Character() name must be a structured name record");
+        require(find(records, "Save{#menu}", RenpyTextRecord.Kind.TRANSLATION_OLD, sourcePath, 1, ""),
+                "old translation key must be structured without losing tags");
+
+        List<RenpyTextRecord> oldOnly = RpycTextExtractor.extractRecords(bytes, sourcePath, true);
+        require(oldOnly.size() == 1, "old-only mode must keep only TRANSLATION_OLD records");
+        RenpyTextRecord only = oldOnly.get(0);
+        require("Save{#menu}".equals(only.text), "old-only mode keeps the old key");
+        require(only.kind == RenpyTextRecord.Kind.TRANSLATION_OLD, "old-only mode kind must be TRANSLATION_OLD");
+        require(sourcePath.equals(only.sourcePath), "old-only mode keeps the virtual source path");
+
+        List<String> texts = RpycTextExtractor.extractTexts(bytes);
+        java.util.Set<String> set = new java.util.HashSet<>(texts);
+        require(set.contains("Hello, world!"), "legacy text API keeps dialogue");
+        require(set.contains("First choice"), "legacy text API keeps menu labels");
+        require(set.contains("Second{#x}"), "legacy text API keeps exact tagged keys");
+        require(set.contains("Start"), "legacy text API keeps UI strings");
+        require(set.contains("Sky"), "legacy text API keeps character names");
+        require(set.contains("Save{#menu}"), "legacy text API keeps old translation keys");
+    }
+
+    private static boolean find(List<RenpyTextRecord> records, String text, RenpyTextRecord.Kind kind,
+                                String sourcePath, int occurrence, String speaker) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)
+                    && kind == record.kind
+                    && sourcePath.equals(record.sourcePath)
+                    && record.occurrence == occurrence
+                    && speaker.equals(record.speaker)) {
+                require("".equals(record.identifier), "identifier must stay empty when unavailable");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="structured-records-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "StructuredRecordsHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath",
+                    third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "StructuredRecordsHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
     
     def test_rpyc_extractor_keeps_renpy_markup_dialogue(self):
         """Dialogue containing Ren'Py markup tags like {/i} and {/b} must
@@ -2259,7 +2402,8 @@ public final class MarkupExtractorHarness {
 
     def test_fast_scanner_reads_translation_entries_in_old_only_mode(self):
         scanner = SCANNER.read_text("utf-8")
-        self.assertIn("extractTexts(bytes, true)", scanner)
+        self.assertIn("RpycTextExtractor.extractRecords", scanner)
+        self.assertIn("translationBucket", scanner)
         self.assertIn("x-tl", scanner)
 
     def test_cleanup_storage_keeps_newest_patch_and_selection_source(self):
