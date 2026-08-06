@@ -83,6 +83,11 @@ public final class TranslationCompiler {
                     }
                     String oldText = pair[0];
                     String newText = pair[1] == null ? "" : pair[1];
+                    String validation = validationMessage(oldText, newText, rpy.getPath());
+                    if (validation != null) {
+                        call.reject("translation_validation_failed: " + validation);
+                        return;
+                    }
                     if (merged.containsKey(oldText)
                             && !merged.get(oldText).equals(newText)) {
                         call.reject("translation_collision_conflict: conflicting translations for exactOld '"
@@ -212,6 +217,18 @@ public final class TranslationCompiler {
         if (collision != null) {
             throw new CompilationValidationException("translation_collision_conflict", collision);
         }
+        String source = meta == null || meta.sourcePath == null
+                ? "translation-artifact" : meta.sourcePath;
+        for (String[] pair : pairs) {
+            if (pair == null || pair.length < 2) {
+                throw new CompilationValidationException("translation_validation_failed",
+                        "old= new= source=" + source + " codes=[empty_translation]");
+            }
+            String validation = validationMessage(pair[0], pair[1], source);
+            if (validation != null) {
+                throw new CompilationValidationException("translation_validation_failed", validation);
+            }
+        }
         String normalized = normalizeActivationMode(activationMode);
         String translatorLanguage = translatorLanguageFor(normalized);
         String compiledPath = compiledPathFor(normalized);
@@ -226,6 +243,17 @@ public final class TranslationCompiler {
         }
         return new TranslationArtifact(normalized, translatorLanguage, compiledPath,
                 runtimeFilename, rpyc);
+    }
+
+    private static String validationMessage(String oldText, String newText, String source) {
+        RenpyTextValidator.ValidationResult result = RenpyTextValidator.validate(oldText, newText);
+        if (result.valid) {
+            return null;
+        }
+        return "old=" + String.valueOf(oldText)
+                + " new=" + String.valueOf(newText)
+                + " source=" + String.valueOf(source)
+                + " codes=" + result.codes;
     }
 
     /** Only the independent translator language bucket is compiled here. */

@@ -2005,14 +2005,15 @@ public final class LegacyRpycHarness {
     def test_local_llm_placeholder_guard_preserves_markup_and_format(self):
         harness = r"""
 import com.slgtranslator.app.LocalLlmEngine;
+import com.slgtranslator.app.RenpyTextValidator;
 
 public final class PlaceholderHarness {
     public static void main(String[] args) {
-        String original = "{b}Hello{/b} [name]!";
+        String original = "{b}Hello{/b} [name]! Score: %s / %1$d";
         LocalLlmEngine.PlaceholderGuard guard = LocalLlmEngine.protectPlaceholders(original);
         String modelOutput = guard.protectedText.replace("Hello", "\u4f60\u597d");
         String restored = LocalLlmEngine.restorePlaceholders(modelOutput, guard);
-        String expected = "{b}\u4f60\u597d{/b} [name]!";
+        String expected = "{b}\u4f60\u597d{/b} [name]! Score: %s / %1$d";
         require(expected.equals(restored), "markup/interpolation must round-trip: " + restored);
 
         String format = "Score: %s / %d";
@@ -2022,6 +2023,24 @@ public final class PlaceholderHarness {
 
         String mangled = formatGuard.protectedText.replace("__SLGPH0__", "");
         require(LocalLlmEngine.restorePlaceholders(mangled, formatGuard) == null, "missing sentinel must reject");
+        String extra = formatGuard.protectedText + " __SLGPH2__";
+        require(LocalLlmEngine.restorePlaceholders(extra, formatGuard) == null, "extra sentinel must reject");
+        String duplicate = formatGuard.protectedText.replace("__SLGPH1__", "__SLGPH0__");
+        require(LocalLlmEngine.restorePlaceholders(duplicate, formatGuard) == null, "duplicate sentinel must reject");
+        String reordered = "__SLGPH1__ and __SLGPH0__";
+        require(LocalLlmEngine.restorePlaceholders(reordered, formatGuard) == null, "reordered sentinel must reject");
+        require(LocalLlmEngine.restorePlaceholders("bad __SLGPH0__", new LocalLlmEngine.PlaceholderGuard("bad", new String[0])) == null,
+                "unrestored sentinel must reject");
+
+        require(RenpyTextValidator.validate(original, expected).valid, "valid Ren'Py text must pass");
+        require(RenpyTextValidator.validate("{b}{i}x{/b}{/i}", "{b}{i}x{/b}{/i}").codes.contains("tag_misnested"),
+                "crossed markup must be diagnosed");
+        require(RenpyTextValidator.validate("Hello [name]", "Hello [other]").codes.contains("interpolation_changed"),
+                "changed interpolation must be diagnosed");
+        require(RenpyTextValidator.validate("Score %s", "Score %d").codes.contains("printf_changed"),
+                "changed printf must be diagnosed");
+        require(RenpyTextValidator.validate("Hello", "").codes.contains("empty_translation"),
+                "empty translation must be diagnosed");
     }
 
     private static void require(boolean condition, String message) {

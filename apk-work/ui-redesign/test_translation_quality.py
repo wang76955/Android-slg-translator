@@ -336,6 +336,48 @@ public final class Task8CompileGateHarness {
         self.assertIn("translation_collision_conflict", self.js)
         self.assertIn("conflicting translations", self.js)
 
+    def test_task9_compile_gate_rejects_invalid_translation_before_rpyc(self):
+        harness = r'''
+package com.slgtranslator.app;
+import java.util.*;
+public final class Task9LintGateHarness {
+  public static void main(String[] args) throws Exception {
+    RenpyTextValidator.ValidationResult bad = RenpyTextValidator.validate(
+        "{b}Hello{/b} [name] %s", "{b}Bonjour{/i} [other] %d");
+    if (bad.valid || !bad.codes.contains("tag_misnested")
+        || !bad.codes.contains("interpolation_changed")
+        || !bad.codes.contains("printf_changed")) throw new AssertionError("lint diagnostics");
+    List<String[]> pairs = new ArrayList<String[]>();
+    pairs.add(new String[] {"{b}Hello{/b} [name] %s", "{b}Bonjour{/i} [other] %d"});
+    try {
+      TranslationCompiler.compileTranslationArtifact("selectable", pairs, new TranslationCompiler.TemplateMeta());
+      throw new AssertionError("invalid translation reached RPYC writer");
+    } catch (Exception expected) {
+      String message = String.valueOf(expected.getMessage());
+      if (!message.contains("tag_misnested") || !message.contains("old=")
+          || !message.contains("new=") || !message.contains("source=")) throw expected;
+    }
+  }
+}
+'''
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="task9-lint-gate-") as directory:
+            directory_path = Path(directory)
+            source = directory_path / "Task9LintGateHarness.java"
+            classes = directory_path / "classes"
+            source.write_text(harness, encoding="utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(source)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.Task9LintGateHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
