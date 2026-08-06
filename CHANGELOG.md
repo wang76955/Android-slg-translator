@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.9] - 2026-08-06
+
+### Fixed
+
+- “继续上次翻译” no longer stays stuck on the interrupted screen: the app no longer waits on the legacy storage-permission gate, the React start button is re-captured whenever the task view renders, and starting a task now enters the progress view before optional installed-app lookup
+- Starting a translation no longer blocks the progress screen behind slow installed-app or Ren'Py menu preparation calls
+
+### Changed
+
+- Release version bumped to 1.0.9 (versionCode 9); About screen now shows Android v1.0.9
+
 ## [1.0.8] - 2026-08-06
 
 ### Fixed
