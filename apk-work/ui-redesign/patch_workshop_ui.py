@@ -1396,7 +1396,7 @@ def patch_translation_quality(js: str) -> str:
 
     # 0b) 缓存键版本：质量策略升级后旧缓存自动失效
     old_o = r'''var _o=`slg-translator-cache:`,vo={}'''
-    new_o = r'''var _o=`slg-translator-cache:v2:`,vo={}'''
+    new_o = r'''var _o=`slg-translator-cache:`,vo={}'''
     if js.count(old_o) != 1:
         raise ValueError("Cache namespace signature not found")
     js = js.replace(old_o, new_o, 1)

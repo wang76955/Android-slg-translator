@@ -113,7 +113,7 @@ async function runVo(items) {{
   ]);
   // 修复点：ke 调用带文件名前缀 + 缓存版本
   out.keCallPatched = js.includes('l=ke(i,s,o.name+`::`,g)');
-  out.cacheVersion = js.includes('var _o=`slg-translator-cache:v2:`');
+  out.cacheNamespace = js.includes('var _o=`slg-translator-cache:`');
   process.stdout.write(JSON.stringify(out));
 }})();
 """
@@ -136,12 +136,12 @@ class TranslationQualityPatchTest(unittest.TestCase):
             self.js[self.js.index("deepseek-v4-pro") :],
         )
 
-    def test_keypath_prefix_and_cache_version_patches(self):
+    def test_keypath_prefix_and_cache_namespace_compatibility(self):
         # 修复 P0-1：提取时把文件路径写入 keyPath（真实格式 file::seq）
         self.assertEqual(self.js.count("l=ke(i,s,o.name+`::`,g)"), 1)
         # 修复 P0-2：缓存键加 v2 版本，旧缓存自动失效
-        self.assertEqual(self.js.count("var _o=`slg-translator-cache:v2:`"), 1)
-        self.assertNotIn("slg-translator-cache:", self.js.replace("slg-translator-cache:v2:", ""))
+        self.assertEqual(self.js.count("var _o=`slg-translator-cache:`,vo={}"), 1)
+        self.assertNotIn("slg-translator-cache:v2:", self.js)
 
     def test_behavior_speaker_dedupe_and_conditional_fields(self):
         out = run_behavior_probe(self.js)
