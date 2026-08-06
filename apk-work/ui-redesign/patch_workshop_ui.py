@@ -1446,6 +1446,14 @@ Return only JSON: {"translations":["..."]}`),i}'''
     if js.count(old_vo) != 1:
         raise ValueError("Batch request signature not found")
     js = js.replace(old_vo, new_vo, 1)
+
+    # Task 8: keep a small, sanitized report available to the workshop UI.
+    # The report distinguishes unique old strings, repeated occurrences and
+    # contextual collisions; it deliberately never exports raw object values.
+    collision_report = r'''
+(function(){/* up to 3 representative contexts */function sanitize(e){return{old:String(e.old??e.exactOld??``),speaker:String(e.speaker??``),identifier:String(e.identifier??``),kind:String(e.kind??``),sourcePath:String(e.sourcePath??``)}}function translationCollisionReport(entries){let m=new Map;for(let e of entries||[]){let x=sanitize(e),a=m.get(x.old)||{old:x.old,occurrences:[],contexts:new Set};a.occurrences.push(x);a.contexts.add([x.speaker,x.identifier,x.kind,x.sourcePath].join(`\u0000`));m.set(x.old,a)}let rows=Array.from(m.values()).map(x=>({old:x.old,occurrenceCount:x.occurrences.length,duplicateCount:Math.max(0,x.occurrences.length-1),contextualCollision:x.contexts.size>1,contexts:Array.from(x.contexts).slice(0,3)}));let report={uniqueOldCount:rows.length,occurrenceCount:rows.reduce((a,x)=>a+x.occurrenceCount,0),duplicateCount:rows.filter(x=>x.duplicateCount>0).length,collisionCount:rows.filter(x=>x.contextualCollision).length,entries:rows};window.__slgTranslationCollisionReport=report;window.__slgTranslationCollisionReportJson=JSON.stringify(report);return report}function rejectTranslationCollisions(pairs){let m=new Map;for(let p of pairs||[]){let old=String(p.old??p[0]??``),next=String(p.new??p[1]??``),prior=m.get(old);if(prior!==undefined&&prior!==next)throw Error(`translation_collision_conflict: conflicting translations for ${old}`);m.set(old,next)}}window.__slgTranslationCollisionReport=translationCollisionReport;window.__slgRejectTranslationCollisions=rejectTranslationCollisions})();
+'''
+    js += collision_report
     return js
 
 
