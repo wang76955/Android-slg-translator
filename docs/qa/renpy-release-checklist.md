@@ -1,8 +1,8 @@
 # Ren'Py 批次 A 发布检查表
 
-> 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16。
+> 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16，以及本次 C16 发布机器矩阵复核。
 >
-> 当前状态：未批准发布。工具 APK 的构建证据、fixture 回归和真实游戏真机验收是三组独立条件；本工作区目前没有完整第三方 Ren'Py 游戏样本，且完整 discover 当前仍有既有 `test_workshop_patch.py` 契约套件的 `25 failures + 1 error`，不能仅凭应用 APK 已生成就勾选真机门禁。
+> 当前状态：未批准发布。C16 已重建机器矩阵；C15 后 full discover 为 `192` 项、0 failures/errors、1 个明确 audit-fixture skip，但工具 APK/fixture 回归和真实游戏真机验收仍是独立条件。本工作区没有完整第三方 Ren'Py 游戏样本，真实样本的 coverage、安装、启动、old save 和 rollback 仍为 `NOT-RUN`。
 
 ## 1. 发布原则
 
@@ -32,7 +32,7 @@ python -m unittest discover -s . -p 'test_*.py' -v
 | scanner contract | 无失败；生成物缺失时只能有明确外部条件 skip | `test_fast_scanner` 输出 | ☐ |
 | translation quality | 无失败；reject、placeholder、markup、collision 检查通过 | `test_translation_quality` 输出 | ☐ |
 | coverage logic | 无失败；真实审计缺输入时保留显式 skip | `test_translation_coverage` 输出 | ☐ |
-| full discover | 无失败；每个 skip 在本清单第 6 节登记原因 | 实际：`167` 项，`25 failures + 1 error + 1 skipped`；失败集中在既有 `test_workshop_patch.py` 契约套件 | ☐ |
+| full discover | 无失败；每个 skip 在本清单第 6 节登记原因 | C15 后实际：`192` 项，0 failures/errors，1 个 `audit APK/extracted texts not present` skip | ☐ |
 | diff hygiene | `git diff --check` 返回 0 | 命令输出 | ☐ |
 
 任何失败都必须在修复并重新运行后才能继续；不能用删测试、放宽断言或隐藏异常来清绿。
@@ -141,7 +141,7 @@ scan
 
 当前已知的合法外部条件是：没有真实完整 Ren'Py 游戏 APK/对应完整提取语料时，coverage audit 可以显式 skip；这不证明真实游戏 `missing == 0`。生成 DEX 缺失时也只能登记“需先运行 `python build_fast_scanner.py`”，不能把 artifact gate 改成无条件通过。
 
-本轮实际 discover 还发现一组非外部条件阻断：`test_workshop_patch.py` 有 `25` 个失败和 `1` 个错误，其中 `test_translation_cache_is_reused_across_models` 仍查找已被 Task 8 淘汰的 `slg-translator-cache:v2:` 命名空间，其他失败主要是旧 UI/乱码契约与当前 patch runtime 漂移。它们没有被改写成 skip，也没有被 QA 门禁隐藏；在修复或明确重新基线前，不能把 full discover 标记为通过。
+本轮 C15 后重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
 
 如果 `test_workshop_patch.py`、构建测试或其他 discover 测试失败，必须把准确的失败测试名、首个稳定错误和是否属于本批次变更写入 `full-discover.txt`，然后修复或明确阻断发布；不能用“基线已通过”覆盖新的失败。
 
@@ -161,6 +161,19 @@ scan
 | 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | ☐ |
 
 当前缺任一项都必须保持“未批准发布”。特别是 `EXTRACT_ONLY`/`UNSUPPORTED` 样本被正确阻断，是安全行为，不是可以通过发布门禁的理由。
+
+## 7.1 C16 发布机器矩阵与完成定义
+
+以下六行与 `renpy-compatibility-matrix.md` 的 C16-01..C16-06 一一对应。`PASS` 只代表当前列出的本地契约或构建证据；真实样本、安装、启动、old save 和 rollback 没有证据时必须保持 `NOT-RUN`，不能被机器测试结果替代。
+
+| requirementId | 门禁范围 | supportLevel | activationStrategy | template/source + counts | missing/rejected/font | build/install/startup/save/rollback | status/evidence |
+|---|---|---|---|---|---|---|---|
+| C16-01 | engine generation 与 `SAFE`/`WARNING`/`EXTRACT_ONLY`/`UNSUPPORTED` 分类 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | T6–T12 preflight/extractor/coverage fixtures；real text counts `not-run` | real missing/rejected/font `not-run` | controlled build PASS；real install/startup/old save/rollback NOT-RUN | PASS (controlled); real sample NOT-RUN |
+| C16-02 | loose RPYC2、RPA-1/RPA-2/RPA-3、legacy zlib | inherited or EXTRACT_ONLY/UNSUPPORTED | inherited or NONE | RPA/RPYC/legacy parser fixtures；real template/source and counts `not-run` | unknown format blocked; real missing/rejected/font `not-run` | blocked for unknown; real install/startup/save/rollback NOT-RUN | PASS (controlled); real archive NOT-RUN |
+| C16-03 | selectable、always-on、标准/自定义/无菜单和菜单注入失败 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | C13/T12/C15 UI/compile fixtures；real menu/source counts `not-run` | real missing/rejected/font `not-run` | tool build PASS；real activation/startup/old save/rollback NOT-RUN | PASS (controlled); device NOT-RUN |
+| C16-04 | 对话、菜单、角色名、UI、`{#}`、插值、printf、重复语境和字体 | inherited source level | inherited activation; advanced dialogue ID default-off | T8–T11/C15 controlled counts/collision/lint/font；real template/source `not-run` | complete real build requires `missing == 0` and `rejected == 0`; real font `not-run` | controlled gates PASS；real install/startup/save/rollback NOT-RUN | PASS (controlled); real corpus NOT-RUN |
+| C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle and C15 workshop/helper builds；Task 20 fresh artifact evidence pending | real missing/rejected/font `not-run` | local build/signature PASS; real install/startup/old save/rollback NOT-RUN | PASS (local build); device NOT-RUN |
+| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 19–22 and Task 23 audit still pending | NOT-RUN |
 
 ## 8. 签字与交接
 

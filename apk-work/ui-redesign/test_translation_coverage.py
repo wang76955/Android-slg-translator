@@ -509,6 +509,17 @@ main().catch(error=>{{process.stderr.write(error.stack||String(error));process.e
         self.assertTrue(RELEASE_CHECKLIST.exists(), "Task 16 release checklist is missing")
         matrix = COMPATIBILITY_MATRIX.read_text("utf-8")
         checklist = RELEASE_CHECKLIST.read_text("utf-8")
+        for requirement_id in (
+            "C16-01", "C16-02", "C16-03", "C16-04", "C16-05", "C16-06",
+        ):
+            self.assertIn(requirement_id, matrix)
+            self.assertIn(requirement_id, checklist)
+        for token in (
+            "SAFE", "WARNING", "EXTRACT_ONLY", "UNSUPPORTED", "single APK",
+            "base + split", "selectable", "always-on", "missing == 0", "old save",
+            "rollback", "NOT-RUN",
+        ):
+            self.assertIn(token, matrix + checklist)
         for token in (
             "6 / Python 2", "7 / Python 2", "8 / Python 3", "未知 / 不支持",
             "loose RPYC2", "RPA-1", "RPA-2", "RPA-3", "legacy zlib",
@@ -529,6 +540,32 @@ main().catch(error=>{{process.stderr.write(error.stack||String(error));process.e
             "not-run",
         ):
             self.assertIn(token, checklist, "release checklist is missing %s" % token)
+        matrix_rows = [line for line in matrix.splitlines() if line.startswith("| C16-")]
+        checklist_rows = [line for line in checklist.splitlines() if line.startswith("| C16-")]
+        self.assertEqual(len(matrix_rows), 6, "matrix must contain C16-01..C16-06 rows")
+        self.assertEqual(len(checklist_rows), 6, "checklist must contain C16-01..C16-06 rows")
+        gate_start = checklist.find("## 7. 最终发布门禁")
+        self.assertGreaterEqual(gate_start, 0, "release gate section is missing")
+        gate_rows = [
+            line for line in checklist[gate_start:].splitlines()
+            if line.startswith("|") and line.count("|") >= 3
+            and not line.startswith("|---") and "门禁" not in line
+        ]
+        if "当前状态：批准发布" in checklist:
+            self.assertFalse(
+                any("FAIL" in row or "NOT-RUN" in row or "☐" in row for row in gate_rows),
+                "approved release cannot retain a mandatory FAIL/NOT-RUN gate",
+            )
+        for row in matrix_rows + checklist_rows:
+            self.assertGreaterEqual(len(row.split("|")), 8, "C16 row must retain release fields")
+        mandatory_blocked = any(
+            "| FAIL |" in row or "| NOT-RUN |" in row
+            for row in checklist_rows
+        )
+        self.assertFalse(
+            "当前状态：批准发布" in checklist and mandatory_blocked,
+            "release approval is forbidden while a mandatory C16 row is FAIL/NOT-RUN",
+        )
 
 
     def test_audit_pins_the_verified_missing_set(self):

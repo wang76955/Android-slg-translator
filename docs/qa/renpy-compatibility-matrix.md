@@ -1,10 +1,10 @@
 # Ren'Py 兼容性矩阵与样本证据
 
-> 版本：批次 A / Task 16
+> 版本：批次 A / Task 16 / C16
 >
-> 冻结日期：2026-08-07（Asia/Shanghai）
+> 冻结日期：2026-08-08（Asia/Shanghai）
 >
-> 当前结论：矩阵和自动化门禁已建立，但本工作区没有可用于真机验收的完整第三方 Ren'Py 游戏样本，因此本文件不会把真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动或存档回归标记为通过。没有证据的格子统一记为 `not-run`，而不是 `0` 或 `success`。
+> 当前结论：C16 机器矩阵和自动化门禁已重建；当前 scanner/workshop/full discover 离线回归为绿色（full discover 192 项、1 个明确 audit-fixture skip），但本工作区仍没有可用于真机验收的完整第三方 Ren'Py 游戏样本。因此真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动、old save 和 rollback 仍保持 `NOT-RUN`，不是 `0` 或 `success`。
 
 ## 1. 证据边界
 
@@ -102,6 +102,19 @@
 | TXT-PRINTF / printf | 继承源样本 | 继承源样本 | 继承模板 | `not-run` | `not-run` | `not-run` | `conditional` | `not-run` | `not-run` | printf 占位符不匹配必须 reject |
 | TXT-CONTEXT / 重复语境 | 继承源样本 | 继承源样本 | 继承模板 | `fixture: Fine. × 2` 或真实计数 | `not-run` | `not-run` | `conditional` | `not-run` | `not-run` | Task 8/15 fixture 覆盖 collision 与 dialogue ID 分流；真机 rollback 待做 |
 
+## 3.7 C16 发布机器矩阵与完成定义
+
+这些行把 Task 6–17 的可执行证据与外部验收分开记录。`PASS` 只表示控制的本地契约或构建门通过；真实样本、安装、启动、old save 和 rollback 没有证据时必须继续写 `NOT-RUN`。
+
+| requirementId | machine gate | supportLevel / activationStrategy | template/source | unique/occurrence/collision | missing/rejected | font result | build/install/startup/save | status / evidence |
+|---|---|---|---|---|---|---|---|---|
+| C16-01 | engine generation: Python 2/3, SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED classification | `SAFE`, `WARNING`, `EXTRACT_ONLY`, `UNSUPPORTED`; `selectable` / `always-on` / `NONE` | Task 6–12 controlled RPYC/preflight fixtures; real GEN-6/7/8 sample `not-run` | fixture-specific counts; real `not-run` | real `missing/rejected=not-run` | real `not-run` | real build/install/startup/old save/rollback `NOT-RUN` | PASS for classification contracts; real sample NOT-RUN; T6–T12 evidence |
+| C16-02 | archive/compiled format: loose RPYC2, RPA-1/RPA-2/RPA-3 and legacy zlib | compatible level inherited from preflight; unsupported shapes `EXTRACT_ONLY`/`UNSUPPORTED`, activation `NONE` | `RpycCompatibility`, RPA fixtures and legacy-zlib fixture; real archive source `not-run` | controlled fixture counts; real `not-run` | unknown/unsafe format blocked; complete real counts `not-run` | `not-run` | build may be `blocked` for unknown format; install/startup/save/rollback `NOT-RUN` | PASS for controlled parser/writer boundaries; real archives NOT-RUN; T7/T13 evidence |
+| C16-03 | activation: standard/custom/none menu, selectable vs always-on | `SAFE`/`WARNING` as preflight decides; `selectable` and `always-on` remain separate | generated UI, language injection and C13 nullable-path fixtures; real game menu `not-run` | fixture counts only; real `not-run` | real `missing/rejected=not-run` | fixture gate; real `not-run` | tool artifact build PASS; device language/startup/old save/rollback `NOT-RUN` | PASS for UI/activation contract; device NOT-RUN; T12/T13/T15 evidence |
+| C16-04 | font and text categories: dialogue, menu, character, UI, `{#}`, interpolation, printf, repeated context | inherited source level/activation; advanced dialogue ID defaults off | controlled structured-record/font/collision fixtures; real template/source `not-run` | fixture `uniqueTextCount/occurrenceCount/collisionCount`; real `not-run` | complete build requires `missing == 0` and `rejected == 0`; audit corpus `not-run` | controlled missing-glyph gate PASS; real `missingCodePoints` `not-run` | font/build/install/startup/save/rollback for real sample `NOT-RUN` | PASS for controlled coverage/font/lint contracts; real corpus NOT-RUN; T8–T11/T15 evidence |
+| C16-05 | APK shape: `single APK` and `base + split` | inherited source level/activation; split uses one session | `InstalledApkSet`, `InstalledAppSource`, helper DEX and rebuilt workshop APK; real game package `not-run` | fixture counts; real `not-run` | real coverage `not-run` | fixture result; real `not-run` | local build/signature/asset gates PASS; real install/startup/old save/rollback `NOT-RUN` | PASS for offline APK/helper shape; device split and single install NOT-RUN; T14/T15/T20 evidence |
+| C16-06 | final release gate: automated, artifact, real sample and device definition of done | all declared support/activation modes must have evidence; `EXTRACT_ONLY`/`UNSUPPORTED` remain blocked | current evidence index and release checklist; real sample source/device prerequisites absent | automated fixture counts recorded; real `not-run` | mandatory real rows remain `NOT-RUN` | real font final set `not-run` | full release decision `NOT-RUN` until Task 19–22; no `批准发布` | NOT-RUN / waiting external acceptance; Task 23 must re-audit every PASS and NOT-RUN |
+
 ## 4. 预检报告和失败证据格式
 
 每次真实样本执行都必须保存一个脱敏 JSON，建议命名为：
@@ -154,14 +167,14 @@ docs/qa/evidence/<sample-id>/device-smoke.txt
 
 | 检查 | 命令/证据 | 当前记录 |
 |---|---|---|
-| scanner regression | `python -m unittest test_fast_scanner.py -v` | Task 16 后实际为 `70 passed` |
+| scanner regression | `python -m unittest test_fast_scanner.py -v` | C15 后实际为 `77 passed` |
 | quality / coverage / performance | `python -m unittest test_translation_quality.py test_translation_coverage.py test_engine_performance.py -v` | 实际为 `30 passed, 1 skipped`；skip 是真实完整 APK/语料缺失，不能当 coverage 通过 |
 | syntax / loader contract | `python -m py_compile ...`；`test_shared_apk_loader_and_installed_selection_behavior` | 实际通过；split loader 的 Node 语法错误已修复 |
-| built APK | `python -m unittest test_built_apk.py -v` | 实际为 `4 passed`；v2/v3 签名和资源指纹通过 |
+| built APK | `python -m unittest test_built_apk.py -v` | Task 18 资产门已在重建后通过；Task 20 将重新记录完整 `test_built_apk.py` 结果、SHA-256 和证书 |
 | Java/D8 helper | `python build_fast_scanner.py` | 已实际构建成功；D8 使用 build-local response file 规避 Windows 命令行长度限制 |
-| helper classes | `dexdump` on `generated/classes7.dex` | 已验证 `FastApkScanner`、`InstalledApkSet`、`InstalledAppSource`、`PackageInstallerSupport`；Task 16 会继续验证 artifact gate |
-| workshop APK | `python build_workshop_apk.py` | 必须在最终回归中重新记录构建、签名和版本证据 |
-| full discover | `python -m unittest discover -s . -p 'test_*.py' -v` | 当前实际为 `167` 项、`25 failures + 1 error + 1 skipped`；失败集中在既有 `test_workshop_patch.py` 契约套件，发布门禁保持阻断 |
+| helper classes | `dexdump` on `generated/classes7.dex` | C15 后已验证 `FastApkScanner`、`RpycTextExtractor`、`RpycPickleWriter`、`RenpyDialogueTranslation` 各恰好一个；Task 20 将补齐完整 12 类清单 |
+| workshop APK | `python build_workshop_apk.py` | C15 后构建返回 0；Task 20 将重新记录完整构建、签名、SHA-256 和版本证据 |
+| full discover | `python -m unittest discover -s . -p 'test_*.py' -v` | C15 后实际为 `192` 项、0 failures/errors、1 个明确 `audit APK/extracted texts not present` skip；真实样本/设备仍 NOT-RUN |
 
 ## 6. 矩阵完成规则
 
