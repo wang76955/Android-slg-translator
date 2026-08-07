@@ -50,3 +50,14 @@ No task review has run yet.
 | TDD RED: explicit-status assertion fails for empty ledger | PASS | `0 not greater than or equal to 11` |
 | Evidence rows T6–T16 initialized | PASS | `docs/qa/renpy-batch-bc-evidence.md` |
 | TDD GREEN and final self-audit | PASS | Targeted test passed; full regression recorded; only explicit Task 0 paths are staged for the commit |
+
+## Fix round 1
+
+| Item | Status | Evidence |
+|---|---|---|
+| Fixed-table evidence parser | PASS | Exactly nine columns, 11 rows, IDs T6–T16, and status column 6 restricted to PASS/FAIL/NOT-RUN |
+| Future PASS/FAIL compatibility | PASS | Temporary T6=PASS and T7=FAIL targeted run passed; ledger restored to NOT-RUN |
+| Failure/error inventory | PASS | 25 failures + 1 error with focus commands, first diagnostics, and classifications in baseline document |
+| APK provenance gate | PASS | Repository, fixed commit, raw URL, local path, SHA256, and stop-on-mismatch rule recorded |
+| Phase 0 scope ruling | PASS | Authority design §5.1 explicitly permits only the non-product evidence-schema assertion |
+| Fix-round verification | PASS_WITH_CONCERNS | Workshop: 49 tests, 25 failures, 1 error; discover: 168 tests, 25 failures, 1 error, 1 skipped |

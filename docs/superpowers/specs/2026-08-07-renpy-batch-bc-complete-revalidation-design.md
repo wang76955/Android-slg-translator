@@ -92,7 +92,9 @@ Phase 0 建立后续所有结论的统一起点：
 - 记录 `git status --short --branch`，区分用户暂存文件、任务文件和无关未跟踪文件；
 - 创建独立的完整重验进度台账和证据目录约定。
 
-Phase 0 只读采集证据，不修改测试或产品代码。
+Phase 0 只读采集证据；此处“只读”指不修改产品逻辑和既有行为测试。
+允许 Task 0 新增一个不改变产品行为的 evidence schema machine assertion，
+用于校验固定九列表格、任务行集合和显式状态；不得借此修改原始产品行为。
 
 ### 5.2 Phase 1：完全对齐 `test_workshop_patch.py`
 

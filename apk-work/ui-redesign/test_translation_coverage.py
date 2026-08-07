@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import tempfile
 import unittest
@@ -51,9 +50,38 @@ class TranslationCoverageLogicTest(unittest.TestCase):
 
     def test_revalidation_evidence_uses_only_explicit_statuses(self):
         evidence = (ROOT / "docs/qa/renpy-batch-bc-evidence.md").read_text(encoding="utf-8")
-        self.assertIn("| requirementId |", evidence)
-        statuses = re.findall(r"\|\s*(PASS|FAIL|NOT-RUN)\s*\|", evidence)
-        self.assertGreaterEqual(len(statuses), 11)
+        lines = evidence.splitlines()
+        header = [
+            "requirementId", "sourceRequirement", "implementation", "automatedTest",
+            "command", "status", "artifact", "residualRisk", "commit",
+        ]
+        header_line_index = lines.index(
+            "| requirementId | sourceRequirement | implementation | automatedTest | command | status | artifact | residualRisk | commit |"
+        )
+        self.assertEqual(
+            [cell.strip() for cell in lines[header_line_index].split("|")[1:-1]],
+            header,
+        )
+        self.assertEqual(
+            [cell.strip() for cell in lines[header_line_index + 1].split("|")[1:-1]],
+            ["---"] * 9,
+        )
+        data_lines = []
+        for line in lines[header_line_index + 2:]:
+            if not line.strip():
+                break
+            self.assertTrue(line.startswith("|"), "unexpected content inside evidence table")
+            data_lines.append(line)
+        self.assertEqual(len(data_lines), 11)
+        rows = []
+        for line in data_lines:
+            cells = [cell.strip() for cell in line.split("|")[1:-1]]
+            self.assertEqual(len(cells), 9, "evidence row must have exactly nine columns")
+            rows.append(cells)
+        self.assertEqual({row[0] for row in rows}, {f"T{task}" for task in range(6, 17)})
+        self.assertEqual(len({row[0] for row in rows}), 11)
+        statuses = [row[5] for row in rows]
+        self.assertTrue(all(status in {"PASS", "FAIL", "NOT-RUN"} for status in statuses))
         self.assertNotIn("assumed-pass", evidence.lower())
         self.assertNotIn("missing = 0 (inferred)", evidence.lower())
 
