@@ -609,7 +609,7 @@ Ran 9 tests in 13.892s
 OK
 ```
 
-The final Task 6 change set is limited to the focused workshop test, patch-generation source, and this inventory document. No `SaveTransfer.java` change was required.
+The final Task 6 change set includes `apk-work/ui-redesign/test_workshop_patch.py`, `apk-work/ui-redesign/test_fast_scanner.py`, `apk-work/ui-redesign/patch_workshop_ui.py`, and `docs/qa/renpy-workshop-failure-inventory.md`. No `SaveTransfer.java` change was made or required.
 
 ### Task 6 review-remediation verification boundaries
 
