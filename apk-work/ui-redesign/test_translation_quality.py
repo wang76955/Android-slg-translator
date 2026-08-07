@@ -143,6 +143,37 @@ class TranslationQualityPatchTest(unittest.TestCase):
         self.assertEqual(self.js.count("var _o=`slg-translator-cache:`,vo={}"), 1)
         self.assertNotIn("slg-translator-cache:v2:", self.js)
 
+    def test_marker_keys_keep_cache_and_compile_identity_isolated(self):
+        start = self.js.index("function cacheScopeIdentity(")
+        end = self.js.index("function Do()", start)
+        cache_runtime = self.js[start:end]
+        harness = f"""
+const runtime = {json.dumps(cache_runtime)};
+const cacheApi = new Function(
+  "let _o=`slg-translator-cache:`;"+
+  "let vo={{}},cacheIndex={{}},_dirty={{}},yo=false,bo=false;"+
+  "function U(value) {{ let hash=2166136261; for (let i=0;i<value.length;i++) {{ hash^=value.charCodeAt(i); hash=Math.imul(hash,16777619); }} return (hash>>>0).toString(36); }}"+
+  runtime+
+  "return {{cacheV2Key,To,Eo,vo}};"
+)();
+const scope = `en|zh|model|0`;
+const slot = `Save{{#slot}}`;
+const menu = `Save{{#menu}}`;
+const slotKey = cacheApi.cacheV2Key(scope, slot);
+const menuKey = cacheApi.cacheV2Key(scope, menu);
+if (slotKey === menuKey) throw new Error(`marker cache keys collided`);
+cacheApi.Eo(scope, slot, `slot translation`);
+cacheApi.Eo(scope, menu, `menu translation`);
+if (cacheApi.To(scope, slot) !== `slot translation`) throw new Error(`slot lookup crossed`);
+if (cacheApi.To(scope, menu) !== `menu translation`) throw new Error(`menu lookup crossed`);
+if (cacheApi.vo[slotKey].sourceText !== slot || cacheApi.vo[menuKey].sourceText !== menu) throw new Error(`exact old marker was not retained`);
+process.stdout.write(JSON.stringify({{slotKey,menuKey,slotSource:cacheApi.vo[slotKey].sourceText,menuSource:cacheApi.vo[menuKey].sourceText}}));
+"""
+        result = json.loads(run_node(harness, ROOT))
+        self.assertNotEqual(result["slotKey"], result["menuKey"])
+        self.assertEqual(result["slotSource"], "Save{#slot}")
+        self.assertEqual(result["menuSource"], "Save{#menu}")
+
     def test_behavior_speaker_dedupe_and_conditional_fields(self):
         out = run_behavior_probe(self.js)
         le_items = {item["text"]: item for item in out["le"]}
