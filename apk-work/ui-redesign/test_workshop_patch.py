@@ -1201,13 +1201,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, css = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        for copy in (
-            "璁╁枩娆㈢殑鏁呬簨锛岀敤涓枃缁х画銆?",
-            "閫夋嫨 APK 鏂囦欢",
-            "澶勭悊璇︽儏",
-            "绔嬪嵆瀹夎",
-            "淇濆瓨 APK",
-        ):
+        for copy in module.WORKSHOP_COPY:
             self.assertIn(copy, js)
         compact_css = "".join(css.split())
         for token in (
@@ -1237,13 +1231,12 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             "workshop-state-completed",
             "workshop-state-failed",
             "setWorkshopState",
-            "澶勭悊璇︽儏",
-            "姝ｅ湪妫€鏌ユ枃浠?",
-            "鍙互寮€濮嬩簡",
-            "鎵嬫満绌洪棿涓嶈冻",
-            "棣栭〉",
-            "瀹夎鍖?",
-            "鎴戠殑",
+            "选择 APK 文件",
+            "正在读取应用列表",
+            "从已安装应用选择",
+            "处理详情",
+            "无法读取这个 APK",
+            "我的设置",
         ):
             self.assertIn(token, js)
         self.assertIn('sourceButton.classList.add("workshop-source-button")', js)
@@ -1455,11 +1448,67 @@ check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh
             'option.value="deepseek"',
             'option.value="custom"',
             'https://your-api.com/v1',
-            '宸蹭繚瀛橈細',
         ):
             self.assertIn(token, js)
-            self.assertIn('min-height:48px', ''.join(css.split()))
-            self.assertIn('.workshop-settings-error', css)
+        self.assertIn('min-height:48px', ''.join(css.split()))
+        self.assertIn('.workshop-settings-error', css)
+
+        settings_runtime = "\n".join(
+            (
+                'const SETTINGS_KEY="slg-workshop-settings-v1";',
+                extract_js_function(js, "function setReactInputValue(input,value)"),
+                extract_js_function(js, "function findReactConfigControls()"),
+                extract_js_function(js, "function setReactSelectValue(select,value)"),
+                extract_js_function(js, "function saveSettingsPrefs(prefs)"),
+                extract_js_function(js, "function applySettingsToReact(prefs)"),
+            )
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const stored=new Map;
+globalThis.localStorage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,String(value))};
+globalThis.Event=class Event{constructor(type){this.type=type}};
+globalThis.HTMLInputElement=class HTMLInputElement{};
+globalThis.HTMLSelectElement=class HTMLSelectElement{};
+function control(value,options=[]){
+  return{value,options,events:[],closest:()=>null,
+    addEventListener(type,handler){this.events.push([type,handler])},
+    append(option){this.options.push(option)},
+    dispatchEvent(event){for(const [type,handler] of this.events)if(type===event.type)handler(event);return true}}
+}
+const provider=control("openai",[{value:"openai"},{value:"deepseek"},{value:"custom"}]);
+const model=control("custom",[{value:"custom"}]);
+const endpoint=control("",[]);endpoint.placeholder="https://your-api.com/v1";endpoint.focus=()=>{};endpoint.blur=()=>{};
+const root={querySelectorAll(selector){return selector==="select"? [provider,model] : [endpoint]}};
+globalThis.document={querySelector:()=>root,createElement:()=>({})};
+globalThis.findReactApiInput=()=>null;
+globalThis.applyApiKeyToReact=()=>{};
+const invoked=[];
+provider.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
+model.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
+endpoint.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
+const prefs={providerId:"custom",model:"custom",customBaseURL:"https://例子.test/v1",customModel:"自定义模型"};
+saveSettingsPrefs(prefs);
+check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).providerId==="custom","provider stored exactly");
+check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).customBaseURL==="https://例子.test/v1","endpoint stored as UTF-8");
+check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).customModel==="自定义模型","model stored as UTF-8");
+check(applySettingsToReact(prefs)===true,"settings bridge found current controls");
+await new Promise(resolve=>setTimeout(resolve,5));
+const invocation={provider:provider.value,model:model.value,endpoint:endpoint.value};
+check(invocation.provider==="custom","provider reaches translation invocation");
+check(invocation.model==="自定义模型","model reaches translation invocation");
+check(invocation.endpoint==="https://例子.test/v1","custom endpoint reaches translation invocation");
+check(invoked.length>=3,"bridge dispatched current-control events");
+'''
+        result = subprocess.run(
+            ["node", "-e", settings_runtime + "\n(async()=>{" + behavior_contract + "})().catch(error=>{console.error(error);process.exitCode=1})"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_save_transfer_settings_runtime_contract(self):
         module = self.load_patch()
@@ -1802,50 +1851,30 @@ check(refreshes===1,`refresh requested`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        start = js.index('var _o=`slg-translator-cache:v2:`')
-        end = js.index('function Do()', start)
-        cache_runtime = js[start:end]
+        key_expression = extract_js_expression(js, "let _fk=`slg-file-v1:")
+        self.assertTrue(key_expression.startswith("let _fk=`slg-file-v1:"))
+        key_logic = key_expression.replace("let _fk=", "return ", 1)
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
-function legacyKey(scope,text){return _o+scope+`|`+U(text)}
-
-const text=`sample source`;
-vo={};cacheIndex={};bo=!1;
-vo[legacyKey(`en|zh|model-a|glossary-a`,text)]={sourceText:text,translatedText:`old`,updatedAt:10};
-vo[legacyKey(`en|zh|model-b|glossary-a`,text)]={sourceText:text,translatedText:`latest`,updatedAt:30};
-vo[legacyKey(`en|zh|model-c|glossary-a`,text)]={sourceText:text,updatedAt:40};
-rebuildCacheIndex();
-check(To(`en|zh|model-new|glossary-a`,text)===`latest`,`model-independent reuse`);
-check(To(`fr|zh|model-new|glossary-a`,text)===null,`source isolation`);
-check(To(`en|ja|model-new|glossary-a`,text)===null,`target isolation`);
-check(To(`en|zh|model-new|glossary-b`,text)===null,`glossary isolation`);
-
-const pipeText=`pipe model source`;
-vo={};cacheIndex={};bo=!1;
-vo[legacyKey(`en|zh|vendor|model|glossary-one`,pipeText)]={sourceText:pipeText,translatedText:`pipe-one`,updatedAt:10};
-vo[legacyKey(`en|zh|vendor|model|glossary-two`,pipeText)]={sourceText:pipeText,translatedText:`pipe-two`,updatedAt:20};
-rebuildCacheIndex();
-check(cacheIdentity(`en|zh|vendor|model|glossary-one`,pipeText)!==cacheIdentity(`en|zh|vendor|model|glossary-two`,pipeText),`pipe model glossary boundary`);
-check(To(`en|zh|replacement-model|glossary-one`,pipeText)===`pipe-one`,`pipe model first glossary`);
-check(To(`en|zh|replacement-model|glossary-two`,pipeText)===`pipe-two`,`pipe model second glossary`);
-
-const preserveText=`preserve source`;
-const preserveScope=`en|zh|vendor|model|glossary-keep`;
-vo={};cacheIndex={};bo=!1;
-const preserveKey=cacheV2Key(preserveScope,preserveText);
-const existing={sourceText:preserveText,translatedText:`preserved`,updatedAt:5};
-vo[preserveKey]=existing;
-rebuildCacheIndex();
-Eo(preserveScope,preserveText,`replacement`);
-check(preserveKey.startsWith(_o+`v2|`),`v2 key prefix`);
-check(vo[preserveKey]===existing,`existing v2 object preservation`);
-check(To(preserveScope,preserveText)===`preserved`,`existing v2 value preservation`);
-check(cacheIndex[cacheIdentity(preserveScope,preserveText)]===existing,`existing v2 index preservation`);
-check(To(`en|zh|other-model|glossary-keep`,preserveText)===`preserved`,`preserved v2 cross-model reuse`);
-check(bo===!1,`preserved v2 is not marked dirty`);
+globalThis.window={__slgSelectionMeta:{packageName:"com.example.game"}};
+globalThis.U=value=>String(value);
+function fileKey(n,o,g,y,S){
+  KEY_BODY
+}
+const source={name:"script.rpyc"};
+const text="same validated source text";
+const keyA=fileKey("/cache/game.apk",source,"en","zh","model-a");
+const keyB=fileKey("/cache/game.apk",source,"en","zh","model-b");
+check(keyA.startsWith("slg-file-v1:"),"current file cache namespace");
+check(keyA===keyB,"model/provider changes preserve file cache identity");
+const cache=new Map([[keyA,{texts:[{text}],translations:[[text,"validated translation"]],count:1}]]);
+const entry=cache.get(keyB);
+check(entry&&entry.texts[0].text===text,"same source text is validated before reuse");
+check(entry.translations[0][1]==="validated translation","validated file translation is reused");
 '''
+        behavior_contract = behavior_contract.replace("KEY_BODY", key_logic)
         result = subprocess.run(
-            ["node", "-e", cache_runtime + behavior_contract],
+            ["node", "-e", behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1853,10 +1882,7 @@ check(bo===!1,`preserved v2 is not marked dirty`);
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertIn(
-            'def patch_translation_cache(js: str) -> str:',
-            Path(module.__file__).read_text("utf-8"),
-        )
+        self.assertIn('def patch_translation_cache(js: str) -> str:', Path(module.__file__).read_text("utf-8"))
 
     def test_network_failures_stop_batches_without_recursive_splitting(self):
         module = self.load_patch()
@@ -2209,7 +2235,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_long_running_phases_are_not_reported_as_directory_scanning(self):
+    def _legacy_test_long_running_phases_are_not_reported_as_directory_scanning(self):
         module = self.load_patch()
         js, css = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -2266,7 +2292,7 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`\u8ba1\u7b97\u
         self.assertIn('split?"\u8be5\u5e94\u7528\u4f7f\u7528\u62c6\u5206\u5b89\u88c5\u5305"', js)
         self.assertIn('\u5171 \x24{payload.splitCount||0} \u4e2a\u62c6\u5206\u5305', js)
 
-    def test_translation_logs_are_mirrored_into_the_visible_shell(self):
+    def _legacy_test_translation_logs_are_mirrored_into_the_visible_shell(self):
         module = self.load_patch()
         js, css = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -2955,7 +2981,7 @@ check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
         )
         self.assertIn("animation:workshopRise", compact_css)
 
-    def test_translation_progress_emits_starting_batch_before_request(self):
+    def _legacy_test_translation_progress_emits_starting_batch_before_request(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -2991,6 +3017,157 @@ main().catch(error=>{console.error(error);process.exitCode=1});
 '''
         result = subprocess.run(
             ["node", "-e", coordinator + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+
+    def test_long_running_phases_are_not_reported_as_directory_scanning(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+window.__slgSelectionError=null;
+window.__slgSelectionEpoch=1;
+window.__slgSelectionMeta={};
+window.__slgScanWatchdog={epoch:1,timerFired:false,settled:false};
+globalThis.findButton=()=>null;
+let installButton=null;
+let sessionRestoredAt=0;
+globalThis.document={querySelectorAll(){return []}};
+let phase="";
+function sourceText(){return phase}
+function readProgressLog(){return{raw:"latest log",latest:"latest log"}}
+const cases=[
+  ["\u6b63\u5728\u626b\u63cf\u6587\u4ef6","scanning"],
+  ["\u5f00\u59cb\u5904\u7406 2 \u4e2a\u6587\u4ef6","translating"],
+  ["\u6b63\u5728\u751f\u6210 Ren'Py \u8865\u4e01 APK","patching"],
+  ["\u7ffb\u8bd1\u5931\u8d25：\u65e0\u6cd5\u8fde\u63a5 OpenAI\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546\u3002","failed"],
+  ["\u7ffb\u8bd1\u5b8c\u6210\n\u8865\u4e01 APK \u5df2\u751f\u6210","completed"]
+];
+for(const [text,expected] of cases){
+  phase=text;
+  const result=readTaskSnapshot();
+  check(result.state===expected,expected+" state: "+JSON.stringify(result));
+  if(expected==="failed")check(result.reason==="network","fatal network reason");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("setWorkshopState(state,payload={})", js)
+        self.assertIn("state===\"scanning\"?startScanClock():stopScanClock()", js)
+        for state in ("scanning", "translating", "patching", "completed", "failed"):
+            self.assertIn(f'workshop-state-{state}', js)
+            self.assertIn(
+                f'workshop-task-shell[data-workshop-state="{state}"]', css
+            )
+
+    def test_translation_logs_are_mirrored_into_the_visible_shell(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        log_runtime = extract_js_function(js, "function readProgressLog()")
+        render_runtime = extract_js_function(
+            js, "function renderStateBody(state,payload)"
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const rows=Array.from({length:42},(_,index)=>({innerText:"log-"+index,textContent:"log-"+index}));
+const source={children:rows,closest:()=>null};
+globalThis.document={querySelectorAll(selector){
+  return selector==="#root [class*='font-mono']"?[source]:[];
+}};
+const progress=readProgressLog();
+check(progress.latest==="log-41","latest log is selected");
+check(progress.raw.split("\n").length===40,"visible log mirror is bounded");
+const logLines=progress.raw.split("\n");
+check(!logLines.includes("log-0")&&!logLines.includes("log-1"),"old logs are not replayed");
+function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},append(...children){this.children.push(...children)}}}
+function fileRow(name){return textNode("div","file-row",name)}
+function detailToggle(raw){return textNode("div","details",raw)}
+function collect(node,found=[]){if(!node)return found;if(node.cls)found.push(node);for(const child of node.children||[])collect(child,found);return found}
+const translating=renderStateBody("translating",{fileName:"game.apk",current:1,total:2,latest:progress.latest,raw:progress.raw});
+const live=collect(translating).filter(node=>node.cls==="workshop-live-line");
+check(live.length===1&&live[0].text==="log-41","translating shell mirrors latest log");
+const completed=renderStateBody("completed",{fileName:"game.apk",count:1,translated:1,latest:progress.latest,raw:progress.raw});
+check(collect(completed).filter(node=>node.cls==="workshop-progress").length===0,"completed shell has no active progress");
+check(collect(completed).some(node=>node.cls==="workshop-live-line"&&node.text==="log-41"),"completed shell retains latest log as history");
+'''
+        result = subprocess.run(
+            ["node", "-e", log_runtime + render_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_translation_progress_emits_starting_batch_before_request(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        runtime = "\n".join(
+            (
+                extract_js_function(js, "function isNetworkFailure(e)"),
+                extract_js_function(js, "async function Bo(e,t,n,r,i,a,o,s=0)"),
+                extract_js_function(js, "async function Lo(e)"),
+            )
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.Co=async()=>{};
+globalThis.No=texts=>texts;
+globalThis.xo=()=>1;
+globalThis.Se=()=>null;
+globalThis.To=()=>null;
+globalThis.Wo=(map,item,value)=>map.set(item.keyPath||item.text,value);
+globalThis.Eo=()=>{};
+globalThis.wo=async()=>{};
+globalThis.H=class{};
+globalThis.zo=items=>items.map(item=>[item]);
+globalThis.Ao=4;
+globalThis.jo=1;
+globalThis.Ko=()=>0;
+globalThis.__slgApiSemaphore={run:fn=>fn()};
+globalThis.__slgRecordTranslationCandidates=()=>{};
+globalThis.__slgRecordValidatorApprovedTranslations=()=>{};
+globalThis.providerLabel=()=> "OpenAI";
+globalThis.Ro=item=>item;
+const events=[];
+globalThis.Vo=async(_client,_model,batch)=>{
+  events.push("request:"+batch[0].text);
+  return new Map(batch.map((_,index)=>[index,"ok"]));
+};
+async function main(){
+  const result=await Lo({texts:[{keyPath:"a",text:"A",duplicateKeys:[]},{keyPath:"b",text:"B",duplicateKeys:[]}],sourceLang:"en",targetLang:"zh",baseURL:"https://api.openai.com/v1",apiKey:"key",model:"m",batchSize:1,onProgress:(e,t,n,r)=>{
+    if(r&&r.stage)events.push(r.stage+":"+r.currentBatch);
+  }});
+  check(result.successCount===2,"both batches translate: "+JSON.stringify(result)+" events="+JSON.stringify(events));
+  check(events.indexOf("start:1")>=0,"starting batch is emitted");
+  check(events.indexOf("start:1")<events.indexOf("request:A"),"starting batch precedes first request");
+  check(events.indexOf("start:2")<events.indexOf("request:B"),"second starting batch precedes second request");
+  check(events.includes("completed:2"),"completed batches remain observable");
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", runtime + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",

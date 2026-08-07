@@ -1215,7 +1215,7 @@ async function Lo(e){'''
     # Stable file-cache key: use the package name so the cache survives
     # re-selecting the game (the APK uri changes on every copy).
     old_key = "let _fk=`slg-file-v1:${U([n,o.name,g,y,S].join(`|`))}`"
-    new_key = "let _fk=`slg-file-v1:${U([window.__slgSelectionMeta?.packageName||n,o.name,g,y,S].join(`|`))}`"
+    new_key = "let _fk=`slg-file-v1:${U([window.__slgSelectionMeta?.packageName||n,o.name,g,y].join(`|`))}`"
     if js.count(old_key) != 1:
         raise ValueError("File cache key signature not found")
     js = js.replace(old_key, new_key, 1)

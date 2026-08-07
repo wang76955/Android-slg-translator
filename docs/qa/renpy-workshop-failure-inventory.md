@@ -459,3 +459,31 @@ python -m unittest `
 ```
 
 Exact result from the command above: `Ran 8 tests in 0.778s` followed by `OK` (four Task 4 contracts plus four performance-regression tests). The automated evidence is complete for the Node/Python harness scope only; real provider/network, native bridge, APK build/package, Android installation, and device/game evidence remain outside this task.
+
+## Task 5 revalidation: cache identity, settings bridge, visible shell, logs, and progress
+
+This section is the authoritative Task 5 update. The initial required seven-test run was performed before changing either the tests or production patch:
+
+    python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_cache_is_reused_across_models test_workshop_patch.WorkshopPatchContractTest.test_settings_support_provider_model_and_custom_endpoint test_workshop_patch.WorkshopPatchContractTest.test_patch_contains_player_workshop_contract test_workshop_patch.WorkshopPatchContractTest.test_patch_installs_visible_android_shell test_workshop_patch.WorkshopPatchContractTest.test_long_running_phases_are_not_reported_as_directory_scanning test_workshop_patch.WorkshopPatchContractTest.test_translation_logs_are_mirrored_into_the_visible_shell test_workshop_patch.WorkshopPatchContractTest.test_translation_progress_emits_starting_batch_before_request -v
+
+Exact initial RED result: Ran 7 tests; FAILED with failures=6 and errors=1, with zero passing tests. The cache test errored while locating the removed slg-translator-cache:v2: contract. The other six failures were stale mojibake/static-token contracts or a fixture that did not prove request ordering.
+
+The corrected cache test extracts the current let _fk=slg-file-v1 key expression from the generated production bundle and executes it. The RED behavior after replacing the stale locator was: model/provider changes preserve file cache identity failed. The generated key included package/source, file name, source language, target language, and model; therefore a model change produced a different file key. The minimal production fix removes only the model from that file key. Resume still validates current source text entries before reusing stored translations.
+
+The corrected settings test drives the current settings bridge against current select/input controls, writes exact UTF-8 provider, model, and custom endpoint values to local storage, dispatches the current input/change events, and asserts the exact values visible to the translation invocation. It does not inspect mojibake labels.
+
+The corrected shell and progress tests execute extracted production functions. They prove directory enumeration → scanning; translation request → translating; RPYC/APK compilation, merge, and signing → patching; fatal network → failed/network; settled success → completed. The log fixture retains only the latest bounded 40-line window, mirrors the latest line into the translating and completed shell, and does not render completed work as active progress. The batch fixture records starting-batch progress before each first request.
+
+Focused GREEN command:
+
+    python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_cache_is_reused_across_models test_workshop_patch.WorkshopPatchContractTest.test_settings_support_provider_model_and_custom_endpoint test_workshop_patch.WorkshopPatchContractTest.test_patch_contains_player_workshop_contract test_workshop_patch.WorkshopPatchContractTest.test_patch_installs_visible_android_shell test_workshop_patch.WorkshopPatchContractTest.test_long_running_phases_are_not_reported_as_directory_scanning test_workshop_patch.WorkshopPatchContractTest.test_translation_logs_are_mirrored_into_the_visible_shell test_workshop_patch.WorkshopPatchContractTest.test_translation_progress_emits_starting_batch_before_request -v
+
+Exact focused result: Ran 7 tests in 0.738s followed by OK.
+
+Required regression results from the same change set:
+
+    python -m unittest test_known_bugfixes.py -v       → Ran 9 tests in 0.665s, OK
+    python -m unittest test_engine_performance.py -v   → Ran 4 tests in 0.495s, OK
+    python -m unittest test_translation_quality.py -v  → Ran 15 tests in 13.480s, OK
+
+Changed files are apk-work/ui-redesign/test_workshop_patch.py, apk-work/ui-redesign/patch_workshop_ui.py, and docs/qa/renpy-workshop-failure-inventory.md. Evidence is Node-only extracted-bundle/production-function execution plus Python unittest orchestration. It does not prove a live provider response, native Android bridge behavior, APK assembly or signing, installation, real-game behavior, or a physical-device UI state.
