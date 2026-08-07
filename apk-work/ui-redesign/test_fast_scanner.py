@@ -22,6 +22,8 @@ INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "Installe
 INSTALLED_APK_SET = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java"
 BUILDER = FAST_SCAN / "build_fast_scanner.py"
 WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
+COMPATIBILITY_MATRIX = ROOT / "docs" / "qa" / "renpy-compatibility-matrix.md"
+RELEASE_CHECKLIST = ROOT / "docs" / "qa" / "renpy-release-checklist.md"
 GENERATED = FAST_SCAN / "generated"
 DEXDUMP = ROOT / ".tools" / "android-15" / "dexdump.exe"
 CAPACITOR_DEX = ROOT / "apk-work" / "extracted" / "classes3.dex"
@@ -1448,6 +1450,7 @@ public final class CacheOwnershipHarness {
             helper_dump.count("Class descriptor  : 'Lcom/slgtranslator/app/WorkshopBackHandler;'"),
             1,
         )
+
         self.assertEqual(helper_dump.count("name          : 'enable'"), 1)
         self.assertEqual(helper_dump.count("name          : 'delegateDefaultBack'"), 1)
 
@@ -1517,6 +1520,49 @@ public final class CacheOwnershipHarness {
                 actual_methods,
                 f"generated external invoke is absent from real base ABI: {target}",
             )
+
+    def test_task16_release_artifacts_and_unsupported_gate_are_pinned(self):
+        """Release docs and the built helper must expose the Task 16 gates."""
+        self.assertTrue(COMPATIBILITY_MATRIX.exists(), "Task 16 compatibility matrix is missing")
+        self.assertTrue(RELEASE_CHECKLIST.exists(), "Task 16 release checklist is missing")
+        matrix = COMPATIBILITY_MATRIX.read_text("utf-8")
+        checklist = RELEASE_CHECKLIST.read_text("utf-8")
+        for token in (
+            "supportLevel", "activationStrategy", "templatePath", "missing",
+            "font result", "build allowed", "install success",
+            "startup translation observed", "not-run", "UNSUPPORTED",
+            "RPA-1", "RPA-2", "RPA-3", "base + split", "rejected",
+        ):
+            self.assertIn(token, matrix)
+        for token in (
+            "python -m unittest discover -s . -p 'test_*.py' -v",
+            "python build_workshop_apk.py", "RenpyPatchValidator", "missing == 0",
+            "rejected == 0", "EXTRACT_ONLY", "UNSUPPORTED", "old save",
+        ):
+            self.assertIn(token, checklist)
+
+        builder = BUILDER.read_text("utf-8")
+        self.assertIn("d8.args", builder)
+        self.assertIn('"@" + str(d8_args)', builder)
+        classes6 = GENERATED / "classes6.dex"
+        classes7 = GENERATED / "classes7.dex"
+        if not classes6.exists() or not classes7.exists():
+            self.skipTest("generated DEX artifacts are not present; run build_fast_scanner.py first")
+        self.assertTrue(DEXDUMP.exists(), "Task 16 artifact gate requires dexdump.exe")
+        dump = subprocess.run(
+            [str(DEXDUMP), str(classes7.relative_to(ROOT))],
+            check=True,
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+        ).stdout
+        for class_name in (
+            "FastApkScanner", "InstalledApkSet", "InstalledAppSource",
+            "PackageInstallerSupport", "RenpyPatchValidator", "RenpyPreflight",
+        ):
+            self.assertIn(class_name, dump)
 
 
     def test_language_menu_support_rewrites_expendable_slot(self):

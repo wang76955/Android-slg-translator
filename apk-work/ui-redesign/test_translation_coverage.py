@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 BASE_JS = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets" / "index-CJtfdHOF.js"
 BASE_CSS = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets" / "index-C044IUg3.css"
+COMPATIBILITY_MATRIX = ROOT / "docs" / "qa" / "renpy-compatibility-matrix.md"
+RELEASE_CHECKLIST = ROOT / "docs" / "qa" / "renpy-release-checklist.md"
 JAVA_HOME = Path(os.environ.get("JAVA_HOME", ""))
 JAVA = JAVA_HOME / "bin" / "java.exe"
 JAVAC = JAVA_HOME / "bin" / "javac.exe"
@@ -268,6 +270,33 @@ process.stdout.write(JSON.stringify({{initial,after,reset}}));
         source = Path(__file__).read_text("utf-8")
         self.assertIn('self.skipTest("audit APK/extracted texts not present")', source)
         self.assertNotIn('missing' + 'Count:0', source)
+
+    def test_task16_matrix_and_release_checklist_cover_every_gate(self):
+        """The release documents must keep the machine and device gates explicit."""
+        self.assertTrue(COMPATIBILITY_MATRIX.exists(), "Task 16 compatibility matrix is missing")
+        self.assertTrue(RELEASE_CHECKLIST.exists(), "Task 16 release checklist is missing")
+        matrix = COMPATIBILITY_MATRIX.read_text("utf-8")
+        checklist = RELEASE_CHECKLIST.read_text("utf-8")
+        for token in (
+            "6 / Python 2", "7 / Python 2", "8 / Python 3", "未知 / 不支持",
+            "loose RPYC2", "RPA-1", "RPA-2", "RPA-3", "legacy zlib",
+            "标准菜单", "自定义菜单", "无菜单", "菜单注入失败",
+            "已有中文字体", "缺中文字体", "部分缺字", "单 APK", "base + split",
+            "对话", "菜单", "角色名", "UI", "`{#}`", "插值", "printf", "重复语境",
+            "supportLevel", "activationStrategy", "templatePath", "text counts",
+            "missing", "font result", "build allowed", "install success",
+            "startup translation observed", "not-run", "rejected",
+        ):
+            self.assertIn(token, matrix, "matrix is missing %s" % token)
+        for token in (
+            "python -m unittest discover -s . -p 'test_*.py' -v",
+            "python build_workshop_apk.py", "RenpyPatchValidator", "single APK",
+            "base + split", "扫描", "翻译", "lint", "compile", "sign", "install",
+            "launch", "translated text", "old save", "rollback", "missing == 0",
+            "rejected == 0", "字体终检", "语言激活", "EXTRACT_ONLY", "UNSUPPORTED",
+            "not-run",
+        ):
+            self.assertIn(token, checklist, "release checklist is missing %s" % token)
 
 
     def test_audit_pins_the_verified_missing_set(self):
