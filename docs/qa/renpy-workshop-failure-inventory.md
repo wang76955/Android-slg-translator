@@ -53,26 +53,26 @@ Ran 2 tests ... OK
 ### WSP-02 `test_completed_zero_entry_scan_is_an_empty_result_not_scanning`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning -v`
-- First effective failure: `Error: settled zero-entry scan misclassified: {"state":"idle"}`。
-- Expected behavior: watchdog 已 settled、扫描结果为 0 条时，snapshot 应为 `empty`，并保留文件名、split 标记及 split 数量。
-- Observed behavior: 同一 fixture 得到 `state: "idle"`，没有进入空结果状态。
-- Authority: `WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning`；`readTaskSnapshot()` 生产接口。
-- Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（行为夹具）；`apk-work/ui-redesign/patch_workshop_ui.py`（后续产品修复面，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning -v` → `Error: settled zero-entry scan misclassified: {"state":"idle"}`。
-- Green evidence: `NOT-RUN — 后续任务修复 snapshot 状态机后再验证。`
+- First effective failure (baseline): `Error: settled zero-entry scan misclassified: {"state":"idle"}`.
+- Expected behavior: with `settled && fileCount === 0 && !fatalError`, `readTaskSnapshot()` returns `empty` and preserves filename plus split metadata.
+- Root-cause evidence: the original fixture used stale mojibake UI tokens; after `extract_js_function(js, "function readTaskSnapshot()")` and a current UTF-8 fixture, the full function returns `empty`, `count:"0"`, the filename, and split metadata.
+- Authority: `WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning`; `readTaskSnapshot()`.
+- Classification: `STALE_CONTRACT` (the initial extractor failure also exposed `BRITTLE_EXTRACTION`; the Task 1 extractor was made regex-literal safe in the test harness).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
+- Red evidence: baseline `-v` run failed with `state:"idle"`; full-function run then passed after updating only the stale fixture/UI token expectations.
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning -v` -> `Ran 1 test ... OK`.
 
 ### WSP-03 `test_dismiss_recovery_banner_re_renders_immediately`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately -v`
-- First effective failure: `Error: recovery banner offers dismiss`。
-- Expected behavior: 中断会话 banner 应显示可执行的 dismiss 动作；点击后清除恢复标记并立即重新渲染，不再显示 banner。
-- Observed behavior: 渲染结果中没有可识别的 dismiss button，测试在点击前失败。
-- Authority: `WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately`；`recoveryBanner()`、`refresh()` 和 `renderStateBody()` 生产接口。
-- Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（行为夹具）；`apk-work/ui-redesign/patch_workshop_ui.py`（后续产品修复面，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately -v` → `Error: recovery banner offers dismiss`。
-- Green evidence: `NOT-RUN — 后续任务修复 recovery banner 后再验证。`
+- First effective failure (baseline): `Error: recovery banner offers dismiss`.
+- Expected behavior: a saved translating session renders a recovery banner; dismiss removes `SESSION_KEY`, resets `sessionRestoredAt`, invalidates the snapshot, calls `refresh()`, and removes the banner immediately.
+- Root-cause evidence: the original fixture used stale mojibake state/banner labels. With complete `readTaskSnapshot()`, `renderStateBody()`, `refresh()`, `snapshotKey()`, and `recoveryBanner()` extraction plus current labels, the harness found the dismiss button and verified immediate re-render.
+- Authority: `WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately`; `recoveryBanner()`, `refresh()`, `renderStateBody()`.
+- Classification: `STALE_CONTRACT` (no product regression after the complete-function/current-fixture run).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
+- Red evidence: baseline `-v` run failed before click; complete-function/current-fixture run passed.
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately -v` -> `Ran 1 test ... OK`.
 
 ### WSP-04 `test_fatal_network_stops_outer_file_controller`
 
@@ -306,39 +306,38 @@ Ran 2 tests ... OK
 ### WSP-22 `test_task_runtime_bridges_and_recovery_contract`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v`
-- First effective failure: `AssertionError: '手机空间不足' not found in '<patched bundle>'`（bundle dump 已省略）。
-- Expected behavior: task runtime 应桥接 React 选择/开始/安装动作，正确处理扫描失败、network failure、ENOSPC，并渲染对应恢复入口。
-- Observed behavior: space-error copy token 断言失败，runtime bridge 行为 harness 未运行。
-- Authority: `WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract`；`triggerReactButton()`、`renderStateBody()` 生产接口。
-- Classification: `ENCODING_BOUNDARY`
-- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（recovery copy token）；`apk-work/ui-redesign/patch_workshop_ui.py`（task runtime，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v` → `AssertionError: '手机空间不足' not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 需先统一 recovery 文案编码，再验证 bridge。`
+- First effective failure (baseline): stale ENOSPC localized-copy token assertion; the later `<patched bundle>` dump is not root-cause evidence.
+- Expected behavior: React remains the owner of controls; the shell dispatches bubbling events, exposes task state, and renders the current recoverable ENOSPC contract.
+- Root-cause evidence: current `renderStateBody()` contains the current space-error copy and retry action; the over-broad global `.click()` assertion also matched unrelated export links in the base bundle. Narrowing the assertion to the managed React button names made the bridge contract run.
+- Authority: `WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract`; `triggerReactButton()`, `renderStateBody()`.
+- Classification: `STALE_CONTRACT` (not a network/product fix).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
+- Red evidence: baseline `-v` run failed at the first stale ENOSPC token; no bundle dump was used as root cause.
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v` -> `Ran 1 test ... OK`.
 
 ### WSP-23 `test_translating_state_does_not_replay_card_entrance_animation`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation -v`
-- First effective failure: `AssertionError: '.workshop-task-shell[data-workshop-state="translating"] .workshop-task-card{animation:none}' not found in '<patched CSS>'`（CSS dump 已省略）。
-- Expected behavior: translating 状态卡片不应重复播放 entrance animation，同时保留 idle/ready 等状态的初次进入动画。
-- Observed behavior: patched CSS 没有 translating-state 的 `animation:none` 规则。
-- Authority: `WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation`；`patch_assets(js, css)` 的 CSS 输出接口。
-- Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（CSS contract）；`apk-work/ui-redesign/patch_workshop_ui.py`（CSS 生成逻辑，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation -v` → `AssertionError: '.workshop-task-shell[data-workshop-state="translating"] .workshop-task-card{animation:none}' not found in '<patched CSS>'`。
-- Green evidence: `NOT-RUN — CSS 行为修复留待后续任务。`
+- First effective failure (baseline): selector with a space before the descendant card was not found in whitespace-compacted CSS.
+- Expected behavior: translating and patching cards must not replay entrance animation; the default card entrance animation remains available for initial states.
+- Root-cause evidence: patched CSS contains `.workshop-task-shell[data-workshop-state="translating"].workshop-task-card{animation:none}` and the corresponding patching rule; the old expectation retained whitespace after CSS compaction.
+- Authority: `WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation`; `patch_assets(js, css)` CSS output.
+- Classification: `STALE_CONTRACT` (product CSS already satisfied both required active phases).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
+- Red evidence: baseline `-v` run failed on the compacted selector token.
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation -v` -> `Ran 1 test ... OK`.
 
 ### WSP-24 `test_translation_heartbeat_updates_session`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session -v`
-- First effective failure: `Error: heartbeat refreshes savedAt while translating`。
-- Expected behavior: translating refresh 应在 heartbeat 时保持 `translating=true`，更新 session `savedAt`，并继续显示 translating state。
-- Observed behavior: fixture 读取到的 `savedAt` 未达到 heartbeat 之前的时间戳，联合断言失败。
-- Authority: `WorkshopPatchContractTest.test_translation_heartbeat_updates_session`；`refresh()`、`SESSION_KEY` 生产接口。
-- Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（heartbeat harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（session refresh，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session -v` → `Error: heartbeat refreshes savedAt while translating`。
-- Green evidence: `NOT-RUN — heartbeat 行为修复留待后续任务。`
+- First effective failure (baseline): `Error: heartbeat refreshes savedAt while translating`.
+- Expected behavior: while translating, `refresh()` keeps `translating=true`, updates `SESSION_KEY.savedAt`, and keeps the translating state visible.
+- Root-cause evidence: the original fixture text was stale mojibake and therefore classified as idle. With `extract_js_function()` and a current `正在处理脚本 1/5` fixture, the full `refresh()` updates the persisted heartbeat and the test passes.
+- Authority: `WorkshopPatchContractTest.test_translation_heartbeat_updates_session`; `refresh()`, `SESSION_KEY`.
+- Classification: `STALE_CONTRACT` (no product regression after the full-function/current-fixture run).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
+- Red evidence: baseline `-v` run failed at the heartbeat assertion.
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session -v` -> `Ran 1 test ... OK`.
 
 ### WSP-25 `test_translation_logs_are_mirrored_into_the_visible_shell`
 

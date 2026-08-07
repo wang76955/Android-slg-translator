@@ -16,6 +16,7 @@ def extract_js_function(source: str, signature: str) -> str:
 
     contexts = [("code", None)]
     escaped = False
+    regex_class = False
     paren_depth = 0
     brace_depth = 0
     body_started = False
@@ -24,6 +25,20 @@ def extract_js_function(source: str, signature: str) -> str:
     while index < len(source):
         char = source[index]
         mode, template_boundary = contexts[-1]
+
+        if mode == "regex":
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "[":
+                regex_class = True
+            elif char == "]":
+                regex_class = False
+            elif char == "/" and not regex_class:
+                contexts.pop()
+            index += 1
+            continue
 
         if mode in ("single", "double", "template"):
             if escaped:
@@ -52,6 +67,13 @@ def extract_js_function(source: str, signature: str) -> str:
             contexts.append(("double", None))
         elif char == "`":
             contexts.append(("template", None))
+        elif char == "/":
+            previous = index - 1
+            while previous >= start and source[previous].isspace():
+                previous -= 1
+            previous_char = source[previous] if previous >= start else ""
+            if previous_char in "([{:;,=!?&|+*%^~<>" or not previous_char:
+                contexts.append(("regex", None))
         elif char == "(":
             paren_depth += 1
         elif char == ")":
@@ -990,10 +1012,10 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
         # while the raw diagnostic remains behind the details disclosure.
         self.assertIn('ENOSPC|No space left', js)
         self.assertIn('return{state:"failed",reason:"space",raw:failed.textContent}', js)
-        self.assertIn('鎵嬫満绌洪棿涓嶈冻', js)
-        self.assertIn('閲婃斁绌洪棿鍚庨噸璇?', js)
+        self.assertIn('\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3', js)
+        self.assertIn('\u8bf7\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5', js)
         self.assertIn('detailToggle(payload.raw||"ENOSPC|No space left")', js)
-        self.assertIn('actionButton("閲婃斁绌洪棿鍚庨噸璇?,()=>retryTask({fileName:payload.fileName,raw:""}))', js)
+        self.assertIn('actionButton("\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5",()=>retryTask({fileName:payload.fileName,raw:""}))', js)
 
         # Keep React-managed controls mounted and avoid direct click shortcuts;
         # the shell may only dispatch events to those existing nodes.
@@ -1003,7 +1025,7 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
                     js,
                     rf'\.\s*{method}\s*\(\s*{moved_node}\b',
                 )
-        self.assertNotRegex(js, r'\.\s*click\s*\(')
+        self.assertNotRegex(js, r'(?:sourceButton|startButton|installButton)\s*\.\s*click\s*\(')
 
         # A single debounced observer prevents React's intermediate renders
         # from causing duplicate shell mounts or state flicker.
@@ -1754,20 +1776,18 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        snapshot_start = js.index("function readTaskSnapshot()")
-        snapshot_end = js.index("function detailToggle(", snapshot_start)
-        snapshot = js[snapshot_start:snapshot_end]
+        snapshot = extract_js_function(js, "function readTaskSnapshot()")
         contract = r'''
 globalThis.window=globalThis;
 window.__slgSelectionError=null;
 window.__slgSelectionEpoch=7;
 window.__slgSelectionMeta={splitApk:true,splitCount:4};
 window.__slgScanWatchdog={epoch:7,timerFired:false,settled:true,applied:false};
-function sourceText(){return `SLG 鏂囨湰缈昏瘧 璁＄畻鍣?apk 路 0 涓剼鏈?宸查€夋嫨锛氳绠楀櫒.apk`}
+function sourceText(){return `\u53d1\u73b0 0 \u4e2a\u53ef\u7ffb\u8bd1\u6587\u4ef6 \u5df2\u9009\u62e9\uff1a\u8ba1\u7b97\u5668.apk`}
 function readProgressLog(){return {raw:``,latest:``}}
 globalThis.document={querySelectorAll(){return []}};
 const result=readTaskSnapshot();
-if(result.state!==`empty`||result.count!==`0`||result.fileName!==`璁＄畻鍣?apk`||!result.splitApk||result.splitCount!==4){
+if(result.state!==`empty`||result.count!==`0`||result.fileName!==`\u8ba1\u7b97\u5668.apk`||!result.splitApk||result.splitCount!==4){
   throw new Error(`settled zero-entry scan misclassified: ${JSON.stringify(result)}`)
 }
 '''
@@ -1779,8 +1799,8 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`璁＄畻鍣?a
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('split?"璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘"', js)
-        self.assertIn('鍏?${payload.splitCount||0} 涓媶鍒嗗寘', js)
+        self.assertIn('split?"\u8be5\u5e94\u7528\u4f7f\u7528\u62c6\u5206\u5b89\u88c5\u5305"', js)
+        self.assertIn('\u5171 \x24{payload.splitCount||0} \u4e2a\u62c6\u5206\u5305', js)
 
     def test_translation_logs_are_mirrored_into_the_visible_shell(self):
         module = self.load_patch()
@@ -2092,27 +2112,13 @@ console.log('ok');
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        snapshot_start = js.index("function readTaskSnapshot(){")
-        snapshot_end = js.index("function detailToggle(", snapshot_start)
-        snapshot_runtime = js[snapshot_start:snapshot_end]
-        topbar_start = js.index("function renderTopbar(state)")
-        topbar_end = js.index("function fileRow(", topbar_start)
-        topbar_runtime = js[topbar_start:topbar_end]
-        render_start = js.index("function renderStateBody(state,payload)")
-        render_end = js.index("function setWorkshopState(", render_start)
-        render_runtime = js[render_start:render_end]
-        state_start = render_end
-        state_end = js.index("function snapshotKey(", state_start)
-        state_runtime = js[state_start:state_end]
-        key_start = js.index("function snapshotKey(s){")
-        key_end = js.index("function retryTask(", key_start)
-        key_runtime = js[key_start:key_end]
-        refresh_start = js.index("function refresh(){")
-        refresh_end = js.index("function decorate(){", refresh_start)
-        refresh_runtime = js[refresh_start:refresh_end]
-        recovery_start = js.index("function recoveryBanner(savedAt){")
-        recovery_end = js.index("function mount(){", recovery_start)
-        recovery_runtime = js[recovery_start:recovery_end]
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        topbar_runtime = extract_js_function(js, "function renderTopbar(state)")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        state_runtime = extract_js_function(js, "function setWorkshopState(state,payload={})")
+        key_runtime = extract_js_function(js, "function snapshotKey(s)")
+        refresh_runtime = extract_js_function(js, "function refresh()")
+        recovery_runtime = extract_js_function(js, "function recoveryBanner(savedAt)")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -2120,7 +2126,7 @@ const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
 const document={querySelectorAll(){return[]}};
 let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0;
-function sourceText(){return`宸查€夋嫨锛欱roken.apk鍙戠幇 5 涓彲缈昏瘧鏂囦欢`}
+function sourceText(){return`\u5df2\u9009\u62e9\uff1aBroken.apk \u53d1\u73b0 5 \u4e2a\u53ef\u7ffb\u8bd1\u6587\u4ef6`}
 function readProgressLog(){return{raw:"",latest:""}}
 function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
 function fileRow(){return textNode(`div`,`file-row`,`file`)}
@@ -2137,12 +2143,12 @@ function collectButtons(node,acc){if(!node)return acc;if(node.tag===`button`)acc
 sessionRestoredAt=123;
 refresh();
 let buttons=collectButtons(shell.rendered[1],[]);
-const dismiss=buttons.find(b=>(b.label||b.text)===`鏀惧純鎭㈠`);
+const dismiss=buttons.find(b=>(b.label||b.text)===`\u653e\u5f03\u6062\u590d`);
 check(dismiss,`recovery banner offers dismiss`);
-check(collectText(shell.rendered[1]).includes(`涓婃缈昏瘧涓柇`),`banner visible before dismiss`);
+check(collectText(shell.rendered[1]).includes(`\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad`),`banner visible before dismiss`);
 dismiss.onclick();
 check(sessionRestoredAt===0,`dismiss clears restored marker`);
-check(!collectText(shell.rendered[1]).includes(`涓婃缈昏瘧涓柇`),`dismiss must re-render immediately without banner`);
+check(!collectText(shell.rendered[1]).includes(`\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad`),`dismiss must re-render immediately without banner`);
 '''
         result = subprocess.run(
             ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + behavior_contract],
@@ -2199,15 +2205,9 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        snapshot_start = js.index("function readTaskSnapshot(){")
-        snapshot_end = js.index("function detailToggle(", snapshot_start)
-        snapshot_runtime = js[snapshot_start:snapshot_end]
-        key_start = js.index("function snapshotKey(s){")
-        key_end = js.index("function retryTask(", key_start)
-        key_runtime = js[key_start:key_end]
-        refresh_start = js.index("function refresh(){")
-        refresh_end = js.index("function decorate(){", refresh_start)
-        refresh_runtime = js[refresh_start:refresh_end]
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        key_runtime = extract_js_function(js, "function snapshotKey(s)")
+        refresh_runtime = extract_js_function(js, "function refresh()")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -2215,7 +2215,7 @@ const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
 const document={querySelectorAll(){return[]}};
 let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionLastBeat=0;
-function sourceText(){return`姝ｅ湪澶勭悊鑴氭湰 1/5`}
+function sourceText(){return`\u6b63\u5728\u5904\u7406\u811a\u672c 1/5`}
 function readProgressLog(){return{raw:"",latest:""}}
 const shell={};
 let states=[];function setWorkshopState(state,payload){states.push([state,payload])}
@@ -2344,7 +2344,11 @@ check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
         )
         compact_css = "".join(css.split())
         self.assertIn(
-            '.workshop-task-shell[data-workshop-state="translating"] .workshop-task-card{animation:none}',
+            '.workshop-task-shell[data-workshop-state="translating"].workshop-task-card{animation:none}',
+            compact_css,
+        )
+        self.assertIn(
+            '.workshop-task-shell[data-workshop-state="patching"].workshop-task-card{animation:none}',
             compact_css,
         )
         self.assertIn("animation:workshopRise", compact_css)
