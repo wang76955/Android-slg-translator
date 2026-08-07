@@ -2,6 +2,12 @@
 
 本清单记录 Task 1 在当前 canonical workshop fixture 上的 26 项失败：1 项 `ERROR`、25 项 `FAIL`。清单只建立证据边界和后续修复入口；Task 1 没有修改产品生成逻辑，也没有把任何失败项伪造为绿色。
 
+### Classification status
+
+本清单中的所有 `Classification` 都是 Phase 0 的 preliminary candidate observation，不是最终根因结论。Phase 1/后续任务必须逐项结合当前实现行为、权威行为来源，以及 fixture 输入/输出和必要的字节或 UTF-8 证据进行确认；若证据不支持当前候选标签，必须替换为允许集合中的其他值。尤其是 `ENCODING_BOUNDARY` 只表示当前观察值得调查，不表示已经证明发生了字节、UTF-8、Node 输入或生产输出转换。
+
+本轮没有分配某个候选标签（例如 `EXTERNAL` 数量为 0）不等于排除该根因；这只是本轮没有分配候选标签，后续仍需调查。
+
 ## 基线证据
 
 工作目录：`apk-work/ui-redesign`
@@ -35,7 +41,7 @@ Ran 2 tests ... OK
 ### WSP-01 `test_translation_cache_is_reused_across_models`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_cache_is_reused_across_models -v`
-- First effective failure: `ValueError: substring not found`，在按 `var _o=`slg-translator-cache:v2:`` 和 `function Do()` 截取 cache runtime 时发生。
+- First effective failure: `ValueError: substring not found`；扫描锚点为 `var _o=slg-translator-cache:v2:` 和 `function Do()`。
 - Expected behavior: 能稳定取得缓存 runtime，并验证同源语言、目标语言及 glossary 隔离，同时允许跨 model 复用最新翻译。
 - Observed behavior: 测试在行为夹具运行前即因固定的下一个函数标记不存在而退出，未能证明缓存行为。
 - Authority: `WorkshopPatchContractTest` 的缓存契约；生产入口 `patch_workshop_ui.patch_assets(js, css)`。
@@ -100,6 +106,7 @@ Ran 2 tests ... OK
 - Observed behavior: Node 在执行生产片段前就无法解析测试夹具，stale-request 行为没有被执行。
 - Authority: `WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests`；installed list/selection epoch 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness 文本边界）；`apk-work/ui-redesign/patch_workshop_ui.py`（被截取生产片段，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests -v` → `SyntaxError: missing ) after argument list`。
 - Green evidence: `NOT-RUN — 先修复夹具编码/语法边界，再判断 epoch 行为。`
@@ -112,6 +119,7 @@ Ran 2 tests ... OK
 - Observed behavior: hard-coded progress 文案/正则 token 未匹配当前生成文本，行为和 CSS 断言未执行。
 - Authority: `WorkshopPatchContractTest.test_long_running_phases_are_not_reported_as_directory_scanning`；`readTaskSnapshot()` 与 `setWorkshopState()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（文本/正则契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（中文 runtime 文本生成，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_long_running_phases_are_not_reported_as_directory_scanning -v` → `AssertionError: expected progress regex token not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 需先统一 UTF-8 文本边界和语义断言。`
@@ -124,6 +132,7 @@ Ran 2 tests ... OK
 - Observed behavior: 精确的中文 action token 断言先失败，恢复动作行为夹具未运行。
 - Authority: `WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui`；`readTaskSnapshot()`、`renderStateBody()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（文案 token 契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（network runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v` → `AssertionError: expected network recovery action token not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 后续任务需先统一文案编码，再验证状态优先级和动作 wiring。`
@@ -136,6 +145,7 @@ Ran 2 tests ... OK
 - Observed behavior: provider error 文案 token 断言失败，递归拆批和 worker 停止行为未执行。
 - Authority: `WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting`；`isNetworkFailure()`、`Bo()`、`Lo()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（中文错误 token）；`apk-work/ui-redesign/patch_workshop_ui.py`（翻译协调器，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v` → `AssertionError: '无法连接 ${P}' not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 后续任务需处理编码边界后再验证请求次数和拆批语义。`
@@ -160,6 +170,7 @@ Ran 2 tests ... OK
 - Observed behavior: 直接中文 copy token 断言失败，未进入后续 workshop contract 检查。
 - Authority: `WorkshopPatchContractTest.test_patch_contains_player_workshop_contract`；`WORKSHOP_COPY`、`patch_assets()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（copy token 断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（WORKSHOP_COPY/生成输出，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_patch_contains_player_workshop_contract -v` → `AssertionError: expected player-facing workshop copy not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 文案编码边界及批准 copy 尚未修复。`
@@ -172,6 +183,7 @@ Ran 2 tests ... OK
 - Observed behavior: 处理详情 token 不匹配，shell 可见性行为夹具未执行。
 - Authority: `WorkshopPatchContractTest.test_patch_installs_visible_android_shell`；`mount()`、`setWorkshopState()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（UI copy token）；`apk-work/ui-redesign/patch_workshop_ui.py`（shell 生成，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_patch_installs_visible_android_shell -v` → `AssertionError: '处理详情' not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 尚未修复文案边界或验证 Android shell 行为。`
@@ -184,6 +196,7 @@ Ran 2 tests ... OK
 - Observed behavior: 进入 `Ne()` 行为 harness 前，固定中文 token 断言已失败。
 - Authority: `WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines`；`Ne()`、`os()`、`patch_assets()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（RPYC/copy token 契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（RPYC patch，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines -v` → `AssertionError: expected cleanup/settings token not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 后续任务需分离文本编码问题与 RPYC 运行时行为。`
@@ -196,6 +209,7 @@ Ran 2 tests ... OK
 - Observed behavior: Node 先在带 mojibake/引号边界的行为 harness 处解析失败，独立选择状态没有被执行。
 - Authority: `WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent`；`savesSelectedPkg`、`importSelectedPkg` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（save/import runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent -v` → `SyntaxError: Unexpected identifier 'cim'`。
 - Green evidence: `NOT-RUN — 先修复 Node harness 的 UTF-8/引号边界。`
@@ -208,6 +222,7 @@ Ran 2 tests ... OK
 - Observed behavior: 行为 harness 在 Node 解析阶段失败，archive list/import/delete 流程未运行。
 - Authority: `WorkshopPatchContractTest.test_save_transfer_can_import_shared_archive`；`listSaveArchives()`、`importSaveBackup()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness 文本）；`apk-work/ui-redesign/patch_workshop_ui.py`（save transfer runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_import_shared_archive -v` → `SyntaxError: missing ) after argument list`。
 - Green evidence: `NOT-RUN — 夹具可解析后再验证 native archive contract。`
@@ -220,6 +235,7 @@ Ran 2 tests ... OK
 - Observed behavior: Node 在游戏 fixture 字符串处解析失败，native list 调用和 state gating 未运行。
 - Authority: `WorkshopPatchContractTest.test_save_transfer_can_pick_game_from_installed_apps`；`listSaveGameApps()`、`updateSavesState()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（save picker runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_pick_game_from_installed_apps -v` → `SyntaxError: Unexpected identifier 'cim'`。
 - Green evidence: `NOT-RUN — 先修复 fixture 编码/字符串边界。`
@@ -232,6 +248,7 @@ Ran 2 tests ... OK
 - Observed behavior: Node 行为 harness 无法解析，runtime actions 与 gating 没有执行。
 - Authority: `WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating`；`refreshSaves()`、`restoreSaves()`、`shareSaveBackup()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（save actions，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating -v` → `SyntaxError: missing ) after argument list`。
 - Green evidence: `NOT-RUN — 夹具解析边界修复后再验证动作契约。`
@@ -244,6 +261,7 @@ Ran 2 tests ... OK
 - Observed behavior: 直接中文 picker token 断言失败，runtime slice 及禁用旧控件断言未执行。
 - Authority: `WorkshopPatchContractTest.test_save_transfer_settings_runtime_contract`；settings save/import production interface。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（save-transfer 文案 token）；`apk-work/ui-redesign/patch_workshop_ui.py`（settings runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_settings_runtime_contract -v` → `AssertionError: '选择游戏' not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 尚未统一 token 编码或验证 save-transfer runtime。`
@@ -256,6 +274,7 @@ Ran 2 tests ... OK
 - Observed behavior: 成功状态中文 token 未匹配，provider/model/custom endpoint 行为断言未执行。
 - Authority: `WorkshopPatchContractTest.test_settings_support_provider_model_and_custom_endpoint`；`readSettingsPrefs()`、`saveSettingsPrefs()`、`applySettingsToReact()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（settings copy token）；`apk-work/ui-redesign/patch_workshop_ui.py`（settings runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_settings_support_provider_model_and_custom_endpoint -v` → `AssertionError: '已保存：' not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 后续任务处理 settings 文本边界后再验证。`
@@ -292,6 +311,7 @@ Ran 2 tests ... OK
 - Observed behavior: space-error copy token 断言失败，runtime bridge 行为 harness 未运行。
 - Authority: `WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract`；`triggerReactButton()`、`renderStateBody()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
+- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（recovery copy token）；`apk-work/ui-redesign/patch_workshop_ui.py`（task runtime，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v` → `AssertionError: '手机空间不足' not found in '<patched bundle>'`。
 - Green evidence: `NOT-RUN — 需先统一 recovery 文案编码，再验证 bridge。`
