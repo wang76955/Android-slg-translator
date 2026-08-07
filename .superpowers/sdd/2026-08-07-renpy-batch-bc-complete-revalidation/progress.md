@@ -12,7 +12,7 @@
 | Task | Status | Implementer | Reviewer | Notes |
 |---|---|---|---|---|
 | 0 | DONE | Task 0 implementation subagent | self-audit complete | Baseline captured; evidence ledger initialized; TDD RED/GREEN recorded; full regression and path audit complete. |
-| 1 | NOT-RUN | — | — | — |
+| 1 | DONE | Task 1 implementation subagent | independent scoped review passed | `bffc701` implementation; `0da088b` classification-evidence remediation; 26 records and stable extractor verified by focused tests. |
 | 2 | NOT-RUN | — | — | — |
 | 3 | NOT-RUN | — | — | — |
 | 4 | NOT-RUN | — | — | — |
@@ -38,7 +38,10 @@
 
 ## Review rounds
 
-No task review has run yet.
+| Task | Review status | Evidence |
+|---|---|---|
+| 0 | Approved after two scoped fix rounds | `d38b551..d3c56b8`, `d3c56b8..3631ce6`, `3631ce6..ecc5e6f`; final focused assertion, hash, protected-stage and diff checks passed. |
+| 1 | Approved after one scoped fix round | `ecc5e6f..bffc701`; `bffc701..0da088b`; focused extractor/syntax tests and 26-row inventory checks passed; no Critical/Important findings remain. |
 
 ## Task 0 execution ledger
 
