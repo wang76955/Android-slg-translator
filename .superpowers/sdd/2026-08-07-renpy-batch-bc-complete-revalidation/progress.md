@@ -16,7 +16,7 @@
 | 2 | DONE | Task 2 implementation subagent | independent scoped review passed | `1684a05` initial state-cluster alignment; `7880e62` runtime/language hardening; `f22bad5` report-artifact cleanup. Five-state group, runtime bridge, recovery/session, language guidance and extractor boundary checks passed. |
 | 3 | DONE | Task 3 implementation subagent | independent scoped review passed after three fix rounds | `a5bfcae` initial; `a4f4654`, `b7775b0`, and `0b5744c` fix rounds; SourceSet, retry/watchdog, epoch, deadline, modal/back, extractor, restore, and split-tuple behavior verified. Node-only evidence; native/device and real split-APK gates remain open. |
 | 4 | DONE | Task 4 implementation subagents | independent scoped review passed after three fix rounds | `8153593` initial; `5796ec4` end-to-end provider/batch/controller/package evidence; `2871bc4` and `01ea7179` exact RED evidence corrections. Four network-stop tests plus four performance tests passed; Node-only evidence boundary remains explicit. |
-| 5 | NOT-RUN | — | — | — |
+| 5 | DONE | Task 5 implementation subagents | independent scoped review passed after one fix round | `8b4c4e3` initial cache/settings/shell/progress alignment; `abf24a7` production-path evidence for cache resume, visible DOM copy, and `Ce→Lo` settings invocation. Final 35-test regression, compile, diff, and protected-stage checks passed; Node-only/device limits remain explicit. |
 | 6 | NOT-RUN | — | — | — |
 | 7 | NOT-RUN | — | — | — |
 | 8 | NOT-RUN | — | — | — |
@@ -45,6 +45,7 @@
 | 2 | Approved after one scoped fix round plus final artifact cleanup review | `7517acb..1684a05`; `1684a05..7880e62`; `1684a05..f22bad5`; five-state group, runtime Node fixture, three language branches, session deletion and regex tests passed; no Critical/Important findings remain. |
 | 3 | Approved after three scoped fix rounds | `3df1369..a5bfcae` initial review; `a5bfcae..a4f4654` fixed SourceSet/retry/deadline/epoch/extractor/inventory issues; `a4f4654..b7775b0` fixed persisted SourceSet and lexical comment/regex issues; `b7775b0..0b5744c` fixed atomic split metadata merge. Final 17-test focused run, `py_compile`, diff checks, and protected-stage audit passed; no Critical/Important findings remain. |
 | 4 | Approved after three scoped fix rounds | `5487cf9..8153593` initial review found P1 harness/package-gate and P2 evidence gaps; `8153593..5796ec4` fixed complete provider→batch→outer-controller/package path and exact RED records; `5796ec4..2871bc4` corrected WSP-04 code point; `2871bc4..01ea7179` corrected literal escaped evidence. Final 8-test network/performance run and exact parent-runner byte comparison passed; no Critical/Important findings remain. |
+| 5 | Approved after one scoped fix round | `b4371d9..8b4c4e3` initial review found cache/source validation, inert-copy, and settings-invocation evidence gaps; `8b4c4e3..abf24a7` fixed all three with production-path behavior tests. Final 35-test regression and Node-only evidence audit passed; no Critical/Important findings remain. |
 
 ## Task 0 execution ledger
 
