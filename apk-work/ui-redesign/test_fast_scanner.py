@@ -2511,6 +2511,227 @@ public class Paint {
                 stderr=subprocess.PIPE,
             )
 
+    def test_translation_font_gate_adds_accepted_codepoints_outside_baseline(self):
+        """An accepted translation glyph must enter the final gate, not baseline only."""
+        compiler = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app"
+                    / "TranslationCompiler.java")
+        source = compiler.read_text("utf-8")
+        self.assertLess(source.index("baselineReport.isComplete()"),
+                        source.index("codePointsOfTranslations(merged.values())"))
+        self.assertLess(source.index("codePointsOfTranslations(merged.values())"),
+                        source.index("if (!fontReport.isComplete())"))
+
+        harness = r"""
+package com.slgtranslator.app;
+
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+public final class TranslationFontGateHarness {
+    public static void main(String[] args) throws Exception {
+        File root = new File(args[0]);
+        File apk = new File(root, "fixture.apk");
+        File cache = new File(root, "cache");
+        File external = new File(root, "external");
+        cache.mkdirs();
+        external.mkdirs();
+
+        byte[] pickle = RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2, "slgtranslated", "game/t.rpy",
+                Arrays.<String[]>asList(new String[]{"Hello", "Hello"}), 17, "fixture-key");
+        byte[] template = deflate(pickle);
+        try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(apk))) {
+            put(out, "assets/x-game/x-script.rpyc", template);
+            put(out, "assets/fonts/cjk.ttf", "BASELINE_CJK");
+            put(out, "assets/x-game/x-tl/x-chinese/x-style.rpyc",
+                    "line_break east_asian text_font");
+        }
+        TranslationCompiler.TemplateMeta detected = TranslationCompiler.readTemplateMeta(apk);
+        require(detected.compatibility != null && detected.compatibility.canGenerate(),
+                "fixture template must reach the compile path: "
+                        + (detected.compatibility == null ? "null" : detected.compatibility.reason)
+                        + " protocol=" + (detected.compatibility == null
+                        ? -1 : detected.compatibility.pickleProtocol)
+                        + " builtins=" + (detected.compatibility != null
+                        && detected.compatibility.usesBuiltins));
+
+        Set<Integer> baseline = RenpyFontSupport.defaultRequiredCodePoints();
+        require(!baseline.contains((int) '界'),
+                "fixture character must be absent from fixed baseline");
+        TestContext context = new TestContext(cache, external);
+        RenpyFontSupport.FontReport baselineReport = RenpyFontSupport.inspect(
+                context, apk, baseline);
+        require(baselineReport.isComplete(),
+                "baseline preflight must pass before the accepted translation is considered: "
+                        + baselineReport.missingCodePoints);
+
+        Set<Integer> finalRequired = new LinkedHashSet<>(baseline);
+        finalRequired.addAll(RenpyFontSupport.codePointsOfTranslations(
+                Arrays.asList("界")));
+        require(finalRequired.contains((int) '界'),
+                "accepted translation code point must be in final required set");
+        RenpyFontSupport.FontReport finalReport = RenpyFontSupport.inspect(
+                context, apk, finalRequired);
+        require(finalReport.missingCodePoints.contains((int) '界'),
+                "final report must expose missing accepted translation glyph");
+        require(!finalReport.isComplete(), "missing accepted glyph must fail closed");
+
+        File output = new File(external, "SLG-Translator-Output/x-tl/x-slgtranslated");
+        output.mkdirs();
+        File translation = new File(output, "translations.rpy");
+        java.nio.file.Files.write(translation.toPath(), (
+                "translate slgtranslated strings:\n"
+                + "    old \"Hello\"\n"
+                + "    new \"界\"\n").getBytes(StandardCharsets.UTF_8));
+
+        require(TranslationCompiler.parseTranslationRpy(
+                new String(java.nio.file.Files.readAllBytes(translation.toPath()),
+                        StandardCharsets.UTF_8)).size() == 1,
+                "fixture translation must be accepted by the production parser");
+
+        TestCall call = new TestCall(apk.getAbsolutePath());
+        TranslationCompiler.compileTranslationsIntoApk(context, call);
+        require(call.rejected != null && call.rejected.contains(
+                        "renpy_font_missing_glyphs: missingCodePoints="),
+                "final translation gate must reject the accepted translation: " + call.rejected);
+        require(call.rejected.contains(String.valueOf((int) '界')),
+                "rejection must include missingCodePoints for 界: " + call.rejected);
+        require(call.resolved == null, "blocked final gate must not resolve a compile result");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    private static void put(ZipOutputStream out, String name, String body) throws Exception {
+        out.putNextEntry(new ZipEntry(name));
+        out.write(body.getBytes(StandardCharsets.UTF_8));
+        out.closeEntry();
+    }
+
+    private static void put(ZipOutputStream out, String name, byte[] body) throws Exception {
+        out.putNextEntry(new ZipEntry(name));
+        out.write(body);
+        out.closeEntry();
+    }
+
+    private static byte[] deflate(byte[] pickle) throws Exception {
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (DeflaterOutputStream stream = new DeflaterOutputStream(compressed)) {
+            stream.write(pickle);
+        }
+        return compressed.toByteArray();
+    }
+
+    private static final class TestContext extends Context {
+        private final File cache;
+        private final File external;
+
+        TestContext(File cache, File external) {
+            this.cache = cache;
+            this.external = external;
+        }
+
+        @Override public File getCacheDir() { return cache; }
+        @Override public File getFilesDir() { return cache; }
+        @Override public File getExternalFilesDir(String type) { return external; }
+    }
+
+    private static final class TestCall extends PluginCall {
+        private final String apkUri;
+        String rejected;
+        JSObject resolved;
+
+        TestCall(String apkUri) { this.apkUri = apkUri; }
+
+        @Override public String getString(String key) {
+            if ("apkUri".equals(key)) return apkUri;
+            if ("activationMode".equals(key)) return "selectable";
+            return null;
+        }
+
+        @Override public void resolve(JSObject value) { resolved = value; }
+        @Override public void reject(String message) { rejected = message; }
+    }
+}
+
+final class TranslationFontGateHarnessMarker {}
+"""
+        typeface_stub = r"""
+package android.graphics;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+public class Typeface {
+    final String marker;
+    private Typeface(String marker) { this.marker = marker; }
+    public static Typeface createFromFile(String path) throws RuntimeException {
+        try {
+            return new Typeface(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            throw new RuntimeException(error);
+        }
+    }
+}
+"""
+        paint_stub = r"""
+package android.graphics;
+
+public class Paint {
+    private Typeface typeface;
+    public Typeface setTypeface(Typeface value) { this.typeface = value; return value; }
+    public boolean hasGlyph(String value) {
+        if (value == null || value.isEmpty() || typeface == null) return false;
+        int codePoint = value.codePointAt(0);
+        return codePoint < 128 || codePoint != '界';
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="renpy-translation-font-gate-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "TranslationFontGateHarness.java"
+            classes = temporary_path / "classes"
+            graphics_dir = temporary_path / "android" / "graphics"
+            graphics_dir.mkdir(parents=True)
+            (graphics_dir / "Typeface.java").write_text(typeface_stub, "utf-8")
+            (graphics_dir / "Paint.java").write_text(paint_stub, "utf-8")
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            try:
+                subprocess.run(
+                    [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                     "-d", str(classes), "-classpath", third_party_classpath(),
+                     *map(str, stubs), str(graphics_dir / "Typeface.java"),
+                     str(graphics_dir / "Paint.java"),
+                     *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                     str(harness_path)],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as error:
+                self.fail(error.stderr.decode("utf-8", errors="replace"))
+            try:
+                subprocess.run(
+                    [str(JAVA), "-cp", str(classes),
+                     "com.slgtranslator.app.TranslationFontGateHarness", str(temporary_path)],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as error:
+                self.fail(error.stderr.decode("utf-8", errors="replace"))
+
     def test_renpy_style_font_rewrite_rebuilds_rpc2_and_supports_schinese(self):
         """A real RPC2/pickle fixture must rewrite only a font value, not bytes."""
         compiler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java"
