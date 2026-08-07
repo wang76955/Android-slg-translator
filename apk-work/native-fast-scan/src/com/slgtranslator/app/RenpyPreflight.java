@@ -65,6 +65,12 @@ public final class RenpyPreflight {
 
         List<RenpyCompatibilityReport.Issue> issues = new ArrayList<>();
         RpycCompatibility.GenerationSupport generation = source.rpyc.generationSupport;
+        if (source.rpyc.pickleProtocol < 0 || "invalid_rpyc".equals(source.rpyc.reason)) {
+            issues.add(new RenpyCompatibilityReport.Issue(
+                    "renpy_rpyc_invalid", "RPYC structure could not be safely inspected"));
+            return report(source, RenpyCompatibilityReport.SupportLevel.UNSUPPORTED,
+                    RenpyCompatibilityReport.ActivationStrategy.NONE, issues);
+        }
         if (generation == RpycCompatibility.GenerationSupport.LEGACY_EXTRACT_ONLY) {
             issues.add(new RenpyCompatibilityReport.Issue(
                     "renpy_python2_writer_unavailable", "Legacy Python 2 output is extract-only"));

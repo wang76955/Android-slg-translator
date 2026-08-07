@@ -2325,6 +2325,7 @@ public final class RenpyPreflightHarness {
         ):
             self.assertIn(field, source)
         self.assertIn("__slgRenpyCompatibilityReport", source)
+        self.assertIn("__slgAccumulateRenpyCompatibility", source)
         self.assertIn("sanitizedJson", source)
         self.assertIn("Ren'Py 兼容性预检", source)
         report_pos = source.index("__slgRenpyCompatibilityReport")
