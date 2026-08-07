@@ -728,9 +728,9 @@ function setReactInputValue(input,value)""",
     branch_new = (
         'if(payload.patchedApkPath)card.append(textNode("p","workshop-state-copy workshop-scan-elapsed","' + "\u4f4d\u7f6e\uff1a" + '"+payload.patchedApkPath));'
         'body.append(card);const actions=textNode("div","workshop-summary-list");'
-        'if(payload.patchedApkPath)actions.append(actionButton("' + "\u4fdd\u5b58\u8865\u4e01 APK" + '",()=>savePatchedApk(payload.patchedApkPath)));'
+        'if(payload.patchedApkPath)actions.append(actionButton("' + "\u4fdd\u5b58 APK" + '",()=>savePatchedApk(payload.patchedApkPath)));'
         'if(payload.installAvailable){actions.append(actionButton("' + "\u5378\u8f7d\u539f\u7248\u5e76\u5b89\u88c5\u8865\u4e01\u7248" + '",()=>clickReact("' + "\u5378\u8f7d\u539f\u7248+\u5b89\u88c5\u8865\u4e01" + '")));'
-        'actions.append(actionButton("' + "\u76f4\u63a5\u5b89\u88c5" + '",()=>triggerReactButton(installButton),true))}'
+        'actions.append(actionButton("' + "\u7acb\u5373\u5b89\u88c5" + '",()=>triggerReactButton(installButton),true))}'
         'if(actions.children.length)body.append(actions);return body}'
     )
     if runtime.count(branch_old) != 1:
@@ -1232,7 +1232,7 @@ async function Lo(e){'''
         "let _map=new Map(),_tmap=new Map(_fr.translations);"
         "for(let r of _fr.texts){let v=_tmap.get(r.keyPath)||_tmap.get(r.text);if(v&&v.trim())_map.set(r.text,v)}"
         "let{content:_c,fileType:_ft}=o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}):await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name});"
-        "let l=ke(_c,_ft,``,g),_need=l.filter(t=>!t||!_map.has(t.text));"
+        "let l=ke(_c,_ft,``,g);if(l.length===0){O(`  当前文件没有可翻译文本，跳过旧缓存输出`,`info`);(_maxDone=Math.max(_maxDone,c+1),ue({current:_maxDone,total:ae.length}));return}let _need=l.filter(t=>!t||!_map.has(t.text));"
         "if(_need.length){let _r=await Lo({texts:_need,sourceLang:g,targetLang:y,baseURL:e,apiKey:te,model:S,batchSize:ps,onProgress:()=>{}});if(_r&&_r.successCount>0){for(let t of _need){let v=_r.translations.get(t.keyPath)||_r.translations.get(t.text);if(v&&v.trim())_map.set(t.text,v)}O(`  \u8865\u5145\u7ffb\u8bd1 ${_r.successCount} \u6761\u65b0\u6587\u672c`,`success`)}}"
         "let _outs=[rs(o,l,_map,`None`),rs(o,l,_map,g)],_uniq=new Map;oe||_outs.unshift(rs(o,l,_map,y));"
         "for(let e of _outs)_uniq.set(e.outputPath,e);"
@@ -1800,7 +1800,6 @@ render();
 
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     verify_canonical_base_text(js, css)
-    copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
     patched = patch_scan_flow(js)
     patched = patch_translation_cache(patched)
     patched = patch_translation_network(patched)
@@ -1822,7 +1821,7 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
         "已合并读取基础 APK 与全部 split 资源",
         1,
     )
-    return patched + copy_contract + enhance_runtime(runtime), css + "\n" + WORKSHOP_CSS
+    return patched + enhance_runtime(runtime), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:

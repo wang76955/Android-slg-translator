@@ -1201,8 +1201,64 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, css = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        for copy in module.WORKSHOP_COPY:
-            self.assertIn(copy, js)
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        source_runtime = extract_js_function(js, "function openSourceChooser()")
+        action_runtime = extract_js_function(js, "function actionButton(label,handler,secondary)")
+        detail_runtime = extract_js_function(js, "function detailToggle(raw,live=false)")
+        visible_runtime = "\n".join(
+            (render_runtime, source_runtime, action_runtime, detail_runtime)
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+window.requestAnimationFrame=callback=>callback();
+window.setTimeout=callback=>{callback();return 1};
+globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
+function node(tag,text){return{tag,textContent:text??"",children:[],className:"",hidden:false,dataset:{},append(...items){this.children.push(...items)},appendChild(item){this.children.push(item)},setAttribute(){},classList:{add(){},remove(){}}}}
+globalThis.document={createElement:tag=>node(tag),querySelector:()=>null,querySelectorAll:()=>[]};
+function textNode(tag,cls,text){const value=node(tag,text);value.className=cls;return value}
+function fileRow(){return textNode("div","file-row","")}
+function triggerReactButton(){}
+function clickReact(){return true}
+function savePatchedApk(){}
+function closeSourceChooser(){}
+function openInstalledApps(){}
+function armModalHistory(){}
+function focusableIn(){return[]}
+let detailsOpen=false,sourceDialog=null,runtimeRoot={append(){}},installButton={isConnected:true},modalHistoryClosing=false,manualIdle=false,lastSnapshot="",previousSourceFocus=null,sourceButton={};
+function trapModalFocus(){}
+function collect(node,out=[]){if(!node)return out;if(node.textContent)out.push(String(node.textContent));for(const child of node.children||[])collect(child,out);return out}
+function buttons(node,out=[]){if(!node)return out;if(node.tag===`button`)out.push(node);for(const child of node.children||[])buttons(child,out);return out}
+const idle=renderStateBody(`idle`,{});
+const ready=renderStateBody(`ready`,{count:1});
+const completed=renderStateBody(`completed`,{fileName:`game.apk`,patchedApkPath:`/tmp/game-patched-signed.apk`,installAvailable:true,raw:`done`});
+openSourceChooser();
+const source=sourceDialog;
+const labels=collect(idle).concat(collect(ready),collect(completed),collect(source));
+const buttonLabels=buttons(idle).concat(buttons(ready),buttons(completed),buttons(source)).map(button=>button.textContent);
+for(const required of REQUIRED_COPY)check(labels.includes(required)||buttonLabels.includes(required),`copy is visible: ${required}`);
+check(buttonLabels.includes(`立即安装`),`install copy comes from completed DOM`);
+check(buttonLabels.includes(`保存 APK`),`save copy comes from completed DOM`);
+'''
+        required_copy = (
+            "让喜欢的故事，用中文继续。",
+            "从文件选择 APK",
+            "处理详情",
+            "立即安装",
+            "保存 APK",
+        )
+        behavior_contract = behavior_contract.replace(
+            "REQUIRED_COPY", repr(list(required_copy)).replace("'", "`")
+        )
+        result = subprocess.run(
+            ["node", "-e", visible_runtime + "\n" + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("workshop-copy:", js)
         compact_css = "".join(css.split())
         for token in (
             "--workshop-primary",
@@ -1463,6 +1519,10 @@ check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh
                 extract_js_function(js, "function applySettingsToReact(prefs)"),
             )
         )
+        controller_runtime = extract_js_function(js, "Ce=async()=>")
+        scheduler_runtime = extract_js_function(
+            js, "async function runFileTasksParallel(e,t,concurrency=3)"
+        )
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -1485,9 +1545,10 @@ globalThis.document={querySelector:()=>root,createElement:()=>({})};
 globalThis.findReactApiInput=()=>null;
 globalThis.applyApiKeyToReact=()=>{};
 const invoked=[];
-provider.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
-model.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
-endpoint.addEventListener("change",()=>invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value}));
+let x="openai",re="",S="gpt-4o-mini";
+provider.addEventListener("change",()=>{x=provider.value;invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value})});
+model.addEventListener("change",()=>{S=model.value;invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value})});
+endpoint.addEventListener("change",()=>{re=endpoint.value;invoked.push({provider:provider.value,model:model.value,endpoint:endpoint.value})});
 const prefs={providerId:"custom",model:"custom",customBaseURL:"https://例子.test/v1",customModel:"自定义模型"};
 saveSettingsPrefs(prefs);
 check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).providerId==="custom","provider stored exactly");
@@ -1495,14 +1556,38 @@ check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).customBaseURL==="https://�
 check(JSON.parse(localStorage.getItem(SETTINGS_KEY)).customModel==="自定义模型","model stored as UTF-8");
 check(applySettingsToReact(prefs)===true,"settings bridge found current controls");
 await new Promise(resolve=>setTimeout(resolve,5));
-const invocation={provider:provider.value,model:model.value,endpoint:endpoint.value};
-check(invocation.provider==="custom","provider reaches translation invocation");
-check(invocation.model==="自定义模型","model reaches translation invocation");
-check(invocation.endpoint==="https://例子.test/v1","custom endpoint reaches translation invocation");
 check(invoked.length>=3,"bridge dispatched current-control events");
+const invocations=[];
+let n="/cache/game.apk",ae=[{name:"script.rpy",fileType:"rpy"}],te="api-key",oe=false;
+let y="zh",g="en",m=null,i="game.apk",fs=1,ps=1,_mode="resume";
+const _e=[{id:"openai",baseURL:"https://openai.test/v1"},{id:"deepseek",baseURL:"https://deepseek.test/v1"}];
+let vo={},cacheIndex={},_dirty={},bo=false,he={current:[]};
+function Co(){} function wo(){} function U(value){return String(value)}
+function is(value){return value} function ns(){return false} function ke(){return[{text:"needs translation",keyPath:"script.rpy::1",duplicateKeys:[]}]}
+function O(){} function ce(){} function fe(){} function ue(){} function w(){}
+async function Lo(args){invocations.push(args);return{translations:new Map(),successCount:0,error:"fixture request"}}
+const E={readFileContent:async()=>({content:"source",fileType:"rpy"}),compileTranslationsIntoApk:async()=>({compiled:0}),buildPatchedApk:async()=>({uri:"patched.apk"})};
+const ds={rpy:"rpy"};
+await Ce();
+check(invocations.length===1,"production controller invoked translation entry point");
+check(invocations[0].baseURL==="https://例子.test/v1","custom endpoint reaches production entry point");
+check(invocations[0].model==="自定义模型","custom model reaches production entry point");
+check(x==="custom","provider control updates production controller state");
+check(invocations[0].targetLang==="zh"&&invocations[0].sourceLang==="en","language arguments remain intact");
 '''
         result = subprocess.run(
-            ["node", "-e", settings_runtime + "\n(async()=>{" + behavior_contract + "})().catch(error=>{console.error(error);process.exitCode=1})"],
+            [
+                "node",
+                "-e",
+                settings_runtime
+                + "\n(async()=>{"
+                + behavior_contract.replace(
+                    "await Ce();",
+                    "let Ce;\n" + controller_runtime + "\n" + scheduler_runtime + "\nawait Ce();",
+                    1,
+                )
+                + "})().catch(error=>{console.error(error);process.exitCode=1})",
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1851,28 +1936,49 @@ check(refreshes===1,`refresh requested`);
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        key_expression = extract_js_expression(js, "let _fk=`slg-file-v1:")
-        self.assertTrue(key_expression.startswith("let _fk=`slg-file-v1:"))
-        key_logic = key_expression.replace("let _fk=", "return ", 1)
+        controller_runtime = extract_js_function(js, "Ce=async()=>")
+        scheduler_runtime = extract_js_function(
+            js, "async function runFileTasksParallel(e,t,concurrency=3)"
+        )
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
-globalThis.window={__slgSelectionMeta:{packageName:"com.example.game"}};
+globalThis.window=globalThis;
+window.__slgSelectionMeta={packageName:"com.example.game"};
 globalThis.U=value=>String(value);
-function fileKey(n,o,g,y,S){
-  KEY_BODY
-}
-const source={name:"script.rpyc"};
-const text="same validated source text";
-const keyA=fileKey("/cache/game.apk",source,"en","zh","model-a");
-const keyB=fileKey("/cache/game.apk",source,"en","zh","model-b");
-check(keyA.startsWith("slg-file-v1:"),"current file cache namespace");
-check(keyA===keyB,"model/provider changes preserve file cache identity");
-const cache=new Map([[keyA,{texts:[{text}],translations:[[text,"validated translation"]],count:1}]]);
-const entry=cache.get(keyB);
-check(entry&&entry.texts[0].text===text,"same source text is validated before reuse");
-check(entry.translations[0][1]==="validated translation","validated file translation is reused");
+let n="/cache/game.apk",ae=[{name:"script.rpy",fileType:"rpy"}],te="api-key",oe=false;
+let x="openai",re="https://openai.test/v1",S="model-a",y="zh",g="en",m=null,i="game.apk",fs=1,ps=1,_mode="full";
+let vo={},cacheIndex={},_dirty={},bo=false,he={current:[]},requests=[],writes=[],currentRecords=[];
+const _e=[{id:"openai",baseURL:"https://openai.test/v1"},{id:"deepseek",baseURL:"https://deepseek.test/v1"}];
+function Co(){} function wo(){} function is(value){return value} function ns(){return true}
+function ke(){return currentRecords}
+function O(){} function ce(){} function fe(){} function ue(){} function w(){}
+function Me(value){return value} function ds(value){return value}
+function rs(file,records,translations){return{outputPath:`${file.name}.translated`,content:[...translations.entries()].map(([old,value])=>`${old}=${value}`).join("\n")}}
+async function Ne(path,content){writes.push({path,content})}
+const E={readFileContent:async()=>({content:"source",fileType:"rpy"}),compileTranslationsIntoApk:async()=>({compiled:0}),buildPatchedApk:async()=>({uri:"patched.apk"})};
+async function Lo(args){requests.push({provider:x,model:S,baseURL:args.baseURL,texts:args.texts.map(item=>item.text)});return{translations:new Map(args.texts.map(item=>[item.text,`${item.text} translated`])),successCount:args.texts.length}}
 '''
-        behavior_contract = behavior_contract.replace("KEY_BODY", key_logic)
+        behavior_contract += "let Ce;\n" + controller_runtime + "\n" + scheduler_runtime + r'''
+async function run(sourceRecords,provider,model,endpoint,mode){currentRecords=sourceRecords;x=provider;S=model;re=endpoint;_mode=mode;await Ce()}
+await run([{text:"same validated source text",keyPath:"script.rpy::1",duplicateKeys:[]}],"openai","model-a","https://openai.test/v1","full");
+check(Object.keys(vo).filter(key=>key.startsWith("slg-file-v1:")).length===1,"production full path writes one file cache entry");
+const cacheKey=Object.keys(vo).find(key=>key.startsWith("slg-file-v1:"));
+check(cacheKey.startsWith("slg-file-v1:"),"current file cache namespace");
+check(vo[cacheKey].translations[0][1]==="same validated source text translated","production path stores translated text");
+const firstRequestCount=requests.length;
+const firstWriteCount=writes.length;
+await run([{text:"same validated source text",keyPath:"script.rpy::1",duplicateKeys:[]}],"deepseek","model-b","https://deepseek.test/v1","resume");
+check(Object.keys(vo).filter(key=>key.startsWith("slg-file-v1:")).length===1,"provider/model changes preserve file cache identity");
+check(requests.length===firstRequestCount,"matching current source reuses cache without translation request");
+check(writes.length>firstWriteCount,"resume path regenerates output from cached translation");
+await run([{text:"changed source text",keyPath:"script.rpy::1",duplicateKeys:[]}],"custom","model-c","https://custom.test/v1","resume");
+check(requests.length===firstRequestCount+1,"changed source does not reuse stale cache");
+check(requests.at(-1).texts.length===1&&requests.at(-1).texts[0]==="changed source text","changed source follows normal translation request");
+const writesBeforeRemoval=writes.length;
+await run([],"custom","model-d","https://custom.test/v1","resume");
+check(requests.length===firstRequestCount+1,"removed source does not trigger a stale translation request");
+check(writes.length===writesBeforeRemoval,"removed source does not regenerate stale cached output");
+'''
         result = subprocess.run(
             ["node", "-e", behavior_contract],
             capture_output=True,
@@ -1882,7 +1988,6 @@ check(entry.translations[0][1]==="validated translation","validated file transla
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertIn('def patch_translation_cache(js: str) -> str:', Path(module.__file__).read_text("utf-8"))
 
     def test_network_failures_stop_batches_without_recursive_splitting(self):
         module = self.load_patch()
