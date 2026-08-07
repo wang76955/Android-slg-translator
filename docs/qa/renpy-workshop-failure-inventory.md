@@ -403,7 +403,7 @@ sys.exit(not result.wasSuccessful())
 ### WSP-04 `test_fatal_network_stops_outer_file_controller`
 
 - RED command: the exact parent-source runner above, selecting `test_fatal_network_stops_outer_file_controller`.
-- First RED diagnostic: `AssertionError: '...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悙澶辫触锛岃鏌ョ湅鏃ュ織`}:{}' not found in generated patch bundle`.
+- First RED diagnostic: `AssertionError: '...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悊澶辫触锛岃鏌ョ湅鏃ュ織`}:{}' not found in generated patch bundle`.
 - Corrected contract: the current UTF-8 error message is asserted, while the test continues to exercise the extracted `runFileTasksParallel(..., concurrency=3)` scheduler.
 - GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
 - Exact GREEN result: `Ran 1 test in 0.173s` followed by `OK`.
