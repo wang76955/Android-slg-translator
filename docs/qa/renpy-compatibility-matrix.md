@@ -1,10 +1,10 @@
 # Ren'Py 兼容性矩阵与样本证据
 
-> 版本：批次 A / Task 16 / C16
+> 版本：批次 A / Task 16 / C16 / Task 19
 >
 > 冻结日期：2026-08-08（Asia/Shanghai）
 >
-> 当前结论：C16 机器矩阵和自动化门禁已重建；当前 scanner/workshop/full discover 离线回归为绿色（full discover 192 项、1 个明确 audit-fixture skip），但本工作区仍没有可用于真机验收的完整第三方 Ren'Py 游戏样本。因此真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动、old save 和 rollback 仍保持 `NOT-RUN`，不是 `0` 或 `success`。
+> 当前结论：C16 机器矩阵和 Task 19 自动化门禁已重建并 fresh 复核为绿色：scanner `77` 项、workshop `60` 项、quality/coverage/performance 合计 `37` 项（1 个明确 audit-fixture skip）、full discover `192` 项（1 个明确 audit-fixture skip），均无 failures/errors。当前工作区仍没有可用于真机验收的完整第三方 Ren'Py 游戏样本。因此真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动、old save 和 rollback 仍保持 `NOT-RUN`，不是 `0` 或 `success`。
 
 ## 1. 证据边界
 
@@ -167,14 +167,15 @@ docs/qa/evidence/<sample-id>/device-smoke.txt
 
 | 检查 | 命令/证据 | 当前记录 |
 |---|---|---|
-| scanner regression | `python -m unittest test_fast_scanner.py -v` | C15 后实际为 `77 passed` |
-| quality / coverage / performance | `python -m unittest test_translation_quality.py test_translation_coverage.py test_engine_performance.py -v` | 实际为 `30 passed, 1 skipped`；skip 是真实完整 APK/语料缺失，不能当 coverage 通过 |
-| syntax / loader contract | `python -m py_compile ...`；`test_shared_apk_loader_and_installed_selection_behavior` | 实际通过；split loader 的 Node 语法错误已修复 |
-| built APK | `python -m unittest test_built_apk.py -v` | Task 18 资产门已在重建后通过；Task 20 将重新记录完整 `test_built_apk.py` 结果、SHA-256 和证书 |
+| scanner regression | `python -m unittest test_fast_scanner.py -v` | Task 19 fresh 实际为 `77` tests，0 failures，OK |
+| workshop regression | `python -m unittest test_workshop_patch.py -v` | Task 19 fresh 实际为 `60` tests，0 failures，OK |
+| quality / coverage / performance | `python -m unittest test_translation_quality.py test_translation_coverage.py test_engine_performance.py -v` | Task 19 fresh 实际为 `37` tests，0 failures，1 explicit audit-fixture skip；skip 是真实完整 APK/语料缺失，不能当 coverage 通过 |
+| syntax / loader contract | `python -m py_compile ...`；`test_shared_apk_loader_and_installed_selection_behavior` | Task 19 fresh 实际通过；split loader 的 Node 语法错误已修复 |
+| built APK | `python -m unittest test_built_apk.py -v` | 随 Task 19 full discover 重新执行并通过；Task 20 仍需单独记录完整 APK/签名/哈希产物 |
 | Java/D8 helper | `python build_fast_scanner.py` | 已实际构建成功；D8 使用 build-local response file 规避 Windows 命令行长度限制 |
 | helper classes | `dexdump` on `generated/classes7.dex` | C15 后已验证 `FastApkScanner`、`RpycTextExtractor`、`RpycPickleWriter`、`RenpyDialogueTranslation` 各恰好一个；Task 20 将补齐完整 12 类清单 |
 | workshop APK | `python build_workshop_apk.py` | C15 后构建返回 0；Task 20 将重新记录完整构建、签名、SHA-256 和版本证据 |
-| full discover | `python -m unittest discover -s . -p 'test_*.py' -v` | C15 后实际为 `192` 项、0 failures/errors、1 个明确 `audit APK/extracted texts not present` skip；真实样本/设备仍 NOT-RUN |
+| full discover | `python -m unittest discover -s . -p 'test_*.py' -v` | Task 19 fresh 实际为 `192` 项、0 failures/errors、1 个明确 `audit APK/extracted texts not present` skip；真实样本/设备仍 NOT-RUN |
 
 ## 6. 矩阵完成规则
 

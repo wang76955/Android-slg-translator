@@ -1,8 +1,8 @@
 # Ren'Py 批次 A 发布检查表
 
-> 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16，以及本次 C16 发布机器矩阵复核。
+> 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16，以及本次 C16/Task 19 发布机器矩阵和自动化门禁复核。
 >
-> 当前状态：未批准发布。C16 已重建机器矩阵；C15 后 full discover 为 `192` 项、0 failures/errors、1 个明确 audit-fixture skip，但工具 APK/fixture 回归和真实游戏真机验收仍是独立条件。本工作区没有完整第三方 Ren'Py 游戏样本，真实样本的 coverage、安装、启动、old save 和 rollback 仍为 `NOT-RUN`。
+> 当前状态：未批准发布。Task 19 fresh 自动化门禁已通过：scanner `77` 项、workshop `60` 项、quality/coverage/performance 合计 `37` 项（1 个明确 audit-fixture skip）、full discover `192` 项（1 个明确 audit-fixture skip），均无 failures/errors。Task 20–23 的产物、真实游戏样本和真机验收仍是独立条件；本工作区没有完整第三方 Ren'Py 游戏样本，真实样本的 coverage、安装、启动、old save 和 rollback 仍为 `NOT-RUN`。
 
 ## 1. 发布原则
 
@@ -18,9 +18,10 @@
 
 ```powershell
 Set-Location 'D:\文件翻译\apk-work\ui-redesign'
-python -m py_compile patch_workshop_ui.py test_fast_scanner.py test_translation_coverage.py
+python -m py_compile patch_workshop_ui.py test_workshop_patch.py test_fast_scanner.py test_translation_quality.py test_translation_coverage.py test_engine_performance.py test_built_apk.py
 python -m unittest test_fast_scanner.py -v
-python -m unittest test_translation_quality.py test_translation_coverage.py -v
+python -m unittest test_workshop_patch.py -v
+python -m unittest test_translation_quality.py test_translation_coverage.py test_engine_performance.py -v
 python -m unittest discover -s . -p 'test_*.py' -v
 ```
 
@@ -28,12 +29,12 @@ python -m unittest discover -s . -p 'test_*.py' -v
 
 | 检查项 | 通过标准 | 证据文件/输出 | 状态 |
 |---|---|---|---|
-| Python syntax | 所有目标 Python 文件 `py_compile` 返回 0 | 命令输出 | ☐ |
-| scanner contract | 无失败；生成物缺失时只能有明确外部条件 skip | `test_fast_scanner` 输出 | ☐ |
-| translation quality | 无失败；reject、placeholder、markup、collision 检查通过 | `test_translation_quality` 输出 | ☐ |
-| coverage logic | 无失败；真实审计缺输入时保留显式 skip | `test_translation_coverage` 输出 | ☐ |
-| full discover | 无失败；每个 skip 在本清单第 6 节登记原因 | C15 后实际：`192` 项，0 failures/errors，1 个 `audit APK/extracted texts not present` skip | ☐ |
-| diff hygiene | `git diff --check` 返回 0 | 命令输出 | ☐ |
+| Python syntax | 所有目标 Python 文件 `py_compile` 返回 0 | Task 19 fresh 命令返回 0 | PASS |
+| scanner contract | 无失败；生成物缺失时只能有明确外部条件 skip | `test_fast_scanner.py`：`77` tests，OK | PASS |
+| workshop contract | 无失败；UI/构建契约保持可执行 | `test_workshop_patch.py`：`60` tests，OK | PASS |
+| translation quality / coverage / performance | 无失败；真实审计缺输入时保留显式 skip | 合计 `37` tests，OK，`1` 个 `audit APK/extracted texts not present` skip | PASS |
+| full discover | 无失败；每个 skip 在本清单第 6 节登记原因 | Task 19 fresh：`192` tests，0 failures/errors，`1` 个明确 skip | PASS |
+| diff hygiene | `git diff --check` 返回 0 | Task 19 证据固化前复核 | PASS |
 
 任何失败都必须在修复并重新运行后才能继续；不能用删测试、放宽断言或隐藏异常来清绿。
 
@@ -141,7 +142,7 @@ scan
 
 当前已知的合法外部条件是：没有真实完整 Ren'Py 游戏 APK/对应完整提取语料时，coverage audit 可以显式 skip；这不证明真实游戏 `missing == 0`。生成 DEX 缺失时也只能登记“需先运行 `python build_fast_scanner.py`”，不能把 artifact gate 改成无条件通过。
 
-本轮 C15 后重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
+Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip；scanner 为 `77` 项，workshop 为 `60` 项，quality/coverage/performance 合计为 `37` 项并保留同一个明确 skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
 
 如果 `test_workshop_patch.py`、构建测试或其他 discover 测试失败，必须把准确的失败测试名、首个稳定错误和是否属于本批次变更写入 `full-discover.txt`，然后修复或明确阻断发布；不能用“基线已通过”覆盖新的失败。
 
