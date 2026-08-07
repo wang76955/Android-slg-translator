@@ -445,7 +445,12 @@ def patch_scan_flow(js: str) -> str:
     patched = js.replace(old_flow, SCAN_FLOW, 1)
     patched = patched.replace(
         "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgSelectionError=null,",
-        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgSelectionError=null,",
+        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgRenpyCompatibilityPreflightDone=false,window.__slgRenpyCompatibilityReport=null,window.__slgRenpyCompatibilityBlocked=false,window.__slgSelectionError=null,",
+        1,
+    )
+    patched = patched.replace(
+        "window.__slgRenpyLanguages=t.renpyLanguages||[],window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgTranslatorLang=''",
+        "window.__slgRenpyLanguages=t.renpyLanguages||[],window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgRenpyCompatibilityReport=t.compatibilityReport||null,window.__slgRenpyCompatibilityGate=t.compatibilityGate||`blocked`,window.__slgTranslatorLang=''",
         1,
     )
     patched = patched.replace(
@@ -984,6 +989,13 @@ async function Lo(e){'''
         "O(`Ren'Py 字体预检通过：固定中文/标点基线 ${_fr?.fontReport?.coveredCount||0}/${_fr?.fontReport?.requiredCount||0}`,`info`)}"
         "catch(_fontError){window.__slgFontPreflightBlocked=true;O(`Ren'Py 字体预检失败：无法读取字体报告，已阻断模型调用。${_fontError&&_fontError.message||_fontError}`,`error`);ce(!1);return}"
         "window.__slgFontPreflightDone=true}"
+        "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgRenpyCompatibilityPreflightDone){"
+        "let _cr=window.__slgRenpyCompatibilityReport;"
+        "if(!_cr){window.__slgRenpyCompatibilityBlocked=true;O(`Ren'Py 兼容性预检失败：扫描器没有返回兼容性报告，已阻断模型调用。`,`error`);ce(!1);return}"
+        "window.__slgRenpyCompatibilityReport=_cr;window.__slgRenpyCompatibilityBlocked=_cr.supportLevel===`UNSUPPORTED`||window.__slgRenpyCompatibilityGate===`blocked`;"
+        "globalThis.__slgRenderRenpyCompatibilityReport?.(_cr);"
+        "if(window.__slgRenpyCompatibilityBlocked){O(`Ren'Py 兼容性预检失败：${(_cr.issues||[]).map(_i=>_i.code).slice(0,3).join(`,`)||`unsupported`}`,`error`);ce(!1);return}"
+        "window.__slgRenpyCompatibilityPreflightDone=true}"
     )
     if js.count(old_start) != 1:
         raise ValueError("Ce start signature not found")
@@ -1638,6 +1650,18 @@ def write_generated_text(path: Path, text: str) -> None:
         stream.write(text)
 
 
+compatibility_report_runtime = r'''
+(function(){
+const root=typeof window!==`undefined`?window:globalThis;
+const fixedFields=[`supportLevel`,`activationStrategy`,`templatePath`,`rpaCount`,`splitCount`,`languageBuckets`,`menuType`,`font`,`uniqueTextCount`,`occurrenceCount`,`collisionCount`,`issues`];
+function text(value){return String(value??``).slice(0,512)}
+function sanitize(report){const r=report&&typeof report===`object`?report:{},rp=r.rpyc&&typeof r.rpyc===`object`?{container:text(r.rpyc.container),preferredSlot:Number(r.rpyc.preferredSlot)||0,pickleProtocol:Number(r.rpyc.pickleProtocol),generationSupport:text(r.rpyc.generationSupport||`UNKNOWN_EXTRACT_ONLY`)}:null,font=r.font&&typeof r.font===`object`?{requiredCount:Number(r.font.requiredCount)||0,coveredCount:Number(r.font.coveredCount)||0,missingCount:Number(r.font.missingCount)||0,hasChineseStyleBucket:!!r.font.hasChineseStyleBucket,hasEastAsianLineBreakEvidence:!!r.font.hasEastAsianLineBreakEvidence}:null;return{supportLevel:text(r.supportLevel||`UNSUPPORTED`),activationStrategy:text(r.activationStrategy||`NONE`),templatePath:text(r.templatePath),rpyc:rp,rpaCount:Math.max(0,Number(r.rpaCount)||0),splitCount:Math.max(0,Number(r.splitCount)||0),languageBuckets:Array.isArray(r.languageBuckets)?r.languageBuckets.slice(0,64).map(text):[],menuType:text(r.menuType||`unknown`),font,uniqueTextCount:Math.max(0,Number(r.uniqueTextCount)||0),occurrenceCount:Math.max(0,Number(r.occurrenceCount)||0),collisionCount:Math.max(0,Number(r.collisionCount)||0),issues:Array.isArray(r.issues)?r.issues.slice(0,32).map(i=>({code:text(i?.code||`unknown_issue`),message:text(i?.message||``)})):[]}}
+function sanitizedJson(report){return JSON.stringify(sanitize(report))}
+function render(report){if(typeof document===`undefined`)return;const safe=sanitize(report),host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;let panel=document.getElementById(`slg-renpy-compatibility-report`);if(!panel){panel=document.createElement(`section`);panel.id=`slg-renpy-compatibility-report`;panel.className=`workshop-renpy-compatibility-report`;panel.style.cssText=`margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,#2563eb 30%,transparent);border-radius:12px;background:color-mix(in srgb,#2563eb 6%,transparent)`;host.append(panel)}panel.hidden=false;panel.replaceChildren();const title=document.createElement(`h3`);title.textContent=`Ren'Py 兼容性预检`;const list=document.createElement(`dl`);const add=(label,value)=>{const row=document.createElement(`div`),dt=document.createElement(`dt`),dd=document.createElement(`dd`);dt.textContent=label;dd.textContent=typeof value===`string`?value:JSON.stringify(value);row.append(dt,dd);list.append(row)};add(`支持等级`,safe.supportLevel);add(`激活策略`,safe.activationStrategy);add(`脚本格式/槽位`,report?.rpyc?`${text(report.rpyc.container)} / ${Number(report.rpyc.preferredSlot)||0}`:`未识别`);add(`模板路径`,safe.templatePath||`未识别`);add(`RPA 版本/数量`,`${safe.rpaCount}`);add(`Split 数量`,`${safe.splitCount}`);add(`语言桶`,safe.languageBuckets.join(`, `)||`无`);add(`菜单类型`,safe.menuType);add(`字体覆盖`,safe.font?`${safe.font.coveredCount}/${safe.font.requiredCount}`:`未返回`);add(`唯一文本/总出现/碰撞`,`${safe.uniqueTextCount} / ${safe.occurrenceCount} / ${safe.collisionCount}`);add(`阻断原因`,safe.issues.map(i=>i.code).join(`, `)||`无`);const exportButton=document.createElement(`button`);exportButton.type=`button`;exportButton.textContent=`导出兼容性 JSON`;exportButton.onclick=()=>{const blob=new Blob([sanitizedJson(safe)],{type:`application/json`}),url=URL.createObjectURL(blob),a=document.createElement(`a`);a.href=url;a.download=`renpy-compatibility-report.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),0)};panel.append(title,list,exportButton)}
+root.__slgSanitizeRenpyCompatibilityReport=sanitize;root.__slgRenpyCompatibilitySanitizedJson=sanitizedJson;root.__slgRenderRenpyCompatibilityReport=report=>{const safe=sanitize(report);root.__slgRenpyCompatibilityReport=safe;root.__slgRenpyCompatibilityReportJson=sanitizedJson(safe);render(safe);return safe};if(root.__slgRenpyCompatibilityReport)root.__slgRenderRenpyCompatibilityReport(root.__slgRenpyCompatibilityReport)})()
+'''
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     verify_canonical_base_text(js, css)
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
@@ -1654,6 +1678,7 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_candidate_filter(patched)
     patched = patch_translation_quality(patched)
     patched = patch_cache_memory(patched)
+    patched += compatibility_report_runtime
     return patched + copy_contract + enhance_runtime(patch_saves_runtime(WORKSHOP_RUNTIME)), css + "\n" + WORKSHOP_CSS
 
 

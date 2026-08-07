@@ -135,6 +135,7 @@ public final class FastApkScanner {
             String content = "";
             String fileType = "unknown";
             RenpyFontSupport.FontReport fontReport = null;
+            RenpyCompatibilityReport compatibilityReport = null;
             JSArray renpyRecords = new JSArray();
             List<RenpyTextRecord> exactOldOccurrences = new ArrayList<>();
             Map<String, String> coverageClassifications = new LinkedHashMap<>();
@@ -152,6 +153,19 @@ public final class FastApkScanner {
                             || lower.contains("/tl/");
                     List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
                             bytes, entryName, translationBucket);
+                    RpycCompatibility.Report rpyc = RpycCompatibility.inspect(bytes);
+                    compatibilityReport = RenpyPreflight.inspect(context,
+                            new RenpyPreflight.SourceSet(
+                                    entryName,
+                                    rpyc,
+                                    0,
+                                    0,
+                                    Collections.<String>emptyList(),
+                                    "none",
+                                    fontReport,
+                                    0,
+                                    records.size(),
+                                    0));
                     exactOldOccurrences.addAll(records);
                     for (RenpyTextRecord record : records) {
                         String text = record.text;
@@ -202,6 +216,10 @@ public final class FastApkScanner {
             if (fontReport != null) {
                 result.put("fontReport", fontReportJson(fontReport));
                 result.put("fontGate", fontReport.isComplete() ? "clear" : "blocked");
+            }
+            if (compatibilityReport != null) {
+                result.put("compatibilityReport", compatibilityReportJson(compatibilityReport));
+                result.put("compatibilityGate", compatibilityGate(compatibilityReport));
             }
             call.resolve(result);
         } catch (Exception e) {
@@ -334,7 +352,7 @@ public final class FastApkScanner {
         ScanResult result = null;
         try (ParcelFileDescriptor descriptor = resolver.openFileDescriptor(uri, "r")) {
             if (descriptor != null) {
-                result = scanSeekableDescriptor(descriptor, plugin, deadline);
+                result = scanSeekableDescriptor(descriptor, plugin, deadline, context);
             }
         } catch (Exception ignored) {
             // Cloud-backed and virtual document providers may not expose a
@@ -350,7 +368,7 @@ public final class FastApkScanner {
         File temp = File.createTempFile("slg-apk-scan-", ".apk", context.getCacheDir());
         try {
             copyCompressedApk(resolver, uri, temp, deadline);
-            result = enumerateCentralDirectory(temp, plugin, deadline);
+            result = enumerateCentralDirectory(temp, plugin, deadline, context);
             synchronized (CACHE) {
                 CACHE.put(cacheKey, result);
             }
@@ -365,10 +383,11 @@ public final class FastApkScanner {
     private static ScanResult scanSeekableDescriptor(
         ParcelFileDescriptor descriptor,
         Object plugin,
-        long deadline
+        long deadline,
+        Context context
     ) throws Exception {
         File descriptorPath = new File("/proc/self/fd/" + descriptor.getFd());
-        return enumerateCentralDirectory(descriptorPath, plugin, deadline);
+        return enumerateCentralDirectory(descriptorPath, plugin, deadline, context);
     }
 
     private static void copyCompressedApk(
@@ -397,7 +416,8 @@ public final class FastApkScanner {
     private static ScanResult enumerateCentralDirectory(
         File apk,
         Object plugin,
-        long deadline
+        long deadline,
+        Context context
     ) throws Exception {
         Method likelyText = privateMethod(plugin, "isLikelyTextFile", String.class);
         Method detectType = privateMethod(plugin, "detectFileType", String.class, String.class);
@@ -405,6 +425,7 @@ public final class FastApkScanner {
         List<ApkEntry> entries = new ArrayList<>();
         String packageName = "";
         long totalScriptInflated = 0;
+        int rpaCount = 0;
         RpycCompatibility.Report compatibility = null;
         int compatibilityPriority = Integer.MAX_VALUE;
         String compatibilityPath = null;
@@ -447,6 +468,7 @@ public final class FastApkScanner {
                     compatibilityPath = name.replace('\\', '/');
                 }
                 if ("rpa".equals(extension) || "rpi".equals(extension)) {
+                    rpaCount++;
                     addRpaEntries(zip, entry, name, extension, entries, deadline);
                     continue;
                 }
@@ -498,8 +520,21 @@ public final class FastApkScanner {
                 }
             }
             String menuType = detectLanguageMenuType(zip, entries, deadline);
+            RenpyFontSupport.FontReport font = fontPreflight(context, apk);
+            RenpyCompatibilityReport compatibilityReport = RenpyPreflight.inspect(context,
+                    new RenpyPreflight.SourceSet(
+                            compatibilityPath,
+                            compatibility,
+                            rpaCount,
+                            0,
+                            new ArrayList<>(languages),
+                            menuType,
+                            font,
+                            0,
+                            0,
+                            0));
             return new ScanResult(entries, packageName, new ArrayList<>(languages), menuType,
-                    compatibility);
+                    compatibility, compatibilityReport);
         }
     }
 
@@ -683,6 +718,10 @@ public final class FastApkScanner {
         }
         response.put("renpyLanguages", languages);
         response.put("renpyMenuType", result.renpyMenuType);
+        response.put("compatibilityReport", compatibilityReportJson(result.compatibilityReport));
+        response.put("compatibilityGate", compatibilityGate(result.compatibilityReport));
+        response.put("compatibilitySupportLevel", result.compatibilityReport == null
+                ? "UNSUPPORTED" : result.compatibilityReport.supportLevel.name());
         if (result.compatibility == null) {
             response.put("supportLevel", "unknown");
             response.put("compatibilityReason", "no_rpyc_template");
@@ -702,6 +741,70 @@ public final class FastApkScanner {
         response.put("scanDurationMs", durationMs);
         response.put("cacheHit", cacheHit);
         return response;
+    }
+
+    private static String compatibilityGate(RenpyCompatibilityReport report) {
+        if (report == null || report.supportLevel == RenpyCompatibilityReport.SupportLevel.UNSUPPORTED) {
+            return "blocked";
+        }
+        if (report.supportLevel == RenpyCompatibilityReport.SupportLevel.EXTRACT_ONLY) {
+            return "extract_only";
+        }
+        return "clear";
+    }
+
+    private static JSObject compatibilityReportJson(RenpyCompatibilityReport report) {
+        JSObject result = new JSObject();
+        if (report == null) {
+            result.put("supportLevel", "UNSUPPORTED");
+            result.put("activationStrategy", "NONE");
+            result.put("templatePath", "");
+            result.put("menuType", "unknown");
+            result.put("rpaCount", 0);
+            result.put("splitCount", 0);
+            result.put("languageBuckets", new JSArray());
+            result.put("uniqueTextCount", 0);
+            result.put("occurrenceCount", 0);
+            result.put("collisionCount", 0);
+            JSArray issues = new JSArray();
+            issues.put(new JSObject().put("code", "renpy_preflight_missing_report")
+                    .put("message", "Compatibility report is unavailable"));
+            result.put("issues", issues);
+            return result;
+        }
+        result.put("supportLevel", report.supportLevel.name());
+        result.put("activationStrategy", report.activationStrategy.name());
+        result.put("templatePath", report.templatePath);
+        result.put("menuType", report.menuType);
+        result.put("rpaCount", report.rpaCount);
+        result.put("splitCount", report.splitCount);
+        JSArray languages = new JSArray();
+        for (String language : report.languageBuckets) languages.put(language);
+        result.put("languageBuckets", languages);
+        result.put("uniqueTextCount", report.uniqueTextCount);
+        result.put("occurrenceCount", report.occurrenceCount);
+        result.put("collisionCount", report.collisionCount);
+        if (report.rpyc != null) {
+            result.put("rpyc", new JSObject()
+                    .put("container", report.rpyc.container)
+                    .put("preferredSlot", report.rpyc.preferredSlot)
+                    .put("pickleProtocol", report.rpyc.pickleProtocol)
+                    .put("usesBuiltins", report.rpyc.usesBuiltins)
+                    .put("usesPy2Builtins", report.rpyc.usesPy2Builtins)
+                    .put("generationSupport", report.rpyc.generationSupport == null
+                            ? "UNKNOWN_EXTRACT_ONLY" : report.rpyc.generationSupport.name())
+                    .put("reason", report.rpyc.reason));
+        } else {
+            result.put("rpyc", null);
+        }
+        if (report.font != null) result.put("font", fontReportJson(report.font));
+        else result.put("font", null);
+        JSArray issues = new JSArray();
+        for (RenpyCompatibilityReport.Issue issue : report.issues) {
+            issues.put(new JSObject().put("code", issue.code).put("message", issue.message));
+        }
+        result.put("issues", issues);
+        return result;
     }
 
     private static Metadata readMetadata(ContentResolver resolver, Uri uri) {
@@ -799,14 +902,17 @@ public final class FastApkScanner {
         final List<String> renpyLanguages;
         final String renpyMenuType;
         final RpycCompatibility.Report compatibility;
+        final RenpyCompatibilityReport compatibilityReport;
 
         ScanResult(List<ApkEntry> entries, String packageName, List<String> renpyLanguages,
-                   String renpyMenuType, RpycCompatibility.Report compatibility) {
+                   String renpyMenuType, RpycCompatibility.Report compatibility,
+                   RenpyCompatibilityReport compatibilityReport) {
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
             this.packageName = packageName == null ? "" : packageName;
             this.renpyLanguages = Collections.unmodifiableList(new ArrayList<>(renpyLanguages));
             this.renpyMenuType = renpyMenuType == null ? "none" : renpyMenuType;
             this.compatibility = compatibility;
+            this.compatibilityReport = compatibilityReport;
         }
     }
 }

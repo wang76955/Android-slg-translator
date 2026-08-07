@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 SCANNER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
 FONT_SUPPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyFontSupport.java"
+COMPATIBILITY_REPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyCompatibilityReport.java"
+PREFLIGHT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyPreflight.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
 BUILDER = FAST_SCAN / "build_fast_scanner.py"
 WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
@@ -2238,6 +2240,99 @@ public final class RenpyStyleFontHarness {
         self.assertIn("没有可检查的 Ren'Py 编译脚本", block[no_target:])
         self.assertNotIn("__slgFontPreflightDone=true", block[no_target:])
         self.assertLess(no_target, block.index("readRenpyTexts"))
+
+    def test_renpy_preflight_reports_safe_warning_and_extract_only(self):
+        """The single preflight entry point must classify the three plan snapshots."""
+        harness = r"""
+import com.slgtranslator.app.RenpyCompatibilityReport;
+import com.slgtranslator.app.RenpyPreflight;
+import com.slgtranslator.app.RpycCompatibility;
+import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
+import java.util.zip.DeflaterOutputStream;
+
+public final class RenpyPreflightHarness {
+    private static byte[] compressed(String module) throws Exception {
+        byte[] pickle = ("\u0080\u0002c" + module + "\nstr\n.").getBytes("ISO-8859-1");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (DeflaterOutputStream stream = new DeflaterOutputStream(output)) {
+            stream.write(pickle);
+        }
+        return output.toByteArray();
+    }
+
+    private static RenpyPreflight.SourceSet source(String menu, String module) throws Exception {
+        return new RenpyPreflight.SourceSet(
+                "assets/x-game/x-script.rpyc",
+                RpycCompatibility.inspect(compressed(module)),
+                2, 1, Arrays.asList("english", "schinese"), menu,
+                null, 7, 10, 1);
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args) throws Exception {
+        RenpyCompatibilityReport safe = RenpyPreflight.inspect(null, source("standard", "builtins"));
+        require(safe.supportLevel == RenpyCompatibilityReport.SupportLevel.SAFE, "modern standard menu must be SAFE");
+        require(safe.activationStrategy == RenpyCompatibilityReport.ActivationStrategy.SELECTABLE_LANGUAGE,
+                "modern standard menu must be selectable");
+
+        RenpyCompatibilityReport warning = RenpyPreflight.inspect(null, source("none", "builtins"));
+        require(warning.supportLevel == RenpyCompatibilityReport.SupportLevel.WARNING, "no menu must be WARNING");
+        require(warning.activationStrategy == RenpyCompatibilityReport.ActivationStrategy.ALWAYS_ON,
+                "no menu must be always-on");
+
+        RenpyCompatibilityReport legacy = RenpyPreflight.inspect(null, source("standard", "__builtin__"));
+        require(legacy.supportLevel == RenpyCompatibilityReport.SupportLevel.EXTRACT_ONLY,
+                "python2 writer gap must be extract-only");
+        require(legacy.activationStrategy == RenpyCompatibilityReport.ActivationStrategy.NONE,
+                "extract-only must not activate a writer strategy");
+        require(legacy.issues.size() > 0, "legacy report must carry a stable issue");
+        String sanitized = safe.toSanitizedJson();
+        require(sanitized.contains("templatePath"), "sanitized report must contain diagnostics");
+        require(!sanitized.contains("apiKey") && !sanitized.contains("apkBytes")
+                && !sanitized.contains("fullScript"), "sanitized report must not contain secrets or APK contents");
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="renpy-preflight-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "RenpyPreflightHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(), *map(str, stubs),
+                 *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))), str(harness_path)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "RenpyPreflightHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+    def test_renpy_compatibility_report_ui_order_fields_and_sanitized_export(self):
+        """The UI must persist fixed diagnostics before either model branch and export only metadata."""
+        source = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        for field in (
+            "compatibilityReport", "supportLevel", "activationStrategy", "templatePath",
+            "rpaCount", "splitCount", "languageBuckets", "menuType", "font",
+            "uniqueTextCount", "occurrenceCount", "collisionCount", "issues",
+        ):
+            self.assertIn(field, source)
+        self.assertIn("__slgRenpyCompatibilityReport", source)
+        self.assertIn("sanitizedJson", source)
+        self.assertIn("Ren'Py 兼容性预检", source)
+        report_pos = source.index("__slgRenpyCompatibilityReport")
+        model_pos = source.index("async function Vo")
+        self.assertLess(report_pos, model_pos)
+        self.assertNotIn("apiKey", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
+        self.assertNotIn("apkBytes", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
+        self.assertNotIn("fullScript", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
 
     def test_rpa_archive_lists_and_reads_rpyc_entries(self):
         rpa3 = build_rpa3_fixture()
