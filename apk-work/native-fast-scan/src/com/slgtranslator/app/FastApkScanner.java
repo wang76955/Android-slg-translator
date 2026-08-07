@@ -105,6 +105,7 @@ public final class FastApkScanner {
             String fileType = "unknown";
             JSArray renpyRecords = new JSArray();
             List<RenpyTextRecord> exactOldOccurrences = new ArrayList<>();
+            Map<String, String> coverageClassifications = new LinkedHashMap<>();
             try (ZipFile zip = new ZipFile(apk)) {
                 byte[] bytes = readEntryData(zip, entryName, Long.MAX_VALUE);
                 if (bytes == null) {
@@ -132,6 +133,10 @@ public final class FastApkScanner {
                                 .replace("\t", "\\t");
                         out.append("RPYC_STRING\t").append(escaped).append('\n');
                         renpyRecords.put(renpyRecordJson(record));
+                        String classification = coverageClassification(record);
+                        if (classification != null) {
+                            coverageClassifications.put(record.sourcePath + "\t" + record.text, classification);
+                        }
                     }
                     content = out.toString();
                     fileType = "rpyc";
@@ -145,13 +150,18 @@ public final class FastApkScanner {
             result.put("content", content);
             result.put("fileType", fileType);
             result.put("renpyRecords", renpyRecords);
+            JSObject classificationJson = new JSObject();
+            for (Map.Entry<String, String> entry : coverageClassifications.entrySet()) {
+                classificationJson.put(entry.getKey(), entry.getValue());
+            }
+            result.put("coverageClassifications", classificationJson);
             TranslationCoverageReport initialCoverage = coverageReport(
                     exactOldOccurrences,
                     Collections.<String, String>emptyMap(),
                     Collections.<String>emptySet(),
                     Collections.<String, List<String>>emptyMap(),
                     Collections.<String>emptySet(),
-                    Collections.<String, String>emptyMap());
+                    coverageClassifications);
             result.put("coverageReport", initialCoverage.toSanitizedJson());
             result.put("coverageOccurrenceCount", initialCoverage.occurrenceCount);
             result.put("coverageUniqueSourceCount", initialCoverage.uniqueSourceCount);
@@ -164,7 +174,7 @@ public final class FastApkScanner {
     }
 
     private static JSObject renpyRecordJson(RenpyTextRecord record) {
-        return new JSObject()
+        JSObject result = new JSObject()
                 .put("text", record.text)
                 .put("kind", record.kind.name())
                 .put("speaker", record.speaker)
@@ -173,6 +183,39 @@ public final class FastApkScanner {
                 .put("sourceLine", record.sourceLine)
                 .put("occurrence", record.occurrence)
                 .put("coverageCertain", record.coverageCertain);
+        String classification = coverageClassification(record);
+        if (classification != null) {
+            result.put("coverageClassification", classification);
+        }
+        return result;
+    }
+
+    /**
+     * Only paths that explicitly identify developer/error/optional buckets are
+     * excluded.  Ordinary x-common story/UI files remain in coverage by
+     * default, even when their record kind is a custom statement.
+     */
+    private static String coverageClassification(RenpyTextRecord record) {
+        if (record == null || record.sourcePath == null) {
+            return null;
+        }
+        String path = record.sourcePath.replace('\\', '/').toLowerCase(Locale.ROOT);
+        if (!(path.contains("/x-common/") || path.startsWith("x-common/"))) {
+            return null;
+        }
+        if (path.contains("/debug") || path.contains("/developer") || path.contains("/console")) {
+            return "developer_console";
+        }
+        if (path.contains("/internal") || path.contains("/error")) {
+            return "internal_error";
+        }
+        if (path.contains("/expired")) {
+            return "expired_text";
+        }
+        if (path.contains("/settings") || path.contains("/optional")) {
+            return "settings_optional";
+        }
+        return null;
     }
 
     private static File fileFrom(String value) {

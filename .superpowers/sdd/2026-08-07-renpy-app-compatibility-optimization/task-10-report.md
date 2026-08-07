@@ -39,6 +39,21 @@ Workshop UI 会累计扫描到的 exact-old occurrence、Task 9/本地引擎返�
 - `python -m unittest test_fast_scanner.py -v`：49 tests，`OK`。
 - `git diff --check`：通过。
 
+## 独立审查后的二次修复
+
+审查发现首次集成仍有覆盖率假阳性风险，已补上并加入行为级测试：
+
+- UI coverage 使用原始 exact-old 作为分组、缓存和候选值 key，不再把换行、Tab 等控制字符归一化后再统计；JSON 导出仍由 `JSON.stringify` 负责转义，渲染仍使用 `textContent`。
+- 远程翻译只在单批 `Vo` 返回经过保护文本恢复的结果时记录为 validator-approved；cache/local-rule 累积 map 不再被整体标记为已验证。批次失败会进入 rejected 集合，不能借缓存绕过完整构建门禁。
+- 本地/远程结果会记录候选译文以产生覆盖率侧 collision；新的翻译轮次会同步清理不确定项、分类表、候选译文和碰撞条目。
+- `x-common` 的 developer/console、internal/error、expired、settings/optional 路径提供显式分类原因；普通公共故事/UI 文本默认仍纳入覆盖率。扫描器把分类原因传入 UI。
+- 新增 Node 行为测试，实际执行生成的 coverage IIFE，验证多行 exact-old 不合并、validated/rejected/collision 计数以及全状态 reset。
+
+该轮修复的验证命令：
+
+- `python -m unittest test_translation_coverage.py test_translation_quality.py -v`：待本轮提交后复跑并记录最终计数。
+- `python -m unittest test_fast_scanner.py -v`：待本轮提交后复跑并记录最终计数。
+
 本报告对应提交消息：`feat: gate renpy builds on validated translation coverage`。
 
 ## 任务 10 集成复核修复

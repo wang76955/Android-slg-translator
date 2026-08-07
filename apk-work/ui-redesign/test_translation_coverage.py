@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -7,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
+BASE_JS = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets" / "index-CJtfdHOF.js"
+BASE_CSS = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets" / "index-C044IUg3.css"
 JAVA_HOME = Path(os.environ.get("JAVA_HOME", ""))
 JAVA = JAVA_HOME / "bin" / "java.exe"
 JAVAC = JAVA_HOME / "bin" / "javac.exe"
@@ -15,6 +18,29 @@ JAVAC = JAVA_HOME / "bin" / "javac.exe"
 def third_party_classpath():
     from test_fast_scanner import third_party_classpath as classpath
     return classpath()
+
+
+def load_patch_workshop_ui():
+    module_path = ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py"
+    spec = importlib.util.spec_from_file_location("patch_workshop_ui", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_node(script: str) -> str:
+    result = subprocess.run(
+        ["node", "-"],
+        input=script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        cwd=ROOT,
+    )
+    if result.returncode != 0:
+        raise AssertionError("node failed: " + (result.stderr or "")[:3000])
+    return result.stdout
 
 
 class TranslationCoverageLogicTest(unittest.TestCase):
@@ -161,14 +187,74 @@ public final class CoverageReportHarness {
             "topMissing", "x-common", "coverage", "incomplete", "__slgBuildCoverage",
             "__slgIncompleteTestPatch", "__slgTranslationCoverageReportJson",
             "__slgRecordValidatorApprovedTranslations?.(t,_lr.translations)",
-            "__slgRecordValidatorApprovedTranslations?.(t,d)",
+            "__slgRecordTranslationCandidates?.(t,_lr.translations)",
+            "__slgRecordTranslationCandidates?.(n,s)",
             "__slgRecordRejectedTranslations?.(_lr.rejected)",
+            "coverageClassifications",
             "__slgResetTranslationCoverage",
             "function exact(value)",
         ):
             self.assertIn(token, source)
         self.assertIn("slg-translator-cache:", source)
         self.assertNotIn("slg-translator-cache:v2:", source)
+        self.assertNotIn("__slgRecordValidatorApprovedTranslations?.(t,d)", source)
+
+    def test_task10_ui_coverage_preserves_exact_text_and_resets_all_state(self):
+        """Execute the generated coverage IIFEs for the critical gate edges."""
+        if not (BASE_JS.exists() and BASE_CSS.exists()):
+            self.skipTest("canonical workshop assets not present")
+        patcher = load_patch_workshop_ui()
+        base = BASE_JS.read_text("utf-8")
+        css = BASE_CSS.read_text("utf-8")
+        patched, _ = patcher.patch_assets(base, css)
+        with tempfile.TemporaryDirectory(prefix="coverage-ui-behavior-") as temporary:
+            js_path = Path(temporary) / "patched.js"
+            js_path.write_text(patched, encoding="utf-8")
+            js_literal = json.dumps(str(js_path))
+            script = f"""
+const fs = require('fs');
+const js = fs.readFileSync({js_literal}, 'utf-8');
+const marker = js.indexOf('function asMap(value)');
+const start = js.lastIndexOf('(function(){{', marker);
+const firstClose = js.indexOf('root.__slgRefreshTranslationCoverage()}})()', start);
+const firstEnd = js.indexOf('}})()', firstClose) + 4;
+const secondStart = js.indexOf('\\n(function(){{', firstEnd) + 1;
+const secondEnd = js.indexOf('}})()', secondStart) + 4;
+const thirdStart = js.indexOf('\\n(function(){{', secondEnd) + 1;
+const thirdEnd = js.indexOf('}})()', thirdStart) + 4;
+if (start < 0 || firstEnd <= start || secondStart <= firstEnd || secondEnd <= secondStart || thirdStart <= secondEnd || thirdEnd <= thirdStart) throw new Error('coverage IIFEs missing');
+globalThis.window = globalThis;
+eval(js.slice(start, firstEnd));
+eval(js.slice(secondStart, secondEnd));
+eval(js.slice(thirdStart, thirdEnd));
+const records = [
+  {{text:'line\\nnext', sourcePath:'game/a.rpyc', coverageCertain:true}},
+  {{text:'line next', sourcePath:'game/a.rpyc', coverageCertain:true}},
+  {{text:'Debug', sourcePath:'assets/x-renpy/x-common/debug.rpyc', coverageCertain:true}},
+];
+globalThis.__slgCoverageRecords = records;
+let initial = globalThis.__slgRefreshTranslationCoverage();
+globalThis.__slgRecordValidatorApprovedTranslations([records[0]], new Map([[0, '译文']]));
+globalThis.__slgRecordTranslationCandidates([records[1]], new Map([[0, '甲']]));
+globalThis.__slgRecordTranslationCandidates([records[1]], new Map([[0, '乙']]));
+globalThis.__slgRecordRejectedTranslations([{{old:'line next'}}]);
+const after = globalThis.__slgRefreshTranslationCoverage();
+globalThis.__slgCoverageUncertain = ['stale'];
+globalThis.__slgCoverageClassifications = {{stale:'developer_console'}};
+globalThis.__slgTranslationCollisionCandidates = new Map([['stale', ['a', 'b']]]);
+globalThis.__slgResetTranslationCoverage();
+const reset = globalThis.__slgBuildTranslationCoverageReport([], new Map(), new Set(), [], {{}}, new Map());
+process.stdout.write(JSON.stringify({{initial,after,reset}}));
+"""
+            result = json.loads(run_node(script))
+        self.assertEqual(result["initial"]["uniqueSourceCount"], 2)
+        self.assertEqual(result["initial"]["occurrenceCount"], 2)
+        self.assertEqual(result["initial"]["missingCount"], 2)
+        self.assertEqual(result["after"]["translatedCount"], 1)
+        self.assertEqual(result["after"]["rejectedCount"], 1)
+        self.assertEqual(result["after"]["collisionCount"], 1)
+        self.assertEqual(result["reset"]["uniqueSourceCount"], 0)
+        self.assertEqual(result["reset"]["occurrenceCount"], 0)
 
     def test_task10_scanner_keeps_exact_old_occurrences_for_coverage(self):
         source = (FAST_SCAN / "src/com/slgtranslator/app/FastApkScanner.java").read_text("utf-8")

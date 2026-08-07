@@ -837,6 +837,7 @@ def patch_local_engine(js: str) -> str:
         "if(_engine){let _lr=null,_le=null;try{"
         "_lr=await (globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl)("
         "{texts:t,sourceLang:n,targetLang:r,onProgress:l,engine:_engine});"
+        "_lr?.translations&&globalThis.__slgRecordTranslationCandidates?.(t,_lr.translations);"
         "_lr?.translations&&globalThis.__slgRecordValidatorApprovedTranslations?.(t,_lr.translations);"
         "_lr?.rejected&&globalThis.__slgRecordRejectedTranslations?.(_lr.rejected);"
         "}catch(e){_le=e}if(_lr)return _lr;"
@@ -886,7 +887,7 @@ async function Lo(e){'''
 
     old_worker_catch = 'catch{v=!0,ee+=1}await wo(),x+=1'
     new_worker_catch = (
-        'catch(e){v=!0,ee+=1,isNetworkFailure(e)&&(N=`无法连接 ${P}。'
+        'catch(e){v=!0,ee+=1,globalThis.__slgRecordRejectedTranslations?.((i||[]).map(_item=>({old:_item.text,reason:`translation_batch_failed`}))),isNetworkFailure(e)&&(N=`无法连接 ${P}。'
         '请检查网络，或前往“我的”切换供应商。`,b=y.length)}wo(),x+=1'
     )
     state_anchor = 'let _=new H({apiKey:a,baseURL:i,dangerouslyAllowBrowser:!0,timeout:3e4,maxRetries:1}),v=!1,y='
@@ -915,19 +916,19 @@ async function Lo(e){'''
     js = js.replace(old_progress_start, new_progress_start, 1)
 
     old_return_empty = 'm.length===0)return await wo(),{translations:d,successCount:d.size};'
-    new_return_empty = 'm.length===0)return globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size};'
+    new_return_empty = 'm.length===0)return wo(!0),{translations:d,successCount:d.size};'
     if js.count(old_return_empty) != 1:
         raise ValueError("Translation cache-only return signature not found")
     js = js.replace(old_return_empty, new_return_empty, 1)
 
     old_return_no_key = 'if(!a)return await wo(),{translations:d,successCount:d.size,error:'
-    new_return_no_key = 'if(!a)return globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size,error:'
+    new_return_no_key = 'if(!a)return wo(!0),{translations:d,successCount:d.size,error:'
     if js.count(old_return_no_key) != 1:
         raise ValueError("Translation no-key return signature not found")
     js = js.replace(old_return_no_key, new_return_no_key, 1)
 
     old_return_final = 'return await Promise.all(ne),await wo(),{translations:d,successCount:d.size'
-    new_return_final = 'return await Promise.all(ne),globalThis.__slgRecordValidatorApprovedTranslations?.(t,d),wo(!0),{translations:d,successCount:d.size'
+    new_return_final = 'return await Promise.all(ne),wo(!0),{translations:d,successCount:d.size'
     if js.count(old_return_final) != 1:
         raise ValueError("Translation final return signature not found")
     js = js.replace(old_return_final, new_return_final, 1)
@@ -943,6 +944,16 @@ async function Lo(e){'''
     if js.count(old_split) != 1:
         raise ValueError("Recursive batch signature not found")
     js = js.replace(old_split, new_split, 1)
+
+    old_failed_leaf = 'if(n.length<=1||s>=4)return{translations:new Map,splitCount:0,failedCount:1};'
+    new_failed_leaf = (
+        'if(n.length<=1||s>=4){globalThis.__slgRecordRejectedTranslations?.('
+        '(n||[]).map(_item=>({old:_item.text,reason:`translation_validation_failed`})));'
+        'return{translations:new Map,splitCount:0,failedCount:1};}'
+    )
+    if js.count(old_failed_leaf) != 1:
+        raise ValueError("Translation failed-leaf signature not found")
+    js = js.replace(old_failed_leaf, new_failed_leaf, 1)
 
     # Source APK resilience: refresh the installed-app source to the persistent
     # directory before translating so a cleared cache cannot break patch builds.
@@ -969,6 +980,7 @@ async function Lo(e){'''
     new_read = (
         "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name}).then(_r=>{"
         "globalThis.__slgCoverageRecords=(globalThis.__slgCoverageRecords||[]).concat((_r&&_r.renpyRecords)||[]);"
+        "globalThis.__slgCoverageClassifications=Object.assign({},globalThis.__slgCoverageClassifications||{},(_r&&_r.coverageClassifications)||{});"
         "globalThis.__slgRefreshTranslationCoverage?.();return _r}):"
         "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name})"
     )
@@ -1499,7 +1511,10 @@ Return only JSON: {"translations":["..."]}`),i}'''
     if js.count(old_vo) != 1:
         raise ValueError("Batch request signature not found")
     old_vo_return = "return s}"
-    new_vo_return = "globalThis.__slgRecordValidatorApprovedTranslations?.(n,s);return s}"
+    new_vo_return = (
+        "globalThis.__slgRecordTranslationCandidates?.(n,s);"
+        "globalThis.__slgRecordValidatorApprovedTranslations?.(n,s);return s}"
+    )
     if new_vo.count(old_vo_return) != 1:
         raise ValueError("Batch result hook signature not found")
     new_vo = new_vo.replace(old_vo_return, new_vo_return, 1)
@@ -1517,11 +1532,14 @@ Return only JSON: {"translations":["..."]}`),i}'''
     coverage_report = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;
 function asMap(value){return value instanceof Map?value:new Map(Object.entries(value||{}))}
-function safe(value){return String(value??``).replace(/[\u0000-\u001f]/g,` `)}
+function exact(value){return String(value??``)}
+function safe(value){return exact(value)}
 function isSkipReason(reason){return /developer_console|internal_error|expired_text|settings_optional/i.test(String(reason||``))}
-function incremental(values,validated,failed,retry){let v=asMap(validated),out=new Set;for(const value of values||[]){let old=safe(value);if(old&&!v.has(old))out.add(old)}for(const value of failed||[])out.add(safe(value));for(const value of retry||[])out.add(safe(value));return Array.from(out)}
+function isXCommon(path){return /(?:^|\/)x-common\//i.test(String(path||``))}
+function inferredClassification(raw){let explicit=String(raw?.coverageClassification??raw?.classificationReason??``);if(explicit)return explicit;let path=exact(raw?.sourcePath??String(raw?.keyPath??``).split(`::`)[0]),kind=String(raw?.kind??``).toLowerCase();if(!isXCommon(path))return ``;let subject=(path+` `+kind).toLowerCase();if(/(?:debug|developer|console)/.test(subject))return `developer_console`;if(/(?:internal|error)/.test(subject))return `internal_error`;if(/(?:expired)/.test(subject))return `expired_text`;if(/(?:settings|optional)/.test(subject))return `settings_optional`;return ``}
+function incremental(values,validated,failed,retry){let v=asMap(validated),out=new Set;for(const value of values||[]){let old=exact(value);if(old&&!v.has(old))out.add(old)}for(const value of failed||[])out.add(exact(value));for(const value of retry||[])out.add(exact(value));return Array.from(out)}
 function render(report){if(typeof document===`undefined`)return;const host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;let panel=document.getElementById(`slg-translation-coverage-report`);if(!panel){panel=document.createElement(`section`);panel.id=`slg-translation-coverage-report`;panel.className=`workshop-translation-coverage-report`;panel.style.cssText=`margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,#b45309 42%,transparent);border-radius:12px;background:color-mix(in srgb,#b45309 8%,transparent)`;host.append(panel)}panel.hidden=false;panel.replaceChildren();const title=document.createElement(`h3`),summary=document.createElement(`p`),status=document.createElement(`p`);title.textContent=`Ren'Py 翻译覆盖率`;summary.textContent=`唯一原文 ${report.uniqueSourceCount} · 总出现 ${report.occurrenceCount} · 已验证 ${report.translatedCount} · 缺失 ${report.missingCount} · 拒绝 ${report.rejectedCount} · 不确定 ${report.uncertainCount}`;status.textContent=report.blocking?`完整构建已阻断：必须补齐缺失或被拒绝的翻译。可显式选择不完整测试补丁。`:`覆盖率通过，可生成完整构建。`;status.style.color=report.blocking?`#b45309`:`#15803d`;const exportButton=document.createElement(`button`);exportButton.type=`button`;exportButton.textContent=`导出覆盖率 JSON`;exportButton.onclick=()=>{const blob=new Blob([root.__slgTranslationCoverageReportJson||JSON.stringify(report)],{type:`application/json`}),url=URL.createObjectURL(blob),a=document.createElement(`a`);a.href=url;a.download=`renpy-translation-coverage.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),0)};const incomplete=document.createElement(`button`);incomplete.type=`button`;incomplete.textContent=root.__slgIncompleteTestPatchSelected?`已选择不完整测试补丁`:`允许不完整测试补丁`;incomplete.disabled=!report.blocking;incomplete.onclick=()=>{root.__slgIncompleteTestPatchSelected=true;root.__slgIncompleteTestPatch=true;incomplete.textContent=`已选择不完整测试补丁`;render(report)};const list=document.createElement(`ol`);for(const item of report.topMissingFiles||[]){const row=document.createElement(`li`);row.textContent=`${item.filePath} · 缺失 ${item.missingCount} · 来源 ${item.sourceCount}`;list.append(row)}panel.append(title,summary,status,exportButton,incomplete,list)}
-function buildCoverage(records,validated,rejected,uncertain,classification,candidates){const groups=new Map,files=new Map,excluded={};const v=asMap(validated),bad=new Set(rejected||[]),uncertainSet=new Set(uncertain||[]),classMap=asMap(classification),candidateMap=asMap(candidates);for(const raw of records||[]){const old=safe(raw?.exactOld??raw?.text);if(!old)continue;const path=safe(raw?.sourcePath??String(raw?.keyPath??``).split(`::`)[0]);const reason=classMap.get(`${path}\t${old}`)||classMap.get(old)||``;if(path.toLowerCase().includes(`/x-common/`)&&isSkipReason(reason)){excluded[`${path}\t${old}`]=reason;continue}let group=groups.get(old);if(!group)groups.set(old,group={old,paths:new Set,occurrences:0,uncertain:false});group.paths.add(path);group.occurrences++;group.uncertain=group.uncertain||raw?.coverageCertain===false||uncertainSet.has(old);let file=files.get(path);if(!file)files.set(path,file={filePath:path,sources:new Set,occurrences:0,translatedCount:0,missingCount:0,rejectedCount:0,collisionCount:0,uncertainCount:0});file.sources.add(old);file.occurrences++}let translatedCount=0,missingCount=0,rejectedCount=0,collisionCount=0,uncertainCount=0,missing=[];for(const group of groups.values()){const rejected=bad.has(group.old),translated=!rejected&&String(v.get(group.old)||``).trim().length>0,items=Array.from(new Set((candidateMap.get(group.old)||[]).map(safe).filter(Boolean)));const collision=items.length>1;if(translated)translatedCount++;else if(rejected)rejectedCount++;else{missingCount++;missing.push({exactOld:group.old,sourcePath:Array.from(group.paths)[0]||``,occurrenceCount:group.occurrences,reason:group.uncertain?`uncertain`:`missing`})}if(collision)collisionCount++;if(group.uncertain)uncertainCount++;for(const path of group.paths){const file=files.get(path);if(translated)file.translatedCount++;else if(rejected)file.rejectedCount++;else file.missingCount++;if(collision)file.collisionCount++;if(group.uncertain)file.uncertainCount++}}missing.sort((a,b)=>b.occurrenceCount-a.occurrenceCount||a.exactOld.localeCompare(b.exactOld));const topMissingFiles=Array.from(files.values()).filter(e=>e.missingCount>0).sort((a,b)=>b.missingCount-a.missingCount||a.filePath.localeCompare(b.filePath)).slice(0,20).map(e=>({...e,sources:undefined}));const report={uniqueSourceCount:groups.size,occurrenceCount:Array.from(groups.values()).reduce((sum,e)=>sum+e.occurrences,0),translatedCount,missingCount,rejectedCount,collisionCount,uncertainCount,files:Object.fromEntries(Array.from(files.entries()).map(([key,e])=>[key,{...e,sources:undefined}])),topMissingFiles,missing:missing.slice(0,20),excludedReasons:excluded,blocking:missingCount>0||rejectedCount>0};root.__slgTranslationCoverageReport=report;root.__slgTranslationCoverageReportJson=JSON.stringify(report);root.__slgBuildCoverage=report;root.__slgIncompleteTestPatch=report.blocking;render(report);return report}
+function buildCoverage(records,validated,rejected,uncertain,classification,candidates){const groups=new Map,files=new Map,excluded={};const v=asMap(validated),bad=new Set(rejected||[]),uncertainSet=new Set(uncertain||[]),classMap=asMap(classification),candidateMap=asMap(candidates);for(const raw of records||[]){const old=exact(raw?.exactOld??raw?.text);if(!old)continue;const path=exact(raw?.sourcePath??String(raw?.keyPath??``).split(`::`)[0]);const reason=classMap.get(`${path}\t${old}`)||classMap.get(old)||inferredClassification(raw);if(isXCommon(path)&&isSkipReason(reason)){excluded[`${path}\t${old}`]=reason;continue}let group=groups.get(old);if(!group)groups.set(old,group={old,paths:new Set,occurrences:0,uncertain:false});group.paths.add(path);group.occurrences++;group.uncertain=group.uncertain||raw?.coverageCertain===false||uncertainSet.has(old);let file=files.get(path);if(!file)files.set(path,file={filePath:path,sources:new Set,occurrences:0,translatedCount:0,missingCount:0,rejectedCount:0,collisionCount:0,uncertainCount:0});file.sources.add(old);file.occurrences++}let translatedCount=0,missingCount=0,rejectedCount=0,collisionCount=0,uncertainCount=0,missing=[];for(const group of groups.values()){const rejected=bad.has(group.old),translated=!rejected&&String(v.get(group.old)||``).trim().length>0,items=Array.from(new Set((candidateMap.get(group.old)||[]).map(exact).filter(Boolean)));const collision=items.length>1;if(translated)translatedCount++;else if(rejected)rejectedCount++;else{missingCount++;missing.push({exactOld:group.old,sourcePath:Array.from(group.paths)[0]||``,occurrenceCount:group.occurrences,reason:group.uncertain?`uncertain`:`missing`})}if(collision)collisionCount++;if(group.uncertain)uncertainCount++;for(const path of group.paths){const file=files.get(path);if(translated)file.translatedCount++;else if(rejected)file.rejectedCount++;else file.missingCount++;if(collision)file.collisionCount++;if(group.uncertain)file.uncertainCount++}}missing.sort((a,b)=>b.occurrenceCount-a.occurrenceCount||a.exactOld.localeCompare(b.exactOld));const topMissingFiles=Array.from(files.values()).filter(e=>e.missingCount>0).sort((a,b)=>b.missingCount-a.missingCount||a.filePath.localeCompare(b.filePath)).slice(0,20).map(e=>({...e,sources:undefined}));const report={uniqueSourceCount:groups.size,occurrenceCount:Array.from(groups.values()).reduce((sum,e)=>sum+e.occurrences,0),translatedCount,missingCount,rejectedCount,collisionCount,uncertainCount,files:Object.fromEntries(Array.from(files.entries()).map(([key,e])=>[key,{...e,sources:undefined}])),topMissingFiles,missing:missing.slice(0,20),excludedReasons:excluded,blocking:missingCount>0||rejectedCount>0};root.__slgTranslationCoverageReport=report;root.__slgTranslationCoverageReportJson=JSON.stringify(report);root.__slgBuildCoverage=report;root.__slgIncompleteTestPatch=report.blocking;render(report);return report}
 root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations||new Map;root.__slgRejectedTranslations=root.__slgRejectedTranslations||new Set;root.__slgTranslationCoverageIncrementalDiff=incremental;root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{for(let i=0;i<(items||[]).length;i++){const old=safe(items[i]?.text);const value=translations instanceof Map?translations.get(i):translations?.[i];if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=safe(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgRefreshTranslationCoverage=()=>buildCoverage(root.__slgCoverageRecords||[],root.__slgValidatorApprovedTranslations,root.__slgRejectedTranslations,root.__slgCoverageUncertain||[],root.__slgCoverageClassifications||{},root.__slgTranslationCollisionCandidates||{});root.__slgBuildTranslationCoverageReport=buildCoverage;root.__slgSelectIncompleteTestPatch=enabled=>{root.__slgIncompleteTestPatchSelected=!!enabled;root.__slgRefreshTranslationCoverage?.()};root.__slgRefreshTranslationCoverage()})()
 '''
     # Uncertain extraction is a separate diagnostic bucket; it must not be
@@ -1531,7 +1549,10 @@ root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations|
     coverage_runtime_fix = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;function exact(value){return String(value??``)}root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{const map=translations instanceof Map?translations:null;for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text),value=map?.get(i)??map?.get(item.keyPath)??map?.get(item.text)??translations?.[item.keyPath]??translations?.[item.text]??translations?.[i];if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=exact(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgResetTranslationCoverage=()=>{root.__slgCoverageRecords=[];root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgIncompleteTestPatchSelected=false;root.__slgRefreshTranslationCoverage?.()}})()
 '''
-    js += collision_report + coverage_report + coverage_runtime_fix
+    coverage_runtime_fix_v2 = r'''
+(function(){const root=typeof window!==`undefined`?window:globalThis;function exact(value){return String(value??``)}function lookup(items,translations,index){const item=items[index]||{},map=translations instanceof Map?translations:null;return map?.get(index)??map?.get(item.keyPath)??map?.get(item.text)??translations?.[item.keyPath]??translations?.[item.text]??translations?.[index]}root.__slgRecordTranslationCandidates=(items,translations)=>{const candidateMap=root.__slgTranslationCollisionCandidates instanceof Map?root.__slgTranslationCollisionCandidates:new Map(Object.entries(root.__slgTranslationCollisionCandidates||{}));for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text);let value=lookup(items,translations,i);if(!old||!value||!String(value).trim())continue;let values=candidateMap.get(old)||[];value=String(value);if(!values.includes(value))values.push(value);candidateMap.set(old,values)}root.__slgTranslationCollisionCandidates=candidateMap;root.__slgRefreshTranslationCoverage?.()};root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{root.__slgRecordTranslationCandidates?.(items,translations);for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text),value=lookup(items,translations,i);if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=exact(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgResetTranslationCoverage=()=>{root.__slgCoverageRecords=[];root.__slgCoverageUncertain=[];root.__slgCoverageClassifications={};root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgTranslationCollisionCandidates=new Map;root.__slgTranslationCollisionEntries=[];root.__slgIncompleteTestPatchSelected=false;root.__slgRefreshTranslationCoverage?.()}})()
+'''
+    js += collision_report + coverage_report + coverage_runtime_fix + coverage_runtime_fix_v2
     return js
 
 
