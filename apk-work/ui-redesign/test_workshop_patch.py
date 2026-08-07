@@ -355,7 +355,7 @@ async function main(){{
   E.listApkEntries=async input=>{{calls.push([`list`,input.uri]);return{{entries:[],scanDurationMs:5}}}};
   let splitError=``;
   try{{await loadSelectedApk({{uri:`file://split.apk`,label:`Split`,splitApk:true,splitCount:2}})}}catch(error){{splitError=error.message}}
-  check(splitError===`璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛屽熀纭€ APK 涓病鏈夊彲缈昏瘧鏂囦欢銆傝鏀圭敤鈥滀粠鏂囦欢閫夋嫨 APK鈥濄€俙,`dedicated split error`);
+  check(splitError===`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`,`dedicated split error`);
   check(scanning.at(-1)===false,`error clears scanning`);
   E.listApkEntries=async()=>({{entries:[{{fileType:`rpy`}}]}});
   await loadSelectedApk({{uri:`file://retry.apk`,name:`Retry.apk`}});
@@ -399,8 +399,8 @@ async function main(){{
   check(calls.at(-1)[0]===`list`&&calls.at(-1)[1]===installed.uri,`installed selection enters real shared scanner`);
   check(uri===installed.uri&&name===installed.name&&packageName===installed.packageName,`installed metadata survives real loader`);
   check(window.__slgSelectionMeta===installed,`installed split metadata preserved by identity`);
-  check(logs.some(([message])=>message===`姝ｅ湪璇诲彇宸插畨瑁呭簲鐢ㄧ殑 APK...`),`installed selection uses dedicated loading log`);
-  check(logs.some(([message])=>message===`璇ュ簲鐢ㄤ娇鐢ㄦ媶鍒嗗畨瑁呭寘锛? 涓媶鍒嗗寘锛夛紝褰撳墠鍏堟壂鎻忓熀纭€ APK锛岄儴鍒嗚祫婧愬彲鑳芥棤娉曡鍙栥€俙),`split warning`);
+  check(logs.some(([message])=>message===`正在读取已安装应用的 APK...`,`installed selection uses dedicated loading log`));
+  check(logs.some(([message])=>message===`该应用使用拆分安装包（2 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`split warning`));
 
   let resolveOldScan,resolveNewScan;
   E.listApkEntries=input=>new Promise(resolve=>{{if(input.uri===`file://old.apk`)resolveOldScan=resolve;else resolveNewScan=resolve}});

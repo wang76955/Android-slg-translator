@@ -447,7 +447,7 @@ def patch_scan_flow(js: str) -> str:
     # the constrained APK-set shape.  The base URI remains for old bridges.
     patched = patched.replace(
         "window.__slgSelectionMeta=e,r(e.uri)",
-        "window.__slgSelectionMeta=Object.assign({},e,{baseUri:e.baseUri||e.uri,splitUris:Array.isArray(e.splitUris)?e.splitUris:[],splitNames:Array.isArray(e.splitNames)?e.splitNames:[],splitCount:Number(e.splitCount||e.splitUris?.length||0)}),e=window.__slgSelectionMeta,e.splitCount&&O(`已复制基础 APK 与 ${e.splitCount} 个 split，准备合并扫描`,`info`),r(e.uri)",
+        "window.__slgSelectionMeta=Object.assign(e,{baseUri:e.baseUri||e.uri,splitUris:Array.isArray(e.splitUris)?e.splitUris:[],splitNames:Array.isArray(e.splitNames)?e.splitNames:[],splitCount:Number(e.splitCount||e.splitUris?.length||0)}),e=window.__slgSelectionMeta,e.splitCount&&O(`已复制基础 APK 与 ${e.splitCount} 个 split，准备合并扫描`,`info`),r(e.uri)",
         1,
     )
     patched = patched.replace(
@@ -994,7 +994,8 @@ async function Lo(e){'''
         "Ce=async()=>{globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
-        "_r?.uri&&(window.__slgSelectionMeta=Object.assign({},window.__slgSelectionMeta,_r,{baseUri:_r.baseUri||_r.uri,splitUris:_r.splitUris||[],splitNames:_r.splitNames||[],splitCount:_r.splitCount||0}),window.__slgSelectionMeta.uri=_r.uri)}"
+        "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri);"
+        "if(_r?.uri){window.__slgSelectionMeta=Object.assign({},window.__slgSelectionMeta,_r,{baseUri:_r.baseUri||_r.uri,splitUris:_r.splitUris||[],splitNames:_r.splitNames||[],splitCount:_r.splitCount||0}),window.__slgSelectionMeta.uri=_r.uri}}"
         "catch(_e){O(`\u91cd\u65b0\u83b7\u53d6\u6e38\u620f\u5b89\u88c5\u5305\u5931\u8d25: ${_e&&_e.message||_e}`,\u0060error\u0060)}"
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgMenuInjectedForRefresh){try{"
         "const _m=await E.injectTranslatorMenu({apkUri:window.__slgSelectionMeta?.uri||n,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});"
