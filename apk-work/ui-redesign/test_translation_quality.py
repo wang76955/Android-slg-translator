@@ -242,14 +242,27 @@ public final class Task8CorpusHarness {
   public static void main(String[] args) {
     RenpyTextRecord same1 = new RenpyTextRecord("OK{#menu}", RenpyTextRecord.Kind.MENU, "", "", "game/a.rpyc", 1, 1, true);
     RenpyTextRecord same2 = new RenpyTextRecord("OK{#menu}", RenpyTextRecord.Kind.MENU, "", "", "game/a.rpyc", 2, 2, true);
-    RenpyTextRecord c1 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "alice", "", "game/a.rpyc", 3, 1, true);
-    RenpyTextRecord c2 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "bob", "", "game/b.rpyc", 4, 1, true);
-    RenpyTranslationCorpus.Corpus corpus = RenpyTranslationCorpus.build(Arrays.asList(same1, same2, c1, c2));
+    RenpyTextRecord c1 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "alice", "dialog-a", "game/a.rpyc", 3, 1, true);
+    RenpyTextRecord c2 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "bob", "dialog-b", "game/b.rpyc", 4, 1, true);
+    RenpyTextRecord c3 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "carol", "dialog-c", "game/c.rpyc", 5, 1, true);
+    RenpyTextRecord c4 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "dave", "dialog-d", "game/d.rpyc", 6, 1, true);
+    RenpyTextRecord c5 = new RenpyTextRecord("Fine.", RenpyTextRecord.Kind.DIALOGUE, "erin", "dialog-e", "game/e.rpyc", 7, 1, true);
+    RenpyTranslationCorpus.Corpus corpus = RenpyTranslationCorpus.build(Arrays.asList(same1, same2, c1, c2, c3, c4, c5));
     RenpyTranslationCorpus.Entry repeated = corpus.get("OK{#menu}");
     RenpyTranslationCorpus.Entry collision = corpus.get("Fine.");
     if (repeated == null || repeated.occurrences.size() != 2 || repeated.contextualCollision) throw new AssertionError("repeat");
-    if (collision == null || collision.occurrences.size() != 2 || !collision.contextualCollision) throw new AssertionError("collision");
-    if (!RenpyTranslationCorpus.contextPrompt(collision).contains("contexts=2")) throw new AssertionError("prompt count");
+    if (collision == null || collision.occurrences.size() != 5 || !collision.contextualCollision) throw new AssertionError("collision");
+    RenpyTextRecord first = collision.occurrences.get(0);
+    if (!"game/a.rpyc".equals(first.sourcePath) || first.sourceLine != 3
+        || first.kind != RenpyTextRecord.Kind.DIALOGUE || !"alice".equals(first.speaker)
+        || !"dialog-a".equals(first.identifier)) throw new AssertionError("record metadata");
+    String prompt = RenpyTranslationCorpus.contextPrompt(collision);
+    if (!prompt.contains("contexts=5") || !prompt.contains("game/a.rpyc:3")
+        || !prompt.contains("kind=DIALOGUE") || !prompt.contains("speaker=alice")
+        || !prompt.contains("identifier=dialog-a")) throw new AssertionError("prompt metadata");
+    if (prompt.split("- game/").length - 1 != 3 || prompt.contains("game/d.rpyc")
+        || prompt.contains("game/e.rpyc")) throw new AssertionError("prompt context bound");
+    if (!prompt.equals(RenpyTranslationCorpus.contextPrompt(collision))) throw new AssertionError("prompt nondeterministic");
     System.out.print("ok");
   }
 }
@@ -263,8 +276,9 @@ public final class Task8CorpusHarness {
                             str(FAST_SCAN / "src/com/slgtranslator/app/RenpyTextRecord.java"),
                             str(FAST_SCAN / "src/com/slgtranslator/app/RenpyTranslationCorpus.java"), str(source)], check=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            result = subprocess.run([str(JAVA), "-cp", str(out), "Task8CorpusHarness"], check=True,
+            result = subprocess.run([str(JAVA), "-cp", str(out), "Task8CorpusHarness"], check=False,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "ok")
 
     def test_task8_ui_reports_collisions_and_exports_sanitized_json(self):
@@ -340,6 +354,21 @@ public final class Task8CompileGateHarness {
     List<String[]> same = Arrays.asList(
         new String[] {"Fine.", "好。"}, new String[] {"Fine.", "好。"});
     if (LocalTranslationSupport.translationCollisionConflict(same) != null) throw new AssertionError("same translation rejected");
+    List<String[]> markerPairs = Arrays.asList(
+        new String[] {"Save{#slot}", "Translated slot{#slot}"},
+        new String[] {"Save{#menu}", "Translated menu{#menu}"},
+        new String[] {"Save{#slot}", "Translated slot{#slot}"});
+    TranslationCompiler.TemplateMeta meta = new TranslationCompiler.TemplateMeta();
+    meta.version = 7;
+    meta.key = "unlocked";
+    TranslationCompiler.TranslationArtifact artifact =
+        TranslationCompiler.compileTranslationArtifact("always_on", markerPairs, meta);
+    if (artifact == null || artifact.rpyc == null || artifact.rpyc.length == 0) throw new AssertionError("artifact missing");
+    RenpyPatchValidator.Result artifactValidation = RenpyPatchValidator.validateCompiledRpyc(
+        artifact.rpyc, 7, "unlocked", null, 3);
+    if (!artifactValidation.valid) throw new AssertionError("artifact validation: " + artifactValidation.code);
+    List<String> emitted = RpycTextExtractor.extractTexts(artifact.rpyc);
+    if (!emitted.contains("Save{#slot}") || !emitted.contains("Save{#menu}")) throw new AssertionError("marker old text missing from artifact");
   }
 }
 '''
@@ -357,13 +386,13 @@ public final class Task8CompileGateHarness {
                  str(source)],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
-            subprocess.run(
+            result = subprocess.run(
                 [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.Task8CompileGateHarness"],
-                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
+            self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
 
     def test_task8_prompt_limits_contexts_and_compile_rejects_conflicting_translations(self):
-        self.assertIn("up to 3 representative contexts", self.js)
         self.assertIn("translation_collision_conflict", self.js)
         self.assertIn("conflicting translations", self.js)
 

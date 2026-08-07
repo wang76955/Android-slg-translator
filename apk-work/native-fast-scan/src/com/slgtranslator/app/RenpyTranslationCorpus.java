@@ -35,7 +35,8 @@ public final class RenpyTranslationCorpus {
         for (int i = 0; i < limit; i++) {
             RenpyTextRecord r = entry.occurrences.get(i);
             prompt.append("- ").append(r.sourcePath).append(":").append(r.sourceLine)
-                    .append(" kind=").append(r.kind).append(" speaker=").append(r.speaker).append("\n");
+                    .append(" kind=").append(r.kind).append(" speaker=").append(r.speaker)
+                    .append(" identifier=").append(r.identifier).append("\n");
         }
         if (entry.contextCount() > 3) prompt.append("- up to 3 representative contexts (total ")
                 .append(entry.contextCount()).append(")\n");
