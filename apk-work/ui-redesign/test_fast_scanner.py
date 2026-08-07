@@ -1,5 +1,6 @@
 import re
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -2334,6 +2335,47 @@ public final class RenpyPreflightHarness {
         self.assertNotIn("apiKey", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
         self.assertNotIn("apkBytes", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
         self.assertNotIn("fullScript", source[source.index("sanitizedJson"):source.index("sanitizedJson") + 1200])
+
+    def test_renpy_extract_only_compatibility_gate_blocks_before_model(self):
+        """EXTRACT_ONLY must fail closed before either model branch, not merely change the label."""
+        source = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        start = source.index("if(window.__slgRenpyMenuType===`renpy`&&!window.__slgRenpyCompatibilityPreflightDone)")
+        end = source.index("window.__slgRenpyCompatibilityPreflightDone=true", start)
+        block = source[start:end]
+        self.assertIn("_cr.supportLevel===`EXTRACT_ONLY`", block)
+        self.assertIn("window.__slgRenpyCompatibilityGate===`extract_only`", block)
+        self.assertIn("ce(!1);return", block)
+        blocked_branch = block.index("if(window.__slgRenpyCompatibilityBlocked)")
+        self.assertLess(block.index("EXTRACT_ONLY"), blocked_branch)
+        self.assertLess(source.index("__slgRenpyCompatibilityPreflightDone"), source.index("async function Vo"))
+
+    def test_renpy_compatibility_accumulate_uses_all_read_records(self):
+        """Two extraction batches must aggregate to 3 unique, 4 occurrences, 1 collision."""
+        import patch_workshop_ui as patcher
+
+        node_script = f"""
+const runtime={json.dumps(patcher.compatibility_report_runtime)};
+globalThis.__slgRenpyCompatibilityReport={{supportLevel:`SAFE`,activationStrategy:`SELECTABLE_LANGUAGE`,templatePath:`assets/x-game/x-script.rpyc`,rpyc:null,rpaCount:0,splitCount:0,languageBuckets:[],menuType:`renpy`,font:null,uniqueTextCount:0,occurrenceCount:0,collisionCount:0,issues:[]}};
+eval(runtime);
+globalThis.__slgAccumulateRenpyCompatibility([
+  {{text:`A`,speaker:`s1`,identifier:`i1`,kind:`DIALOGUE`,sourcePath:`game/one.rpyc`}},
+  {{text:`B`,speaker:`s2`,identifier:`i2`,kind:`DIALOGUE`,sourcePath:`game/two.rpyc`}}
+]);
+globalThis.__slgAccumulateRenpyCompatibility([
+  {{text:`A`,speaker:`s3`,identifier:`i3`,kind:`DIALOGUE`,sourcePath:`game/three.rpyc`}},
+  {{text:`C`,speaker:`s4`,identifier:`i4`,kind:`DIALOGUE`,sourcePath:`game/four.rpyc`}}
+]);
+const report=globalThis.__slgRenpyCompatibilityReport;
+if(report.uniqueTextCount!==3||report.occurrenceCount!==4||report.collisionCount!==1){{
+  throw new Error(JSON.stringify(report));
+}}
+process.stdout.write(JSON.stringify({{unique:report.uniqueTextCount,occurrences:report.occurrenceCount,collisions:report.collisionCount}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", node_script],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(json.loads(result.stdout), {"unique": 3, "occurrences": 4, "collisions": 1})
 
     def test_rpa_archive_lists_and_reads_rpyc_entries(self):
         rpa3 = build_rpa3_fixture()
