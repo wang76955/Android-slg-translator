@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -47,6 +48,14 @@ def run_node(script: str) -> str:
 
 class TranslationCoverageLogicTest(unittest.TestCase):
     """Pure-Python coverage comparison used by the full APK audit."""
+
+    def test_revalidation_evidence_uses_only_explicit_statuses(self):
+        evidence = (ROOT / "docs/qa/renpy-batch-bc-evidence.md").read_text(encoding="utf-8")
+        self.assertIn("| requirementId |", evidence)
+        statuses = re.findall(r"\|\s*(PASS|FAIL|NOT-RUN)\s*\|", evidence)
+        self.assertGreaterEqual(len(statuses), 11)
+        self.assertNotIn("assumed-pass", evidence.lower())
+        self.assertNotIn("missing = 0 (inferred)", evidence.lower())
 
     def test_missing_strings_are_reported(self):
         corpus = {"Hello", "Choice A", "Name", "Screen Title"}
