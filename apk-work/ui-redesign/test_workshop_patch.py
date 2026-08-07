@@ -2029,55 +2029,120 @@ main().catch(error=>{console.error(error);process.exitCode=1});
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
 
-        controller_start = js.index("N=await runFileTasksParallel")
-        network_check = js.index("m&&isProviderNetworkFailure(m)", controller_start)
-        result_start = network_check - 3 if js[network_check - 3 : network_check] == "if(" else network_check
-        result_end = js.index("t+=p,O(", result_start)
-        file_result = js[result_start:result_end]
+        runtime = "\n".join(
+            extract_js_function(js, signature)
+            for signature in (
+                "function isNetworkFailure(e)",
+                "function networkFailureParts(e)",
+                "function providerLabel(e)",
+                "function isProviderNetworkFailure(e)",
+                "async function runFileTasksParallel(e,t,concurrency=3)",
+                "async function Bo(",
+                "async function Lo(e){",
+            )
+        )
+        outer_controller = extract_js_expression(js, "Ce=async()=>")
+        package_gate = "if(!N&&(a.length>0||oe))"
+        build_marker = "await E.buildPatchedApk"
+        self.assertEqual(outer_controller.count(package_gate), 1)
+        self.assertIn(build_marker, outer_controller)
+        self.assertLess(
+            outer_controller.index(package_gate),
+            outer_controller.index(build_marker),
+        )
+        completion_anchor = "t+=p,O("
+        self.assertEqual(outer_controller.count(completion_anchor), 1)
+        outer_controller = outer_controller.replace(
+            completion_anchor,
+            "t+=p,globalThis.__slgRecordFileCompletion?.(),O(",
+            1,
+        )
 
-        build_call = js.index("await E.buildPatchedApk", result_end)
-        package_guard_start = js.rfind("if(", controller_start, build_call)
-        package_guard_end = js.index("){", package_guard_start) + 1
-        package_guard = js[package_guard_start:package_guard_end]
-
-        behavior_contract = rf'''
-function check(condition,label){{if(!condition)throw new Error(label)}}
+        behavior_contract = "\n".join(
+            (
+                runtime,
+                r'''
+function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
-const fatal=`fatal provider network`;
-let requestCalls=0,writeCalls=0,buildCalls=0,completedFiles=0;
-function isProviderNetworkFailure(error){{return error===fatal}}
-async function requestFatal(){{requestCalls+=1;throw fatal}}
-function O(){{}}
-function ue(){{}}
-function ns(){{return true}}
-function rs(_file,_items,_translations,language){{return{{outputPath:`tl/${{language}}.rpy`,content:`translated`}}}}
-async function Ne(){{writeCalls+=1}}
-async function wo(){{}}
-function qe(){{return `translated`}}
-const E={{buildPatchedApk:async()=>{{buildCalls+=1}}}};
-
-async function simulatePartialFile(){{
-  let N=``,r=false,p=2,m=await requestFatal().catch(error=>error),a=[],o={{name:`script.rpy`}},l=[{{}},{{}}],f=new Map(),g=`zh`,y=`en`,oe=false,i=``,s=`rpy`,t=0,c=0,ae=[o],_fk=`cache-key`,vo={{}},bo=false,_maxDone=0;
-  {file_result}
-  return N;
-}}
-
-async function simulatePackaging(){{
-  let N=fatal,a=[{{path:`cached/partial.rpy`,content:`cached`}}],oe=false;
-  {package_guard}{{await E.buildPatchedApk()}}
-}}
-
-async function main(){{
-  const result=await simulatePartialFile();
-  check(result===fatal,`fatal network result survives partial success`);
-  check(requestCalls===1,`fatal provider rejection happens once`);
+globalThis.document={querySelector(){return null}};
+const fatal=`无法连接 DeepSeek。请检查网络，或前往“我的”切换供应商。`;
+const providerError=new Error(`Connection error`);
+providerError.name=`APIConnectionError`;
+providerError.cause={code:`ETIMEDOUT`};
+let requestCalls=0,writeCalls=0,buildCalls=0,completedFiles=0,finalResult=null;
+globalThis.Vo=async()=>{requestCalls+=1;throw providerError};
+globalThis.__slgApiSemaphore={run:async fn=>fn()};
+globalThis.Co=async()=>{};
+globalThis.No=texts=>texts;
+globalThis.xo=()=>`scope`;
+globalThis.Se=()=>null;
+globalThis.To=()=>null;
+globalThis.Wo=(map,item,value)=>map.set(item.id,value);
+globalThis.Eo=()=>{};
+globalThis.wo=async()=>{};
+globalThis.H=class{};
+globalThis.zo=items=>[items];
+globalThis.Ro=item=>item;
+globalThis.Ao=1;
+globalThis.jo=1;
+globalThis.Ko=()=>0;
+globalThis.__slgRecordFileCompletion=()=>{completedFiles+=1};
+globalThis.O=()=>{};
+globalThis.ue=()=>{};
+globalThis.ce=()=>{};
+globalThis.fe=result=>{finalResult=result};
+globalThis.he={current:[]};
+globalThis.w=()=>{};
+globalThis.U=value=>value;
+globalThis.ds={rpy:`rpy`};
+globalThis.ke=()=>[{id:0,text:`hello`,duplicateKeys:[]}];
+globalThis.rs=()=>({outputPath:`tl/zh.rpy`,content:`translated`});
+globalThis.ns=()=>true;
+globalThis.qe=()=>`translated`;
+globalThis.Ne=async()=>{writeCalls+=1};
+globalThis.is=value=>value;
+globalThis.Me=value=>value;
+globalThis.E={
+  createDirectory:async()=>{},
+  readFileContent:async()=>({content:`hello`,fileType:`rpy`}),
+  compileTranslationsIntoApk:async()=>{throw new Error(`compile must not run`)},
+  buildPatchedApk:async()=>{buildCalls+=1},
+};
+globalThis.n=`source.apk`;
+globalThis.ae=[{name:`script.rpy`,fileType:`rpy`}];
+globalThis.te=`test-api-key`;
+globalThis.oe=false;
+globalThis.x=`deepseek`;
+globalThis.re=``;
+globalThis._e=[{id:`deepseek`,baseURL:`https://api.deepseek.com/v1`}];
+globalThis.S=`test-model`;
+globalThis.m=null;
+globalThis.g=`en`;
+globalThis.y=`zh`;
+globalThis.ps=1;
+globalThis._mode=`test`;
+globalThis.vo={};
+globalThis.cacheIndex={};
+globalThis._dirty={};
+globalThis.bo=false;
+globalThis.__slgLocalSelected=false;
+let Ce;
+''',
+                outer_controller,
+                r'''
+async function main(){
+  await Ce();
+  check(requestCalls===1,`fatal provider rejection happens once through Vo`);
+  check(finalResult&&finalResult.success===false,`outer result is failed`);
+  check(finalResult.error===fatal,`outer result preserves network error`);
   check(writeCalls===0,`fatal network does not write partial translations`);
-  await simulatePackaging();
   check(buildCalls===0,`fatal network does not package cached or partial files`);
   check(completedFiles===0,`fatal network does not complete a file`);
-}}
-main().catch(error=>{{console.error(error);process.exitCode=1}});
-'''
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+''',
+            )
+        )
         result = subprocess.run(
             ["node", "-e", behavior_contract],
             capture_output=True,

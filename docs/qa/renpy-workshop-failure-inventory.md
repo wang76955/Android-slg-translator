@@ -76,15 +76,15 @@ Ran 2 tests ... OK
 
 ### WSP-04 `test_fatal_network_stops_outer_file_controller`
 
-- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
-- First effective failure: `AssertionError: expected outer-controller error token not found in patched JavaScript`（断言的完整形式为 `'<expected token>' not found in '<patched bundle>'`；bundle dump 已省略）。
+- Reproduce (pre-fix source): exact parent-source runner in the Task 4 revalidation section, selecting `test_fatal_network_stops_outer_file_controller`.
+- First effective failure (parent `8153593^`): `AssertionError: '...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悙澶辫触锛岃鏌ョ湅鏃ュ織`}:{}' not found in generated patch bundle`。
 - Expected behavior: 外层文件控制器应使用 `runFileTasksParallel(..., concurrency=3)`，在 fatal provider error 后阻止后续文件，并保留 actionable error。
 - Observed behavior: 直接 token 断言失败，未进入 scheduler 行为夹具；当前实现的错误文案/生成片段与契约中的精确字符串不同。
 - Authority: `WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller`；`runFileTasksParallel()` 与文件控制器生产接口。
 - Classification: `STALE_CONTRACT`
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（过具体 token 契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（生成输出，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v` → `AssertionError: '<expected token>' not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 需由后续任务决定更新契约还是恢复产品接口后再验证。`
+- Red evidence: exact parent-source runner in the Task 4 revalidation section → the missing legacy outer-controller token above.
+- Green evidence: superseded by the authoritative Task 4 revalidation entry below; current focused command reports `Ran 1 test in 0.173s` followed by `OK`。
 
 ### WSP-05 `test_installed_app_source_chooser_contract`
 
@@ -130,41 +130,41 @@ Ran 2 tests ... OK
 
 ### WSP-08 `test_network_failure_preempts_stale_translating_ui`
 
-- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v`
-- First effective failure: `AssertionError: expected network recovery action token not found in '<patched bundle>'`（bundle dump 已省略）。
+- Reproduce (pre-fix source): exact parent-source runner in the Task 4 revalidation section, selecting `test_network_failure_preempts_stale_translating_ui`.
+- First effective failure (parent `8153593^`): `AssertionError: 'actionButton("鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢",openSettings)' not found in generated patch bundle`。
 - Expected behavior: network failure 应抢占 stale translating snapshot，显示 `reason: "network"`，保留可操作错误，并提供切换供应商与重试动作。
 - Observed behavior: 精确的中文 action token 断言先失败，恢复动作行为夹具未运行。
 - Authority: `WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui`；`readTaskSnapshot()`、`renderStateBody()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
 - Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（文案 token 契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（network runtime，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v` → `AssertionError: expected network recovery action token not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 后续任务需先统一文案编码，再验证状态优先级和动作 wiring。`
+- Red evidence: exact parent-source runner in the Task 4 revalidation section → the missing legacy recovery-action token above.
+- Green evidence: superseded by the authoritative Task 4 revalidation entry below; current focused command reports `Ran 1 test in 0.168s` followed by `OK`。
 
 ### WSP-09 `test_network_failures_stop_batches_without_recursive_splitting`
 
-- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v`
-- First effective failure: `AssertionError: '无法连接 ${P}' not found in '<patched bundle>'`（bundle dump 已省略）。
+- Reproduce (pre-fix source): exact parent-source runner in the Task 4 revalidation section, selecting `test_network_failures_stop_batches_without_recursive_splitting`.
+- First effective failure (parent `8153593^`): `AssertionError: '鏃犳硶杩炴帴 ${P}' not found in generated patch bundle`。
 - Expected behavior: provider/network failure 只发起一次请求并向外传播；普通内容错误仍允许递归拆批，network failure 不得递归重试。
 - Observed behavior: provider error 文案 token 断言失败，递归拆批和 worker 停止行为未执行。
 - Authority: `WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting`；`isNetworkFailure()`、`Bo()`、`Lo()` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
 - Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（中文错误 token）；`apk-work/ui-redesign/patch_workshop_ui.py`（翻译协调器，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v` → `AssertionError: '无法连接 ${P}' not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 后续任务需处理编码边界后再验证请求次数和拆批语义。`
+- Red evidence: exact parent-source runner in the Task 4 revalidation section → the missing legacy provider-message token above.
+- Green evidence: superseded by the authoritative Task 4 revalidation entry below; current focused command reports `Ran 1 test in 0.170s` followed by `OK`。
 
 ### WSP-10 `test_partial_network_failure_never_writes_or_packages`
 
-- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v`
-- First effective failure: `ReferenceError: _maxDone is not defined`。
+- Reproduce (pre-fix source): exact parent-source runner in the Task 4 revalidation section, selecting `test_partial_network_failure_never_writes_or_packages`.
+- First effective failure (parent `8153593^`): `AssertionError: 1 != 0 : ReferenceError: _maxDone is not defined`。
 - Expected behavior: partial file success 后发生 fatal provider outage 时，不写入部分翻译、不构建 patched APK，也不打包缓存输出。
-- Observed behavior: 截取出的 file-result 片段引用 `_maxDone`，但独立 Node fixture 没有提供该生产上下文变量，导致行为尚未可判定。
+- Observed behavior: the old fixture directly seeded `m=fatal`, sliced only a file-result fragment, selected a preceding `if(` with `rfind`, and never reached the real provider/batch/controller/package path; `_maxDone` was only the first fixture error。
 - Authority: `WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages`；文件控制器与 `E.buildPatchedApk()` 生产接口。
 - Classification: `FIXTURE_GAP`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（缺少 `_maxDone` 的独立 fixture）；`apk-work/ui-redesign/patch_workshop_ui.py`（被截取片段，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v` → `ReferenceError: _maxDone is not defined`。
-- Green evidence: `NOT-RUN — 先补齐 fixture 的生产上下文，再判断写入/打包门禁。`
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（stable full-controller/provider harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（未修改）。
+- Red evidence: exact parent-source runner in the Task 4 revalidation section → the `_maxDone` fixture diagnostic above。
+- Green evidence: superseded by the authoritative Task 4 revalidation entry below; current focused command reports `Ran 1 test in 0.200s` followed by `OK`。
 
 ### WSP-11 `test_patch_contains_player_workshop_contract`
 
@@ -381,51 +381,69 @@ Ran 2 tests ... OK
 
 ## Task 4 revalidation: fatal network termination and output quarantine
 
-This section is the authoritative Task 4 update and supersedes the earlier preliminary WSP-04/WSP-08/WSP-09/WSP-10 entries above. The source and test files were inspected before editing. The initial RED run exposed three stale UTF-8/legacy-mojibake token contracts and one harness defect; it did not establish a product regression.
+This section is the authoritative Task 4 update and supersedes the earlier preliminary WSP-04/WSP-08/WSP-09/WSP-10 entries above. The source and test files were inspected before editing. The pre-fix RED run used the test source from parent commit `5487cf9` (`8153593^`) against the unchanged extracted fixtures and production patch; it exposed three stale UTF-8/legacy-mojibake token contracts and one harness defect. Those failures were test-evidence failures, not proof of a product regression.
+
+The exact pre-fix RED runner was:
+
+```powershell
+@'
+import subprocess,sys,types,unittest
+from pathlib import Path
+source=subprocess.check_output(['git','show','8153593^:apk-work/ui-redesign/test_workshop_patch.py'],text=True,encoding='utf-8')
+module=types.ModuleType('pre_fix_test_workshop_patch')
+module.__file__=str(Path('test_workshop_patch.py').resolve())
+sys.modules[module.__name__]=module
+exec(compile(source,module.__file__,'exec'),module.__dict__)
+names=['test_network_failures_stop_batches_without_recursive_splitting','test_fatal_network_stops_outer_file_controller','test_partial_network_failure_never_writes_or_packages','test_network_failure_preempts_stale_translating_ui']
+result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(module.WorkshopPatchContractTest(name) for name in names))
+sys.exit(not result.wasSuccessful())
+'@ | python -
+```
 
 ### WSP-04 `test_fatal_network_stops_outer_file_controller`
 
-- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
-- Exact RED result: `AssertionError: '<expected outer-controller error token>' not found in '<patched bundle>'`.
-- Corrected contract: the test now matches the current UTF-8 error message and executes `runFileTasksParallel(..., concurrency=3)`.
+- RED command: the exact parent-source runner above, selecting `test_fatal_network_stops_outer_file_controller`.
+- First RED diagnostic: `AssertionError: '...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悙澶辫触锛岃鏌ョ湅鏃ュ織`}:{}' not found in generated patch bundle`.
+- Corrected contract: the current UTF-8 error message is asserted, while the test continues to exercise the extracted `runFileTasksParallel(..., concurrency=3)` scheduler.
 - GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
-- Exact GREEN result: `Ran 1 test ... OK`.
+- Exact GREEN result: `Ran 1 test in 0.173s` followed by `OK`.
 - Behavioral evidence: `file-1` and the already-running `file-2` may start; `file-3` never starts; the exact fatal error object is returned by the outer controller.
 - Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
 - Boundary: Node-only extracted-production-function harness. It does not prove a real provider request, Android bridge behavior, filesystem commit, APK packaging, or device execution.
 
 ### WSP-08 `test_network_failure_preempts_stale_translating_ui`
 
-- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v`
-- Exact RED result: `AssertionError: 'actionButton("<legacy network recovery action>",openSettings)' not found in '<patched bundle>'`.
+- RED command: the exact parent-source runner above, selecting `test_network_failure_preempts_stale_translating_ui`.
+- First RED diagnostic: `AssertionError: 'actionButton("鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢",openSettings)' not found in generated patch bundle`.
 - Corrected contract: the fixture now uses the current UTF-8 labels `前往“我的”切换供应商` and `重试翻译`, and a current translating/error source text.
 - GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v`
-- Exact GREEN result: `Ran 1 test ... OK`.
+- Exact GREEN result: `Ran 1 test in 0.168s` followed by `OK`.
 - Behavioral evidence after the fatal rejection: `snapshot.state === "failed"`, `snapshot.reason === "network"`, `snapshot.raw` preserves the actionable provider error, and both recovery actions are wired.
 - Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
 - Boundary: Node-only extracted `readTaskSnapshot()`/`renderStateBody()` harness. It does not prove native UI rendering, Android lifecycle behavior, or a device-visible failure state.
 
 ### WSP-09 `test_network_failures_stop_batches_without_recursive_splitting`
 
-- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v`
-- Exact RED result: `AssertionError: '<legacy provider-message token>' not found in '<patched bundle>'`.
+- RED command: the exact parent-source runner above, selecting `test_network_failures_stop_batches_without_recursive_splitting`.
+- First RED diagnostic: `AssertionError: '鏃犳硶杩炴帴 ${P}' not found in generated patch bundle`.
 - Corrected contract: the fixture now asserts the current UTF-8 provider message while retaining ordinary content-error recursive splitting checks.
 - GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v`
-- Exact GREEN result: `Ran 1 test ... OK`.
+- Exact GREEN result: `Ran 1 test in 0.170s` followed by `OK`.
 - Behavioral evidence: ordinary content errors retain split shape `4,2,1,1,2,1,1`; the fatal network error escapes `Bo()` without splitting; `requestCalls === 1` for the first fatal rejection; the coordinator stops acquiring later batches while allowing the already in-flight batch to settle.
 - Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
 - Boundary: Node-only extracted provider/batch/coordinator harness. It does not prove remote service availability, SDK retry behavior outside the extracted function, or Android/device networking.
 
 ### WSP-10 `test_partial_network_failure_never_writes_or_packages`
 
-- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v`
-- Exact RED result: `ReferenceError: _maxDone is not defined`.
-- Root cause: fixture defect. `_maxDone` is harness-owned context needed by the extracted production fragment; the fixture now defines `_maxDone=0` before evaluating it. No `_maxDone` production addition was made for this test.
+- RED command: the exact parent-source runner above, selecting `test_partial_network_failure_never_writes_or_packages`.
+- First RED diagnostic: `AssertionError: 1 != 0 : ReferenceError: _maxDone is not defined`.
+- Root cause: the old harness directly seeded `m=fatal`, sliced only the result fragment, selected a preceding `if(` with `rfind`, and never exercised the provider/batch/controller/package path. `_maxDone` was only the first fixture failure; adding that variable alone would not have proved the required behavior. No `_maxDone` production addition was made.
+- Corrected contract: the test now extracts the complete `Ce=async()=>` outer controller with `extract_js_expression()`, extracts the production `Lo()`/`Bo()`/`runFileTasksParallel()` functions with `extract_js_function()`, injects a rejecting provider through `Vo()`, and executes the actual `if(!N&&(a.length>0||oe))` guard next to `await E.buildPatchedApk`.
 - GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v`
-- Exact GREEN result: `Ran 1 test ... OK`.
-- Behavioral evidence after the first fatal rejection: `requestCalls === 1`, `writeCalls === 0`, `buildCalls === 0`, `completedFiles === 0`; the fatal result survives the file controller; the write bridge and `buildPatchedApk` guard are both bypassed.
+- Exact GREEN result: `Ran 1 test in 0.200s` followed by `OK`.
+- Behavioral evidence after the first fatal rejection: `requestCalls === 1`, the outer result is `success === false` with the exact network error, `writeCalls === 0`, `buildCalls === 0`, and `completedFiles === 0`; the completion probe is attached to the actual successful-file fragment and is not reached. The ordinary content-error recursive split contract remains covered by WSP-09.
 - Classification: `FIXTURE_GAP` resolved; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
-- Boundary: Node-only extracted file-result/package-guard harness. It does not prove native file writes, APK assembly/signing, cache persistence, or a real Android install.
+- Boundary: Node-only extracted provider/batch/file-controller harness. It proves the JavaScript decision path and the real generated package condition, but does not prove native file writes, APK assembly/signing, cache persistence, or a real Android install.
 
 ### Task 4 focused regression evidence
 
@@ -440,4 +458,4 @@ python -m unittest `
   test_engine_performance.py -v
 ```
 
-Exact result: `Ran 8 tests ... OK` (four Task 4 contracts plus four performance-regression tests). The automated evidence is complete for the Node/Python harness scope only; real provider/network, native bridge, APK build/package, Android installation, and device/game evidence remain outside this task.
+Exact result from the command above: `Ran 8 tests in 0.778s` followed by `OK` (four Task 4 contracts plus four performance-regression tests). The automated evidence is complete for the Node/Python harness scope only; real provider/network, native bridge, APK build/package, Android installation, and device/game evidence remain outside this task.
