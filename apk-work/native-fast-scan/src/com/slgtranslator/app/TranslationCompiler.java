@@ -19,7 +19,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
@@ -106,6 +108,19 @@ public final class TranslationCompiler {
             for (java.util.Map.Entry<String, String> entry : merged.entrySet()) {
                 pairs.add(new String[]{entry.getKey(), entry.getValue()});
             }
+            Set<Integer> requiredCodePoints = new LinkedHashSet<>(
+                    RenpyFontSupport.defaultRequiredCodePoints());
+            // Run the fixed baseline preflight before adding translation-specific glyphs.
+            RenpyFontSupport.inspect(context, apk, requiredCodePoints);
+            requiredCodePoints.addAll(RenpyFontSupport.codePointsOfTranslations(merged.values()));
+            RenpyFontSupport.FontReport fontReport = RenpyFontSupport.inspect(
+                    context, apk, requiredCodePoints);
+            if (!fontReport.isComplete()) {
+                call.reject("renpy_font_missing_glyphs: missingCodePoints="
+                        + fontReport.missingCodePoints + ", bestFont="
+                        + String.valueOf(fontReport.bestFontPath));
+                return;
+            }
             TranslationArtifact artifact = compileTranslationArtifact(activationMode, pairs, meta);
             List<String[]> pending = new ArrayList<>();
             List<byte[]> pendingBytes = new ArrayList<>();
@@ -121,7 +136,7 @@ public final class TranslationCompiler {
             }
             rewriteApkWithEntries(apk, pending, pendingBytes);
             call.resolve(compileResult(artifact.activationMode, merged.size(),
-                    artifact.compiledPath, artifact.translatorLanguage, meta));
+                    artifact.compiledPath, artifact.translatorLanguage, meta, fontReport));
         } catch (Exception e) {
             if (e instanceof CompilationValidationException) {
                 CompilationValidationException validation = (CompilationValidationException) e;
@@ -136,6 +151,13 @@ public final class TranslationCompiler {
     private static JSObject compileResult(String activationMode, int compiled,
                                           String compiledPath, String translatorLanguage,
                                           TemplateMeta meta) {
+        return compileResult(activationMode, compiled, compiledPath, translatorLanguage, meta, null);
+    }
+
+    private static JSObject compileResult(String activationMode, int compiled,
+                                          String compiledPath, String translatorLanguage,
+                                          TemplateMeta meta,
+                                          RenpyFontSupport.FontReport fontReport) {
         JSObject result = new JSObject();
         result.put("compiled", compiled);
         result.put("activationMode", activationMode);
@@ -158,6 +180,35 @@ public final class TranslationCompiler {
                 result.put("compatibilityReason", meta.compatibility == null
                         ? "no_compatibility_report" : meta.compatibility.reason);
                 result.put("message", "");
+            }
+        }
+        if (fontReport != null) {
+            JSObject report = new JSObject();
+            JSArray candidates = new JSArray();
+            for (String candidate : fontReport.candidateFonts) {
+                candidates.put(candidate);
+            }
+            JSArray missing = new JSArray();
+            for (Integer codePoint : fontReport.missingCodePoints) {
+                missing.put(codePoint);
+            }
+            JSArray warnings = new JSArray();
+            for (String warning : fontReport.warnings) {
+                warnings.put(warning);
+            }
+            report.put("candidateFonts", candidates);
+            report.put("bestFontPath", fontReport.bestFontPath);
+            report.put("requiredCount", fontReport.requiredCount);
+            report.put("coveredCount", fontReport.coveredCount);
+            report.put("missingCodePoints", missing);
+            report.put("hasChineseStyleBucket", fontReport.hasChineseStyleBucket);
+            report.put("hasEastAsianLineBreakEvidence", fontReport.hasEastAsianLineBreakEvidence);
+            report.put("warnings", warnings);
+            result.put("fontReport", report);
+            if (!fontReport.hasChineseStyleBucket || !fontReport.hasEastAsianLineBreakEvidence) {
+                result.put("fontWarning", "未确认完整的中文 translate style 或东亚断行证据；请检查游戏排版。");
+            } else if (!fontReport.warnings.isEmpty()) {
+                result.put("fontWarning", "字体预检发现边界警告：" + fontReport.warnings);
             }
         }
         return result;

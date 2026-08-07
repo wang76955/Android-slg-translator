@@ -1045,8 +1045,18 @@ async function Lo(e){'''
         'return N},2);if(!N&&(a.length>0||oe)){', coverage_gate, 1
     )
     build_gate_compiled = build_gate_compiled.replace(
+        'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk(',
+        'return N},2);if(!N&&(a.length>0||oe)){window.__slgCompileFailed=false;(!N&&a.length)&&await E.compileTranslationsIntoApk(',
+        1,
+    )
+    build_gate_compiled = build_gate_compiled.replace(
+        'O(`  编译翻译资源失败: ${_e&&_e.message||_e}`,`error`)});O(`',
+        'window.__slgCompileFailed=true;O(`  编译翻译资源失败: ${_e&&_e.message||_e}`,`error`)});if(window.__slgCompileFailed){return N}O(`',
+        1,
+    )
+    build_gate_compiled = build_gate_compiled.replace(
         "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;",
-        "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;window.__slgActivationMode=_r&&_r.activationMode||window.__slgActivationMode||'always_on';window.__slgTranslatorLang=_r&&_r.translatorLanguage||'';window.__slgCompiledPath=_r&&_r.compiledPath||'';",
+        "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;window.__slgFontReport=_r&&_r.fontReport||null;window.__slgFontWarning=_r&&_r.fontWarning||'';window.__slgActivationMode=_r&&_r.activationMode||window.__slgActivationMode||'always_on';window.__slgTranslatorLang=_r&&_r.translatorLanguage||'';window.__slgCompiledPath=_r&&_r.compiledPath||'';(_r&&_r.fontWarning)&&O(`  字体预检警告：${_r.fontWarning}`,`warning`);",
         1,
     )
     if js.count(build_gate) != 1:

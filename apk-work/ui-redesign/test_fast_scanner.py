@@ -12,6 +12,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 SCANNER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
+FONT_SUPPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyFontSupport.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
 BUILDER = FAST_SCAN / "build_fast_scanner.py"
 WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
@@ -1468,6 +1469,10 @@ public final class TranslationCompilerActivationHarness {
             "window.__slgActivationMode",
             "activationMode:window.__slgActivationMode||'always_on'",
             "window.__slgCompiledPath",
+            "window.__slgFontReport",
+            "window.__slgFontWarning",
+            "window.__slgCompileFailed",
+            "fontWarning",
             "always_on",
             r"\u8bf7\u5728\u6e38\u620f\u8bbe\u7f6e\u4e2d\u9009\u62e9\u7ffb\u8bd1\u6587\u672c",
             r"\u6b64\u6e38\u620f\u4e0d\u652f\u6301\u53ef\u9760\u7684\u8bed\u8a00\u83dc\u5355\u6ce8\u5165\uff0c\u4e2d\u6587\u7ffb\u8bd1\u5c06\u5728\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528\uff0c\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587",
@@ -1868,6 +1873,167 @@ public final class RenpyResourceLimitsHarness {
             subprocess.run(
                 [str(JAVA), "-cp", str(classes),
                  "com.slgtranslator.app.RenpyResourceLimitsHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_renpy_font_report_detects_missing_translation_glyphs(self):
+        """Exercise real APK enumeration and glyph selection through Android stubs."""
+        self.assertTrue(FONT_SUPPORT.exists(), "RenpyFontSupport.java must exist")
+        source = FONT_SUPPORT.read_text("utf-8")
+        for token in (
+            "public static FontReport inspect(",
+            "Typeface.createFromFile",
+            "Paint.hasGlyph",
+            "MAX_FONT_ENTRIES",
+            "MAX_FONT_BYTES",
+            "MAX_TOTAL_FONT_BYTES",
+            "createTempFile",
+            "delete()",
+            "hasChineseStyleBucket",
+            "hasEastAsianLineBreakEvidence",
+        ):
+            self.assertIn(token, source)
+        self.assertNotRegex(source, r"/system/fonts|systemFont|sans-serif")
+
+        harness = r"""
+package com.slgtranslator.app;
+
+import android.content.Context;
+import android.graphics.Paint;
+import android.graphics.Typeface;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+public final class RenpyFontSupportHarness {
+    public static void main(String[] args) throws Exception {
+        File apk = new File(args[0]);
+        File cache = new File(args[1]);
+        cache.mkdirs();
+        try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(apk))) {
+            put(out, "assets/fonts/latin.ttf", "LATIN");
+            put(out, "assets/fonts/cjk.ttf", "CJK");
+            put(out, "../escape.ttf", "CJK");
+            put(out, "assets/fonts/ignored.txt", "CJK");
+            put(out, "assets/x-game/x-tl/x-chinese/x-style.rpyc",
+                    "line_break east_asian text_font");
+        }
+
+        Set<Integer> required = new HashSet<>(Arrays.asList(
+                (int) '中', (int) '文', (int) '界'));
+        RenpyFontSupport.FontReport report = RenpyFontSupport.inspect(
+                new TestContext(cache), apk, required);
+        require(report.candidateFonts.size() == 2, "only safe font entries are candidates");
+        require(report.candidateFonts.contains("assets/fonts/latin.ttf"), "latin candidate");
+        require(report.candidateFonts.contains("assets/fonts/cjk.ttf"), "cjk candidate");
+        require("assets/fonts/cjk.ttf".equals(report.bestFontPath), "highest coverage font wins");
+        require(report.requiredCount == 3, "required count");
+        require(report.coveredCount == 2, "covered count");
+        require(report.missingCodePoints.contains((int) '界'), "missing glyph is reported");
+        require(report.missingCodePoints.size() == 1, "only one glyph is missing");
+        require(report.hasChineseStyleBucket, "Chinese translate style is detected");
+        require(report.hasEastAsianLineBreakEvidence, "East Asian line-break evidence is detected");
+        require(report.warnings.contains("font_preflight_multiple_candidates_best_coverage_selected"),
+                "multiple candidates produce an explicit selection warning");
+        require(!Files.list(cache.toPath()).findAny().isPresent(), "temporary font copies are cleaned up");
+    }
+
+    private static void put(ZipOutputStream out, String name, String body) throws Exception {
+        out.putNextEntry(new ZipEntry(name));
+        out.write(body.getBytes(StandardCharsets.UTF_8));
+        out.closeEntry();
+    }
+
+    private static final class TestContext extends Context {
+        private final File cache;
+        TestContext(File cache) { this.cache = cache; }
+        @Override public File getCacheDir() { return cache; }
+        @Override public File getFilesDir() { return cache; }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+
+final class FontHarnessTypefaceMarker {}
+"""
+        typeface_stub = r"""
+package android.graphics;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+public class Typeface {
+    final String marker;
+    private Typeface(String marker) { this.marker = marker; }
+    public static Typeface createFromFile(String path) throws RuntimeException {
+        try {
+            return new Typeface(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            throw new RuntimeException(error);
+        }
+    }
+}
+"""
+        paint_stub = r"""
+package android.graphics;
+
+public class Paint {
+    private Typeface typeface;
+    public Typeface setTypeface(Typeface value) { this.typeface = value; return value; }
+    public boolean hasGlyph(String value) {
+        if (value == null || value.isEmpty() || typeface == null) return false;
+        int codePoint = value.codePointAt(0);
+        if (typeface.marker.startsWith("LATIN")) return codePoint < 128;
+        return codePoint < 128 || codePoint == '中' || codePoint == '文' || codePoint == '日';
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="renpy-font-support-test-") as temporary:
+            temporary_path = Path(temporary)
+            apk_path = temporary_path / "fixture.apk"
+            cache_path = temporary_path / "cache"
+            harness_path = temporary_path / "RenpyFontSupportHarness.java"
+            graphics_dir = temporary_path / "android" / "graphics"
+            graphics_dir.mkdir(parents=True)
+            (graphics_dir / "Typeface.java").write_text(typeface_stub, "utf-8")
+            (graphics_dir / "Paint.java").write_text(paint_stub, "utf-8")
+            harness_path.write_text(harness, "utf-8")
+            classes = temporary_path / "classes"
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath", third_party_classpath(),
+                    *map(str, stubs),
+                    str(graphics_dir / "Typeface.java"),
+                    str(graphics_dir / "Paint.java"),
+                    str(FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyResourceLimits.java"),
+                    str(FONT_SUPPORT),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes),
+                 "com.slgtranslator.app.RenpyFontSupportHarness",
+                 str(apk_path), str(cache_path)],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
