@@ -4,7 +4,7 @@
 >
 > 冻结日期：2026-08-08（Asia/Shanghai）
 >
-> 当前结论：C16 机器矩阵和 Task 19 自动化门禁已在共享工作区 fresh 复核为绿色：scanner `77` 项、workshop `60` 项、quality/coverage/performance 合计 `37` 项（1 个明确 audit-fixture skip）、full discover `192` 项（1 个明确 audit-fixture skip），均无 failures/errors；Task 20 本地 helper/APK 产物、哈希、签名和 DEX 归属也已复核。当前工作区仍没有可用于真机验收的完整第三方 Ren'Py 游戏样本。因此真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动、old save 和 rollback 仍保持 `NOT-RUN`，不是 `0` 或 `success`。
+> 当前结论：C16 机器矩阵和 Task 19 自动化门禁已在共享工作区 fresh 复核为绿色：scanner `77` 项、workshop `60` 项、quality/coverage/performance 合计 `37` 项（1 个明确 audit-fixture skip）、full discover `192` 项（1 个明确 audit-fixture skip），均无 failures/errors；Task 20 本地 helper/APK 产物、哈希、签名和 DEX 归属也已复核。另已在连接的 PEMM20 上对现有翻译工具 v1.0.10 完成范围受限的启动、入口、DocumentsUI 调用和返回恢复冒烟测试并记为 PASS，但当前工作区仍没有可用于真机验收的完整第三方 Ren'Py 游戏样本。因此真实游戏的 `missing == 0`、语言激活、字体覆盖、安装、启动、old save 和 rollback 仍保持 `NOT-RUN`，不是 `0` 或 `success`。
 
 ## 1. 证据边界
 
@@ -184,7 +184,8 @@ docs/qa/evidence/<sample-id>/device-smoke.txt
 | T21-01 | 本地 APK 候选的包名、版本和 Ren'Py 资源入口盘点 | `apk-work/samples/newmanwa.apk` 为 `newmanwa.com`/`Manwa2`，`apk-work/samples/nearbubble_final_hclm67.apk` 与 `apk-work/selected.apk` 为 `com.nearbubble`/`盘丝洞`；候选 ZIP 中未发现 `rpyc`、`rpa`、`renpy`、`assets/game` 或 `libpython` 入口；`com.slgtranslator.app` 候选是工具 APK | NOT-RUN | 没有可确认来源、许可和完整脚本/字体资产的真实 Ren'Py 游戏 APK；不能把这些候选提升为真实样本 |
 | T21-02 | 真实样本 coverage、字体、编译、安装、启动、语言、old save、rollback | 未执行 | NOT-RUN | Task 21 的完整门禁依赖 T21-01 的合法真实样本；控制 fixtures 和本地工具 APK 不替代真实游戏 |
 | T22-01 | 已连接设备只读 inventory | `PEMM20`; Android `13`/SDK `33`; ABI `arm64-v8a,armeabi-v7a,armeabi`; `/data/user/0` 可用 `36,952,844 KiB`; 已安装工具包 `com.slgtranslator.app` versionCode `10`, versionName `1.0.10` | PASS | 仅 inventory PASS；没有安装或启动本次 Task 20 的 `versionCode=7` APK，也没有安装真实游戏；真机安装/启动/译文/old save/rollback 仍 `NOT-RUN` |
-| T22-02 | 真机完整工作流 | 未执行 | NOT-RUN | 无批准真实游戏样本；用户设备锁屏窗口仅用于后续获得样本后的受控测试，不得以工具包 inventory 替代验收 |
+| T22-02 | 真机完整工作流 | 真实 Ren'Py 游戏流程未执行；工具包范围受限冒烟另见 T22-03 | NOT-RUN | 无批准真实游戏样本；工具包入口 PASS 不代表翻译、安装、语言、old save 或 rollback 验收 |
+| T22-03 | 已安装工具的设备启动与入口冒烟（不安装、不降级、不清数据） | `com.slgtranslator.app` versionCode `10` / versionName `1.0.10` 在 `PEMM20` / Android `13` / SDK `33` 上冷启动成功；主活动、中文首页、三步流程、APK 入口和底部导航可见；来源面板可打开；“从文件选择 APK”进入 `com.android.documentsui/.picker.PickActivity`；未选择文件，显式返回恢复 `com.slgtranslator.app/.MainActivity`；app-specific logcat 未命中明确崩溃/ANR 模式；截图见 `apk-work/device-smoke-v10-20260808-0620.png`、`apk-work/device-smoke-picker-v10-20260808-0621.png`、`apk-work/device-smoke-documentsui-v10-20260808-0623.png`、`apk-work/device-smoke-v10-final-20260808-0625.png` | PASS（范围受限） | 仅证明已安装 v1.0.10 工具的启动、UI、来源入口、系统文件选择器调用和返回恢复；不证明本地重建 v1.0.7，不证明 APK 翻译/补丁安装，也不证明真实 Ren'Py 游戏兼容性；真实游戏矩阵仍 NOT-RUN |
 
 ## 6. 矩阵完成规则
 

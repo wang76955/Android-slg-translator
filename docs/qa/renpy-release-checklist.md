@@ -2,7 +2,7 @@
 
 > 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16，以及本次 C16/Task 19 发布机器矩阵和自动化门禁复核。
 >
-> 当前状态：未批准发布。Task 19 自动化门禁、Task 20 本地产物门禁和 Task 23 文档审计已通过；但 Task 21/22 的真实游戏样本、安装、启动、语言、old save 和 rollback 仍为 `NOT-RUN`，因此最终发布决策仍是“未批准发布”。
+> 当前状态：未批准发布。Task 19 自动化门禁、Task 20 本地产物门禁和 Task 23 文档审计已通过；已对设备上现有的翻译工具 v1.0.10 完成范围受限的启动与入口冒烟测试并记为 PASS，但 Task 21/22 的真实 Ren'Py 游戏样本、安装、启动、语言、old save 和 rollback 仍为 `NOT-RUN`，因此最终发布决策仍是“未批准发布”。
 
 ## 1. 发布原则
 
@@ -128,6 +128,16 @@ scan
 - [ ] selectable 模式能够切回原文；always-on 模式显示“完成后持续使用翻译”的准确说明。
 - [ ] 每种激活模式至少完成一次“扫描 → 翻译 → lint → 编译 → 签名 → 安装 → 启动 → 看到译文 → 加载旧存档”。
 
+### 5.5 已安装工具的范围受限冒烟（2026-08-08）
+
+- [x] `PEMM20` / Android 13 / SDK 33 上，已安装 `com.slgtranslator.app` v1.0.10（versionCode 10）冷启动成功，主活动保持前台。
+- [x] 中文首页、三步流程、APK 选择入口和底部导航渲染正常；入口能够打开“选择来源”面板。
+- [x] “从文件选择 APK”能够调用 `com.android.documentsui/.picker.PickActivity`；未选择文件，显式返回后工具主活动和首页恢复。
+- [x] 观察窗口内 app-specific logcat 未命中 `FATAL EXCEPTION`、`ANR in`、`Fatal signal`、`SIGSEGV` 或 `Process: com.slgtranslator.app`。
+- [ ] 本地重建 v1.0.7 安装/降级、真实 APK 导入、扫描、翻译、补丁安装、真实 Ren'Py 游戏启动、语言、字体、old save 和 rollback：仍未运行。
+
+证据截图：`apk-work/device-smoke-v10-20260808-0620.png`、`apk-work/device-smoke-picker-v10-20260808-0621.png`、`apk-work/device-smoke-documentsui-v10-20260808-0623.png`、`apk-work/device-smoke-v10-final-20260808-0625.png`。本节 PASS 仅适用于设备现有 v1.0.10 工具包，不改变真实 Ren'Py 验收的 `NOT-RUN` 状态。
+
 ## 6. Skip 与外部条件登记
 
 允许 skip 的唯一理由是可验证的外部条件，例如真实 APK、完整提取语料、Android 设备或 `dexdump` 不存在。每条 skip 必须写清：
@@ -144,7 +154,7 @@ scan
 
 Task 21/22 前置盘点（2026-08-08）只读完成：本地候选 `samples/newmanwa.apk`（`newmanwa.com`/`Manwa2`）和 `samples/nearbubble_final_hclm67.apk`、`selected.apk`（`com.nearbubble`/`盘丝洞`）均未发现 `rpyc`、`rpa`、`renpy`、`assets/game` 或 `libpython` 入口；`com.slgtranslator.app` 候选是翻译工具本身。它们不具备可确认的真实 Ren'Py 游戏样本资格，因此 Task 21 的 coverage、字体、编译、安装、启动、语言、old save 和 rollback 保持 `NOT-RUN`。
 
-已连接设备只做了只读 inventory：`PEMM20`、Android 13 / SDK 33、ABI `arm64-v8a,armeabi-v7a,armeabi`、`/data/user/0` 可用 `36,952,844 KiB`；设备上的工具包为 `com.slgtranslator.app` versionCode `10` / versionName `1.0.10`。这一行只代表 inventory PASS，不代表应用验收；没有安装或启动 Task 20 的 versionCode 7 APK，也没有安装真实游戏；Task 22 真机完整工作流保持 `NOT-RUN`。
+已连接设备先完成只读 inventory，随后仅对现有工具包做了不安装、不降级、不清数据的范围受限冒烟：`PEMM20`、Android 13 / SDK 33、ABI `arm64-v8a,armeabi-v7a,armeabi`、`/data/user/0` 可用 `36,952,844 KiB`；设备上的工具包为 `com.slgtranslator.app` versionCode `10` / versionName `1.0.10`。工具包冷启动、首页、来源面板、DocumentsUI 调用和返回恢复记录为 PASS，但这不是真实游戏验收；没有安装或启动 Task 20 的 versionCode 7 APK，也没有安装真实游戏；Task 22 真机完整工作流仍保持 `NOT-RUN`。
 
 Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip；scanner 为 `77` 项，workshop 为 `60` 项，quality/coverage/performance 合计为 `37` 项并保留同一个明确 skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
 
@@ -162,7 +172,7 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 | 编译产物 | `RenpyPatchValidator` 通过，签名在 validator 之后进行 | PASS — Task 20 本地工具产物；不代表真实游戏 |
 | 字体终检 | `missingCodePoints` 为空，覆盖报告已保存 | NOT-RUN — 真实语料/字体未执行 |
 | 语言激活 | 每种声明支持的激活模式已在设备观察到译文 | NOT-RUN — 未安装真实游戏 |
-| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | NOT-RUN — 真机流程未执行 |
+| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | NOT-RUN — 工具包入口冒烟 PASS；真实游戏流程未执行 |
 | 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | PASS — controlled unsupported gate；真实样本仍 NOT-RUN |
 
 当前缺任一项都必须保持“未批准发布”。特别是 `EXTRACT_ONLY`/`UNSUPPORTED` 样本被正确阻断，是安全行为，不是可以通过发布门禁的理由。
@@ -177,8 +187,8 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 | C16-02 | loose RPYC2、RPA-1/RPA-2/RPA-3、legacy zlib | inherited or EXTRACT_ONLY/UNSUPPORTED | inherited or NONE | RPA/RPYC/legacy parser fixtures；real template/source and counts `not-run` | unknown format blocked; real missing/rejected/font `not-run` | blocked for unknown; real install/startup/save/rollback NOT-RUN | PASS (controlled); real archive NOT-RUN |
 | C16-03 | selectable、always-on、标准/自定义/无菜单和菜单注入失败 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | C13/T12/C15 UI/compile fixtures；real menu/source counts `not-run` | real missing/rejected/font `not-run` | tool build PASS；real activation/startup/old save/rollback NOT-RUN | PASS (controlled); device NOT-RUN |
 | C16-04 | 对话、菜单、角色名、UI、`{#}`、插值、printf、重复语境和字体 | inherited source level | inherited activation; advanced dialogue ID default-off | T8–T11/C15 controlled counts/collision/lint/font；real template/source `not-run` | complete real build requires `missing == 0` and `rejected == 0`; real font `not-run` | controlled gates PASS；real install/startup/save/rollback NOT-RUN | PASS (controlled); real corpus NOT-RUN |
-| C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle; Task 20 helper/APK artifact gate；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295` | real missing/rejected/font `not-run` | local build/signature/asset PASS；v2/v3 true；real install/startup/old save/rollback NOT-RUN | PASS (local artifact); device NOT-RUN |
-| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 23 audit complete；Task 21–22 real sample/device rows remain NOT-RUN | NOT-RUN — 未批准发布 |
+| C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle; Task 20 helper/APK artifact gate；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295` | real missing/rejected/font `not-run` | local build/signature/asset PASS；v2/v3 true；installed tool v1.0.10 startup/entry smoke PASS；real install/startup/old save/rollback NOT-RUN | PASS (local artifact/tool smoke); real device NOT-RUN |
+| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 23 audit complete；Task 22 tool smoke separately PASS；Task 21–22 real sample/device rows remain NOT-RUN | NOT-RUN — 未批准发布 |
 
 ## 8. 签字与交接
 
