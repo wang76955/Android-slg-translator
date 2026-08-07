@@ -1903,6 +1903,195 @@ public final class TranslationCompilerActivationHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_protocol2_always_on_artifact_uses_none_without_changing_selectable_language(self):
+        """A verified protocol-2 template keeps always-on nullable and selectable named."""
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
+
+public final class Protocol2ActivationHarness {
+    private static final byte[] MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
+
+    public static void main(String[] args) throws Exception {
+        List<String[]> pairs = new ArrayList<>();
+        pairs.add(new String[]{"same old", "same new"});
+
+        byte[] template = rpc2(RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2, "slgtranslated", "game/t.rpy",
+                pairs, 17, "fixture-key"));
+        RpycCompatibility.Report report = RpycCompatibility.inspect(template);
+        require(report.isProtocol2WriterVerified(),
+                "fixture must be recognized as the verified protocol-2 shape: " + report.reason);
+
+        TranslationCompiler.TemplateMeta meta = new TranslationCompiler.TemplateMeta();
+        meta.version = 17;
+        meta.key = "fixture-key";
+        meta.compatibility = report;
+
+        TranslationCompiler.TranslationArtifact selectable =
+                TranslationCompiler.compileTranslationArtifact("selectable", pairs, meta);
+        require(RpycCompatibility.inspect(selectable.rpyc).isProtocol2WriterVerified(),
+                "selectable artifact must use the verified protocol-2 writer");
+        require("slgtranslated".equals(selectable.translatorLanguage),
+                "selectable artifact must remain slgtranslated");
+        require(selectable.compiledPath.contains("tl/x-slgtranslated/"),
+                "selectable output path must remain in the slgtranslated bucket");
+        require(selectable.runtimeFilename.contains("tl/slgtranslated/"),
+                "selectable runtime path must remain slgtranslated");
+        require(hasLanguageString(inflateSlot(selectable.rpyc), "slgtranslated"),
+                "selectable pickle language must remain a string");
+
+        TranslationCompiler.TranslationArtifact alwaysOn =
+                TranslationCompiler.compileTranslationArtifact("always_on", pairs, meta);
+        require(RpycCompatibility.inspect(alwaysOn.rpyc).isProtocol2WriterVerified(),
+                "always-on artifact must use the verified protocol-2 writer");
+        require(alwaysOn.translatorLanguage == null,
+                "always-on compiler language must be null");
+        require(alwaysOn.compiledPath.contains("tl/x-None/"),
+                "always-on output path must include tl/None");
+        require(alwaysOn.runtimeFilename.contains("tl/None/"),
+                "always-on runtime path must include tl/None");
+        require(hasNoneLanguage(inflateSlot(alwaysOn.rpyc)),
+                "always-on pickle language must be NONE");
+        RenpyPatchValidator.Result validation = RenpyPatchValidator.validateCompiledRpyc(
+                alwaysOn.rpyc, 17, "fixture-key", null, pairs.size());
+        require(validation.valid, "always-on protocol-2 artifact must validate: " + validation.code);
+    }
+
+    private static byte[] rpc2(byte[] pickle) throws Exception {
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        DeflaterOutputStream deflated = new DeflaterOutputStream(raw);
+        deflated.write(pickle);
+        deflated.finish();
+        deflated.close();
+        byte[] slot = raw.toByteArray();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(MAGIC);
+        int dataStart = MAGIC.length + 3 * 12;
+        for (int id = 1; id <= 2; id++) {
+            le(out, id);
+            le(out, dataStart);
+            le(out, slot.length);
+            dataStart += slot.length;
+        }
+        le(out, 0);
+        le(out, 0);
+        le(out, 0);
+        out.write(slot);
+        out.write(slot);
+        return out.toByteArray();
+    }
+
+    private static byte[] inflateSlot(byte[] rpyc) throws Exception {
+        int pos = MAGIC.length;
+        while (pos + 12 <= rpyc.length) {
+            int id = le(rpyc, pos);
+            int offset = le(rpyc, pos + 4);
+            int length = le(rpyc, pos + 8);
+            if (id == 2) {
+                InflaterInputStream in = new InflaterInputStream(
+                        new ByteArrayInputStream(rpyc, offset, length));
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buffer = new byte[1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                return out.toByteArray();
+            }
+            if (id == 0) break;
+            pos += 12;
+        }
+        throw new AssertionError("RPC2 slot 2 missing");
+    }
+
+    private static boolean hasNoneLanguage(byte[] pickle) {
+        byte[] key = bin("language");
+        for (int i = 0; i + key.length < pickle.length; i++) {
+            if (matches(pickle, i, key) && pickle[i + key.length] == 0x4e) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasLanguageString(byte[] pickle, String expected) {
+        byte[] key = bin("language");
+        byte[] value = bin(expected);
+        for (int i = 0; i + key.length + value.length <= pickle.length; i++) {
+            if (matches(pickle, i, key) && matches(pickle, i + key.length, value)) return true;
+        }
+        return false;
+    }
+
+    private static byte[] bin(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(0x58);
+        le(out, bytes.length);
+        out.write(bytes, 0, bytes.length);
+        return out.toByteArray();
+    }
+
+    private static boolean matches(byte[] data, int offset, byte[] expected) {
+        if (offset < 0 || expected.length > data.length - offset) return false;
+        for (int i = 0; i < expected.length; i++) {
+            if (data[offset + i] != expected[i]) return false;
+        }
+        return true;
+    }
+
+    private static void le(ByteArrayOutputStream out, int value) {
+        out.write(value & 0xff);
+        out.write((value >>> 8) & 0xff);
+        out.write((value >>> 16) & 0xff);
+        out.write((value >>> 24) & 0xff);
+    }
+
+    private static int le(byte[] data, int pos) {
+        return (data[pos] & 0xff)
+                | ((data[pos + 1] & 0xff) << 8)
+                | ((data[pos + 2] & 0xff) << 16)
+                | ((data[pos + 3] & 0xff) << 24);
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="protocol2-activation-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "Protocol2ActivationHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath", third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes),
+                 "com.slgtranslator.app.Protocol2ActivationHarness"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
     def test_workshop_patch_propagates_activation_mode_and_guidance(self):
         ui_redesign = ROOT / "apk-work" / "ui-redesign"
         sys.path.insert(0, str(ui_redesign))
