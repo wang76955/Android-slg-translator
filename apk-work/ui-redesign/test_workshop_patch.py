@@ -108,6 +108,92 @@ def extract_js_function(source: str, signature: str) -> str:
     raise AssertionError(f"unclosed JavaScript function: {signature!r}")
 
 
+def extract_js_expression(source: str, signature: str) -> str:
+    """Extract a top-level comma-delimited initializer without slicing by a later function."""
+    start = source.find(signature)
+    assert start >= 0, f"JavaScript expression signature not found: {signature!r}"
+    contexts = [("code", None)]
+    escaped = False
+    regex_class = False
+    paren_depth = brace_depth = bracket_depth = 0
+    index = start
+    while index < len(source):
+        char = source[index]
+        mode, template_boundary = contexts[-1]
+        if mode == "regex":
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == "[":
+                    regex_class = True
+                elif char == "]":
+                    regex_class = False
+                elif char == "/" and not regex_class:
+                    contexts.pop()
+                index += 1
+                continue
+        if mode in ("single", "double", "template"):
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif mode == "template":
+                if char == "`":
+                    contexts.pop()
+                elif char == "$" and index + 1 < len(source) and source[index + 1] == "{":
+                    contexts.append(("code", brace_depth))
+                    index += 2
+                    continue
+            elif char == ("'" if mode == "single" else '"'):
+                contexts.pop()
+            index += 1
+            continue
+        if char == "'":
+            contexts.append(("single", None))
+        elif char == '"':
+            contexts.append(("double", None))
+        elif char == "`":
+            contexts.append(("template", None))
+        elif char == "/":
+            previous = index - 1
+            while previous >= start and source[previous].isspace():
+                previous -= 1
+            previous_char = source[previous] if previous >= start else ""
+            word_end = previous
+            while word_end >= start and (
+                source[word_end].isalnum() or source[word_end] in "_$"
+            ):
+                word_end -= 1
+            previous_word = source[word_end + 1 : previous + 1]
+            if (
+                previous_char in "([{:;,=!?&|+*%^~<>"
+                or not previous_char
+                or previous_word
+                in {"return", "throw", "case", "delete", "void", "typeof", "yield", "await"}
+            ):
+                contexts.append(("regex", None))
+        elif char == "(":
+            paren_depth += 1
+        elif char == ")":
+            paren_depth -= 1
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            if template_boundary is not None and brace_depth == template_boundary:
+                contexts.pop()
+            else:
+                brace_depth -= 1
+        elif char == "[":
+            bracket_depth += 1
+        elif char == "]":
+            bracket_depth -= 1
+        elif char == "," and not (paren_depth or brace_depth or bracket_depth):
+            return source[start:index]
+        index += 1
+    return source[start:]
+
+
 class WorkshopPatchContractTest(unittest.TestCase):
     def load_patch(self):
         module_path = ROOT / "patch_workshop_ui.py"
@@ -126,6 +212,11 @@ class WorkshopPatchContractTest(unittest.TestCase):
         source = 'function target(){const braces=/[{}]/;const quotient=a / b;return /}/.test("}")?quotient:0} function next(){}'
         block = extract_js_function(source, "function target()")
         self.assertEqual(block, source.split(" function next()")[0])
+
+    def test_extract_js_expression_handles_regex_classes_escapes_and_division(self):
+        source = r"loader=()=>{const suffix=/\.rp(?:y|ym)c$/i;const literal=/}/;const classPattern=/[{}\\]/;const slash=/\//;const quotient=a / b;const message=`${literal} ${`inner ${quotient}`}`;return {suffix,literal,classPattern,slash,quotient,message}},next=()=>{}"
+        expression = extract_js_expression(source, "loader=")
+        self.assertEqual(expression, source.split(",next=")[0])
 
     def test_canonical_extracted_assets_are_cryptographically_pinned(self):
         module = self.load_patch()
@@ -327,17 +418,20 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
 
         for token in (
             "loadSelectedApk=window.__slgLoadSelectedApk=e=>",
-            "window.__slgSelectionMeta=e",
+            "Object.assign(e,{baseUri:e.baseUri||e.uri",
+            "splitUris:Array.isArray(e.splitUris)",
+            "splitNames:Array.isArray(e.splitNames)",
+            "splitCount:Number(e.splitCount",
             "window.__slgSelectionError=null",
             "window.__slgSelectionError={message:",
             "await loadSelectedApk(await E.pickApkFile())",
-            "E.listApkEntries({uri:e.uri})",
+            "E.listApkEntries({uri:e.uri,baseUri:e.baseUri||e.uri",
             "e.name||e.label||e.uri.split(`/`).pop()||`Unknown.apk`",
             "e.packageName||``",
+            "e.versionCode",
+            "source:e.source||''",
             "e.splitApk&&t.entries.length===0",
             "function openSourceChooser()",
-            "该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。",
-            "该应用使用拆分安装包（${e.splitCount||0} 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。",
             "function openInstalledApps()",
             "function filterInstalledApps(apps,query)",
             "function renderInstalledApps()",
@@ -351,19 +445,14 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
             "FileManager.listInstalledApps()",
             "FileManager.selectInstalledApp({packageName:app.packageName})",
             "await window.__slgLoadSelectedApk(selection)",
-            "閫夋嫨搴旂敤鎴?APK",
-            "浠庡凡瀹夎搴旂敤閫夋嫨",
-            "浠庢枃浠堕€夋嫨 APK",
-            "姝ｅ湪璇诲彇搴旂敤鍒楄〃",
-            "娌℃湁鎵惧埌鍙€夋嫨鐨勫凡瀹夎搴旂敤銆備綘浠嶅彲浠庢枃浠堕€夋嫨 APK銆?",
-            "姝ｅ湪璇诲彇搴旂敤瀹夎鍖呪€?",
-            "姝ｅ湪璇诲彇宸插畨瑁呭簲鐢ㄧ殑 APK...",
-            "閲嶆柊鍔犺浇",
-            "鎼滅储搴旂敤鍚嶇О鎴栧寘鍚?",
+            'actionButton("从文件选择 APK"',
+            'actionButton("重新加载"',
+            'actionButton("从已安装应用选择"',
+            'search.placeholder="搜索应用名称或包名"',
         ):
             self.assertIn(token, js)
         self.assertEqual(js.count("loadSelectedApk=window.__slgLoadSelectedApk"), 1)
-        self.assertEqual(js.count("E.listApkEntries({uri:e.uri})"), 1)
+        self.assertEqual(js.count("E.listApkEntries({uri:e.uri,baseUri:e.baseUri||e.uri"), 1)
         self.assertIn("toLocaleLowerCase()", js)
         self.assertIn("app.label", js)
         self.assertIn("app.packageName", js)
@@ -389,37 +478,29 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=")
-        loader_end = js.index(",xe=async()=>", loader_start)
-        loader_initializer = js[
-            loader_start + len("loadSelectedApk=") : loader_end
-        ]
-        timeout_start = js.index("withTimeout=(")
-        timeout_runtime = js[timeout_start:loader_start].removesuffix(",") + ";"
-        xe_start = js.index("xe=async()=>", loader_end)
-        xe_end = js.index(",Se=async()=>", xe_start)
-        xe_initializer = js[xe_start + len("xe=") : xe_end]
-        filter_start = js.index("function filterInstalledApps(apps,query)")
-        filter_end = js.index("function renderInstalledApps()", filter_start)
-        filter_runtime = js[filter_start:filter_end]
-        list_start = js.index("async function loadInstalledApps()")
-        list_end = js.index("async function openInstalledApps()", list_start)
-        list_runtime = js[list_start:list_end]
-        choose_start = js.index("async function chooseInstalledApp(app)")
-        choose_end = js.index("function closeInstalledApps", choose_start)
-        choose_runtime = js[choose_start:choose_end]
-        snapshot_start = js.index("function readTaskSnapshot(){")
-        snapshot_end = js.index("function detailToggle(", snapshot_start)
-        snapshot_runtime = js[snapshot_start:snapshot_end]
-        render_start = js.index("function renderTopbar(state)")
-        render_end = js.index("function setWorkshopState(", render_start)
-        render_runtime = js[render_start:render_end]
-        state_start = render_end
-        state_end = js.index("function snapshotKey(", state_start)
-        state_runtime = js[state_start:state_end]
+        loader_expression = extract_js_expression(
+            js, "loadSelectedApk=window.__slgLoadSelectedApk="
+        )
+        loader_initializer = loader_expression[len("loadSelectedApk=") :]
+        timeout_runtime = extract_js_expression(js, "withTimeout=") + ";"
+        scan_runtime = extract_js_expression(js, "scanSelectedApk=") + ";"
+        xe_expression = extract_js_expression(js, "xe=async()=>")
+        xe_initializer = xe_expression[len("xe=") :]
+        filter_runtime = extract_js_function(js, "function filterInstalledApps(apps,query)")
+        list_runtime = extract_js_function(js, "async function loadInstalledApps()")
+        choose_runtime = extract_js_function(js, "async function chooseInstalledApp(app)")
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot(){")
+        render_runtime = "\n".join(
+            (
+                extract_js_function(js, "function renderTopbar(state)"),
+                extract_js_function(js, "function renderStateBody(state,payload)"),
+                extract_js_function(js, "function setWorkshopState(state,payload={})"),
+            )
+        )
         behavior_contract = rf'''
 function check(condition,label){{if(!condition)throw new Error(label)}}
 globalThis.window=globalThis;
+window.__slgScanTimeoutMs=65000;
 const calls=[],logs=[],scanning=[];
 const he={{current:[]}};
 let uri=`old`,name=`old.apk`,entries=[`old`],failure=`old`,progress=[`old`],packageName=`old.pkg`;
@@ -433,7 +514,9 @@ const E={{
   getApkPackageName:async input=>{{calls.push([`package`,input.uri]);return{{packageName:`fallback.pkg`}}}},
   pickApkFile:async()=>{{calls.push([`pick`]);return{{uri:`file://picked.apk`,name:`Picked.apk`}}}},
 }};
+let withTimeout,scanSelectedApk;
 {timeout_runtime}
+{scan_runtime}
 const loadSelectedApk={loader_initializer};
 const xe={xe_initializer};
 let installedDialog=null,installedError=``,installedLoading=false,installedApps=[],installedListEpoch=0,sourceRequestEpoch=0,installedBusy=false;
@@ -446,15 +529,15 @@ function sourceText(){{return`宸查€夋嫨锛欱roken.apk`}} function readPro
 function textNode(tag,cls,text){{return{{tag,cls,text,children:[],dataset:{{}},style:{{}},setAttribute(){{}},append(...children){{this.children.push(...children)}}}}}}
 function fileRow(){{return textNode(`div`,`file-row`,`file`)}} function detailToggle(raw){{return textNode(`div`,`details`,raw)}}
 function actionButton(label,handler,secondary=false){{return{{tag:`button`,label,handler,secondary,children:[]}}}}
-let sourceChooserOpened=0;function openSourceChooser(){{sourceChooserOpened+=1}} function openSettings(){{}} function retryTask(){{}} function triggerReactButton(){{}}
-const startButton=null,installButton=null;
+let sourceChooserOpened=0,retries=0,fileFallbacks=0;function openSourceChooser(){{sourceChooserOpened+=1}} function openSettings(){{}} function retryTask(){{retries+=1}} function triggerReactButton(){{fileFallbacks+=1}}
+const sourceButton={{}},startButton=null,installButton=null;
 function startScanClock(){{}} function stopScanClock(){{}}
 function classList(){{return{{remove(){{}},add(){{}}}}}}
 let shell={{dataset:{{}},classList:classList(),setAttribute(name,value){{this[name]=value}},replaceChildren(...nodes){{this.rendered=nodes}}}};
 const runtimeRoot={{classList:classList(),setAttribute(){{}}}};
 
 async function main(){{
-  const installed={{uri:`file://installed.apk`,name:`Friendly Game.apk`,label:`Friendly Game`,packageName:`game.pkg`,source:`installed`,splitApk:true,splitCount:3}};
+  const installed={{uri:`file://installed.apk`,baseUri:`file://base.apk`,splitUris:[`file://config.apk`,`file://lang.apk`],splitNames:[`config.apk`,`lang.apk`],splitCount:2,name:`Friendly Game.apk`,label:`Friendly Game`,packageName:`game.pkg`,versionCode:17,source:`installed`,splitApk:true}};
   await xe();
   check(calls[0][0]===`pick`&&calls[1][0]===`list`&&calls[1][1]===`file://picked.apk`,`real file picker enters shared URI scanner`);
   check(uri===`file://picked.apk`&&name===`Picked.apk`,`file selection metadata loaded`);
@@ -463,7 +546,7 @@ async function main(){{
   E.listApkEntries=async input=>{{calls.push([`list`,input.uri]);return{{entries:[],scanDurationMs:5}}}};
   let splitError=``;
   try{{await loadSelectedApk({{uri:`file://split.apk`,label:`Split`,splitApk:true,splitCount:2}})}}catch(error){{splitError=error.message}}
-  check(splitError===`该应用使用拆分安装包，基础 APK 中没有可翻译文件。请改用“从文件选择 APK”。`,`dedicated split error`);
+  check(splitError.includes(`\u62c6\u5206\u5b89\u88c5\u5305`)&&splitError.includes(`\u4ece\u6587\u4ef6\u9009\u62e9 APK`),`dedicated split error`);
   check(scanning.at(-1)===false,`error clears scanning`);
   E.listApkEntries=async()=>({{entries:[{{fileType:`rpy`}}]}});
   await loadSelectedApk({{uri:`file://retry.apk`,name:`Retry.apk`}});
@@ -481,9 +564,9 @@ async function main(){{
   const failedBody=shell.rendered[1],failedButtons=[];
   function visit(node){{if(!node)return;if(node.tag===`button`)failedButtons.push(node);for(const child of node.children||[])visit(child)}}
   visit(failedBody);
-  const reselect=failedButtons.find(button=>button.label===`\u91cd\u65b0\u9009\u62e9 APK`);
-  check(reselect,`failed shell offers source recovery`);reselect.handler();
-  check(sourceChooserOpened===1,`failed shell recovery opens source chooser`);
+  const retry=failedButtons.find(button=>button.label===`\u91cd\u8bd5\u626b\u63cf`),fileFallback=failedButtons.find(button=>button.label===`\u4ece\u6587\u4ef6\u9009\u62e9 APK`);
+  check(retry&&fileFallback,`failed shell offers retry and file fallback`);retry.handler();fileFallback.handler();
+  check(retries===1&&fileFallbacks===1,`failed shell recovery actions are executable`);
 
   const apps=[{{label:`Alpha Story`,packageName:`com.game.one`}},{{label:`Beta`,packageName:`ORG.EXAMPLE.TWO`}}];
   check(filterInstalledApps(apps,`alpha`)[0]===apps[0],`case-insensitive label search`);
@@ -507,8 +590,11 @@ async function main(){{
   check(calls.at(-1)[0]===`list`&&calls.at(-1)[1]===installed.uri,`installed selection enters real shared scanner`);
   check(uri===installed.uri&&name===installed.name&&packageName===installed.packageName,`installed metadata survives real loader`);
   check(window.__slgSelectionMeta===installed,`installed split metadata preserved by identity`);
-  check(logs.some(([message])=>message===`正在读取已安装应用的 APK...`,`installed selection uses dedicated loading log`));
-  check(logs.some(([message])=>message===`该应用使用拆分安装包（2 个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`split warning`));
+  check(window.__slgSelectionMeta.baseUri===installed.baseUri&&window.__slgSelectionMeta.splitUris.join(`,`)===installed.splitUris.join(`,`),`base and split URI metadata survives`);
+  check(window.__slgSelectionMeta.splitNames.join(`,`)===installed.splitNames.join(`,`)&&window.__slgSelectionMeta.splitCount===installed.splitCount,`split names and count survive`);
+  check(window.__slgSelectionMeta.packageName===installed.packageName&&window.__slgSelectionMeta.versionCode===installed.versionCode&&window.__slgSelectionMeta.source===`installed`,`package version and source survive`);
+  check(logs.some(([message])=>message.includes(`\u6b63\u5728\u8bfb\u53d6`)&&message.includes(`APK`),`installed selection uses dedicated loading log`));
+  check(logs.some(([message])=>message.includes(`split`)&&message.includes(`2`),`split warning`));
 
   let resolveOldScan,resolveNewScan;
   E.listApkEntries=input=>new Promise(resolve=>{{if(input.uri===`file://old.apk`)resolveOldScan=resolve;else resolveNewScan=resolve}});
@@ -525,7 +611,8 @@ async function main(){{
 main().catch(error=>{{console.error(error);process.exitCode=1}});
 '''
         result = subprocess.run(
-            ["node", "-e", filter_runtime + list_runtime + choose_runtime + snapshot_runtime + render_runtime + state_runtime + behavior_contract],
+            ["node", "--input-type=module"],
+            input=filter_runtime + list_runtime + choose_runtime + snapshot_runtime + render_runtime + behavior_contract,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -538,18 +625,17 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        helper_start = js.index("function armModalHistory()")
-        helper_end = js.index("function filterInstalledApps(", helper_start)
-        helpers = js[helper_start:helper_end]
-        render_start = js.index("function renderInstalledApps()")
-        render_end = js.index("async function loadInstalledApps()", render_start)
-        installed_render = js[render_start:render_end]
-        close_start = js.index("function closeInstalledApps(")
-        close_end = js.index("function findButton(", close_start)
-        installed_close = js[close_start:close_end]
-        pop_start = js.index("function handleWorkshopPopState()")
-        pop_end = js.index("function schedule()", pop_start)
-        pop_handler = js[pop_start:pop_end]
+        helpers = "\n".join(
+            (
+                extract_js_function(js, "function armModalHistory()"),
+                extract_js_function(js, "function releaseModalHistory()"),
+                extract_js_function(js, "function closeSourceChooser("),
+                extract_js_function(js, "function focusInstalledTarget()"),
+            )
+        )
+        installed_render = extract_js_function(js, "function renderInstalledApps()")
+        installed_close = extract_js_function(js, "function closeInstalledApps(")
+        pop_handler = extract_js_function(js, "function handleWorkshopPopState()")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -571,6 +657,7 @@ check(pushes===1&&modalHistoryArmed,`opening modal arms one history entry`);
 handleWorkshopPopState();
 check(sourceDialog.hidden===true&&!modalHistoryArmed,`Android back closes visible source modal`);
 check(backs===0,`back event does not navigate or exit twice`);
+check(returnedFocus===1,`source modal back restores opener focus`);
 armModalHistory();armModalHistory();
 check(pushes===2,`reopening does not stack duplicate history while open`);
 closeSourceChooser();
@@ -590,8 +677,8 @@ renderInstalledApps();
 check(search.focusCalls===1,`loading state restores focus to search`);
 installedLoading=false;installedError=`native failed`;renderInstalledApps();
 check(search.focusCalls===2,`error replacement restores focus`);
-const retry=content.children.find(node=>node.textContent===`閲嶆柊鍔犺浇`);
-const fallback=content.children.find(node=>node.textContent===`浠庢枃浠堕€夋嫨 APK`);
+const retry=content.children.find(node=>node.className===`workshop-source-option`);
+const fallback=content.children.find(node=>node.className===`workshop-modal-action`);
 check(retry&&fallback,`error state exposes retry and file fallback`);
 retry.onclick();check(retries===1,`retry action is executable`);
 modalHistoryArmed=false;
@@ -707,34 +794,64 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         self.assertIn("window.__slgScanTimeoutMs??=65000", js)
         self.assertIn("withTimeout(()=>selectionEpoch===window.__slgSelectionEpoch?", js)
         self.assertNotIn("withTimeout(E.listApkEntries", js)
-        helper_start = js.index("withTimeout=(")
-        loader_start = js.index("loadSelectedApk=window.__slgLoadSelectedApk=", helper_start)
-        loader_end = js.index(",xe=async()=>", loader_start)
-        helper = js[helper_start:loader_start].removesuffix(",") + ";"
-        loader = js[loader_start + len("loadSelectedApk="):loader_end]
+        helper = "\n".join(
+            (
+                extract_js_expression(js, "withTimeout=") + ";",
+                extract_js_expression(js, "scanSelectedApk=") + ";",
+            )
+        )
+        loader_expression = extract_js_expression(
+            js, "loadSelectedApk=window.__slgLoadSelectedApk="
+        )
+        loader = loader_expression[len("loadSelectedApk=") :]
+        render_state = extract_js_function(js, "function renderStateBody(state,payload)")
         contract = rf'''
 globalThis.window=globalThis;
+const timers=[];window.setTimeout=(callback,delay)=>{{timers.push({{callback,delay,cleared:false}});return timers.length}};window.clearTimeout=id=>{{timers[id-1].cleared=true}};
+window.__slgScanTimeoutMs=65000;
 const scanning=[];let uri=``,name=``,entries=[],pkg=``,failure=null;const logs=[];
 function r(v){{uri=v}} function a(v){{name=v}} function s(v){{entries=v}} function p(v){{pkg=v}}
 function fe(v){{failure=v}} const he={{current:[]}};function w(){{}} function d(v){{scanning.push(v)}} function O(v){{logs.push(v)}}
 function Jo(v){{return v}} function Oe(){{return {{rpy:1}}}} const ds={{rpy:`rpy`}},c=`all`,g=`zh`;
 let mode=`pending`,lateResolve;
 const E={{listApkEntries(){{if(mode===`pending`)return new Promise(resolve=>lateResolve=resolve);if(mode===`reject`)return Promise.reject(new Error(`native reject`));return Promise.resolve({{entries:[{{name:`fresh`,fileType:`rpy`}}]}})}},getApkPackageName:async()=>({{packageName:``}})}};
+let withTimeout,scanSelectedApk;
 {helper}
 const loadSelectedApk={loader};
+function textNode(tag,cls,text){{return{{tag,cls,textContent:text,children:[],style:{{}},append(...nodes){{this.children.push(...nodes)}},setAttribute(){{}}}}}}
+function actionButton(label,handler,secondary){{return{{tag:`button`,label,handler,children:[]}}}}
+function fileRow(){{return textNode(`div`,`file-row`,`file`)}} function detailToggle(){{return textNode(`div`,`details`,`details`)}}
+function stateIcon(){{return textNode(`span`,`icon`,`icon`)}} function retryTask(){{}} function openSourceChooser(){{}}
+function triggerReactButton(){{}} const sourceButton=null,startButton=null,installButton=null;
+{render_state}
 async function main(){{
  if(window.__slgScanTimeoutMs!==65000)throw new Error(`production deadline is not observable`);
- window.__slgScanTimeoutMs=10;
- let timeout=``;try{{await loadSelectedApk({{uri:`pending`,name:`Pending.apk`}})}}catch(e){{timeout=e.message}}
- if(!/timed out|瓒呮椂/i.test(timeout)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
+ const pending=loadSelectedApk({{uri:`pending`,name:`Pending.apk`}});
+ if(timers.length!==1||timers[0].delay!==65000)throw new Error(`deadline timer contract`);
+ await Promise.resolve();
+ if(scanning.at(-1)!==true)throw new Error(`scan did not start before deadline`);
+ timers[0].callback();
+ let timeout=``;try{{await pending}}catch(e){{timeout=e.message}}
+ if(!timeout.includes(`\u8d85\u65f6`)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
+ const failedBody=renderStateBody(`failed`,{{reason:`scan`,fileName:`Pending.apk`,raw:timeout}}),failedButtons=[];
+ function visit(node){{if(!node)return;if(node.tag===`button`)failedButtons.push(node);for(const child of node.children||[])visit(child)}}
+ visit(failedBody);
+ if(!failedButtons.some(button=>button.label===`\u91cd\u8bd5\u626b\u63cf`)||!failedButtons.some(button=>button.label===`\u4ece\u6587\u4ef6\u9009\u62e9 APK`))throw new Error(`timeout failure lacks retry and file fallback`);
  mode=`reject`;let rejected=``;try{{await loadSelectedApk({{uri:`reject`,name:`Reject.apk`}})}}catch(e){{rejected=e.message}}
  if(rejected!==`native reject`||scanning.at(-1)!==false)throw new Error(`reject contract`);
- mode=`resolve`;await loadSelectedApk({{uri:`fresh`,name:`Fresh.apk`}});lateResolve({{entries:[{{name:`late`,fileType:`rpy`}}]}});await new Promise(resolve=>setTimeout(resolve,0));
+ mode=`resolve`;await loadSelectedApk({{uri:`fresh`,name:`Fresh.apk`}});lateResolve({{entries:[{{name:`late`,fileType:`rpy`}}]}});await Promise.resolve();await Promise.resolve();
  if(uri!==`fresh`||entries[0].name!==`fresh`||window.__slgSelectionError!==null)throw new Error(`late resolve overwrote fresh selection`);
 }}
 main().catch(e=>{{console.error(e);process.exitCode=1}})
 '''
-        result = subprocess.run(["node", "-e", contract], capture_output=True, text=True, encoding="utf-8", check=False)
+        result = subprocess.run(
+            ["node", "--input-type=module"],
+            input=contract,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_production_loader_watchdog_registers_first_and_updates_state_directly(self):
@@ -792,12 +909,22 @@ main().catch(error=>{{console.error(error);process.exitCode=1}})
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        helper_start = js.index("function armModalHistory()")
-        helper_end = js.index("function filterInstalledApps(", helper_start)
-        helpers = js[helper_start:helper_end]
-        installed_start = helper_end
-        installed_end = js.index("function findButton(", installed_start)
-        installed_runtime = js[installed_start:installed_end]
+        helpers = "\n".join(
+            (
+                extract_js_function(js, "function armModalHistory()"),
+                extract_js_function(js, "function focusInstalledTarget()"),
+                extract_js_function(js, "function releaseModalHistory()"),
+            )
+        )
+        installed_runtime = "\n".join(
+            (
+                extract_js_function(js, "function filterInstalledApps(apps,query)"),
+                extract_js_function(js, "function renderInstalledApps()"),
+                extract_js_function(js, "async function loadInstalledApps()"),
+                extract_js_function(js, "async function chooseInstalledApp(app)"),
+                extract_js_function(js, "function closeInstalledApps("),
+            )
+        )
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;const ID=`workshop-runtime`;
@@ -832,26 +959,23 @@ async function main(){
   installedDialog.hidden=false;installedApps=[{label:`One`,packageName:`one.pkg`},{label:`Two`,packageName:`two.pkg`}];installedError=``;
   const chooseResolvers={};
   window.Capacitor.Plugins.FileManager.selectInstalledApp=({packageName})=>new Promise((resolve,reject)=>{chooseResolvers[packageName]={resolve,reject}});
-  const loaded=[];window.__slgLoadSelectedApk=async selection=>{loaded.push(selection.packageName)};
+  const loaded=[];window.__slgLoadSelectedApk=async selection=>{loaded.push(selection)};
   const chooseOne=chooseInstalledApp(installedApps[0]);
   const chooseTwo=chooseInstalledApp(installedApps[1]);
   renderInstalledApps();
   check(attrs[`aria-busy`]===`true`,`choose marks dialog aria busy`);
   check(findNodes(content.children,node=>node.tag===`button`).every(button=>button.disabled),`busy disables rows and source operations`);
   check(cancelAction.disabled,`busy disables modal source cancellation action`);
-  check(findNode(content.children,node=>node.textContent===`姝ｅ湪璇诲彇搴旂敤瀹夎鍖呪€),`busy copy is visible`);
-  chooseResolvers[`two.pkg`].resolve({uri:`file://two.apk`,name:`Two.apk`,packageName:`two.pkg`,source:`installed`});await chooseTwo;
-  chooseResolvers[`one.pkg`].resolve({uri:`file://one.apk`,name:`One.apk`,packageName:`one.pkg`,source:`installed`});await chooseOne;
-  check(loaded.join(`,`)===`two.pkg`,`stale choose success cannot close or load`);
-
-  installedDialog.hidden=false;modalHistoryArmed=true;
-  const staleFailure=chooseInstalledApp({label:`Three`,packageName:`three.pkg`});
-  closeInstalledApps();chooseResolvers[`three.pkg`].reject(new Error(`stale select failed`));await staleFailure;
-  check(installedDialog.hidden&&!modalHistoryArmed,`stale choose failure cannot rearm or reopen after close`);
+  check(findNode(content.children,node=>node.cls===`workshop-installed-status`),`busy copy is visible`);
+  chooseResolvers[`two.pkg`].resolve({uri:`file://two.apk`,baseUri:`file://two.apk`,splitUris:[],splitNames:[],splitCount:0,name:`Two.apk`,packageName:`two.pkg`,versionCode:2,source:`installed`});await chooseTwo;
+  chooseResolvers[`one.pkg`].reject(new Error(`stale select failed`));await chooseOne;
+  check(loaded.length===1&&loaded[0].packageName===`two.pkg`,`stale choose rejection cannot close or load`);
+  check(loaded[0].uri===`file://two.apk`&&loaded[0].baseUri===`file://two.apk`&&loaded[0].splitCount===0&&loaded[0].versionCode===2&&loaded[0].source===`installed`,`new selection preserves complete SourceSet`);
+  check(installedError===``,`stale choose rejection cannot render error`);
 
   installedDialog.hidden=false;installedApps=[];installedLoading=false;installedError=``;installedBusy=false;renderInstalledApps();
-  check(findNode(content.children,node=>node.textContent===`娌℃湁鎵惧埌鍙€夋嫨鐨勫凡瀹夎搴旂敤銆備綘浠嶅彲浠庢枃浠堕€夋嫨 APK銆俙),`complete empty guidance`);
-  const fallback=findNode(content.children,node=>node.textContent===`浠庢枃浠堕€夋嫨 APK`);check(fallback,`empty state file fallback exists`);fallback.onclick();
+  check(findNode(content.children,node=>node.cls===`workshop-installed-status`),`complete empty guidance`);
+  const fallback=findNode(content.children,node=>node.className===`workshop-modal-action`);check(fallback,`empty state file fallback exists`);fallback.onclick();
   check(fallbackClicks===1&&installedDialog.hidden,`empty fallback executes React file picker bridge`);
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

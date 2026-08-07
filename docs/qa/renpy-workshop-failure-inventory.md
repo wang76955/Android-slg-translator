@@ -91,25 +91,25 @@ Ran 2 tests ... OK
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract -v`
 - First effective failure: `AssertionError: 'window.__slgSelectionMeta=e' not found in '<patched bundle>'`（bundle dump 已省略）。
 - Expected behavior: 已安装应用选择应保存 selection metadata，包含 URI、package、split 信息，并通过真实 shared URI scanner 继续加载。
-- Observed behavior: 当前生成代码采用扩展后的 `Object.assign(...)` metadata 写入形式，缺少测试要求的旧精确 token，因此行为夹具未运行。
+- Observed behavior: 当前生成代码采用扩展后的 `Object.assign(...)` metadata 写入形式，缺少测试要求的旧精确 token，因此行为夹具未运行；本次 baseline 首个有效错误仍为该精确契约不匹配。
 - Authority: `WorkshopPatchContractTest.test_installed_app_source_chooser_contract`；`chooseInstalledApp()`、`loadSelectedApk()` 生产接口。
 - Classification: `STALE_CONTRACT`
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（过具体 token）；`apk-work/ui-redesign/patch_workshop_ui.py`（metadata 生成输出，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract -v` → `AssertionError: 'window.__slgSelectionMeta=e' not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 尚未决定以语义断言替换旧 token 或调整产品输出。`
+- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract -v` → `AssertionError: 'window.__slgSelectionMeta=e' not found in '<patched bundle>'`（bundle dump 已省略）。
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract` → `Ran 1 test in 0.067s; OK`；测试改为验证完整 SourceSet 与 shared scanner 行为，未修改运行时 metadata 逻辑。
 
 ### WSP-06 `test_installed_list_and_selection_epochs_ignore_stale_requests`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests -v`
 - First effective failure: `SyntaxError: missing ) after argument list`，定位到夹具中的 `正在读取应用安装包...` 字符串。
 - Expected behavior: 旧 installed-list/selection 请求在新请求完成后不得覆盖当前 URI、entries、package 或 error；loading/error 状态必须可恢复。
-- Observed behavior: Node 在执行生产片段前就无法解析测试夹具，stale-request 行为没有被执行。
+- Observed behavior: Node 在执行生产片段前就无法解析测试夹具（`[eval]:55`），stale-request 行为没有被执行。
 - Authority: `WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests`；installed list/selection epoch 生产接口。
-- Classification: `ENCODING_BOUNDARY`
-- Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness 文本边界）；`apk-work/ui-redesign/patch_workshop_ui.py`（被截取生产片段，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests -v` → `SyntaxError: missing ) after argument list`。
-- Green evidence: `NOT-RUN — 先修复夹具编码/语法边界，再判断 epoch 行为。`
+- Classification: `FIXTURE_GAP`
+- Classification confidence: Confirmed; the harness had an unterminated template literal in its busy-state assertion, so Node could not reach epoch behavior.
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（修复 Node harness 语法、改用可控 deferred 与语义断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（未修改）。
+- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests -v` → `SyntaxError: missing ) after argument list`（`[eval]:55`）。
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests` → `Ran 1 test in 0.122s; OK`；两个 list request 与两个 selection request 均通过逆序 settlement/stale rejection 验证。
 
 ### WSP-07 `test_long_running_phases_are_not_reported_as_directory_scanning`
 
@@ -284,24 +284,24 @@ Ran 2 tests ... OK
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement -v`
 - First effective failure: `Error: timeout contract`。
 - Expected behavior: shared loader 应同步注册 watchdog、对 native scan 设置 65 秒可观测 deadline、在 timeout/reject 时清理 scanning 状态，并拒绝 late resolve 覆盖新 selection。
-- Observed behavior: timeout harness 未满足 `timed out`、selection error 和 scanning cleanup 的联合断言。
+- Observed behavior: baseline harness 首个失败于 timeout contract；修正可控 fake deadline 后，进一步证实扫描失败 UI 缺少可执行 retry/file fallback，已做最小运行时补丁。
 - Authority: `WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement`；`withTimeout()`、`loadSelectedApk()` 生产接口。
 - Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（loader harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（shared loader，Task 1 未修改）。
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（loader fake-timer/deferred harness 与失败 UI 行为断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（扫描失败状态增加 retry/file fallback）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement -v` → `Error: timeout contract`。
-- Green evidence: `NOT-RUN — loader deadline/settlement 修复留待后续任务。`
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement` → `Ran 1 test in 0.176s; OK`；fake timer 跨过 65000 ms deadline，late resolve 未覆盖失败状态，retry/file fallback 均可执行。
 
 ### WSP-21 `test_source_modals_handle_android_back_focus_and_file_fallback`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback -v`
 - First effective failure: `Error: error state exposes retry and file fallback`。
 - Expected behavior: installed-app modal 的 loading/error 状态应恢复 focus；error 状态同时提供 retry 和从文件选择 APK fallback，fallback 要关闭 modal 并触发真实 picker bridge。
-- Observed behavior: error state 没有同时暴露可识别的 retry/fallback actions，后续 Android back/focus 断言未执行。
+- Observed behavior: error state 首个失败于 retry/file-fallback 联合断言，后续 Android back/focus 断言未执行。
 - Authority: `WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback`；`renderInstalledApps()`、`closeInstalledApps()` 生产接口。
-- Classification: `PRODUCT_REGRESSION`
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（modal harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（source modal，Task 1 未修改）。
+- Classification: `STALE_CONTRACT`
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（modal harness 改为稳定 DOM/action 语义断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（source modal 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback -v` → `Error: error state exposes retry and file fallback`。
-- Green evidence: `NOT-RUN — modal error-state 修复留待后续任务。`
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback` → `Ran 1 test in 0.119s; OK`；Android Back 仅消费可见 source/installed modal，恢复 opener focus，file fallback 可执行。
 
 ### WSP-22 `test_task_runtime_bridges_and_recovery_contract`
 
