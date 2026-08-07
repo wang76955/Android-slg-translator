@@ -67,12 +67,12 @@ Ran 2 tests ... OK
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately -v`
 - First effective failure (baseline): `Error: recovery banner offers dismiss`.
 - Expected behavior: a saved translating session renders a recovery banner; dismiss removes `SESSION_KEY`, resets `sessionRestoredAt`, invalidates the snapshot, calls `refresh()`, and removes the banner immediately.
-- Root-cause evidence: the original fixture used stale mojibake state/banner labels. With complete `readTaskSnapshot()`, `renderStateBody()`, `refresh()`, `snapshotKey()`, and `recoveryBanner()` extraction plus current labels, the harness found the dismiss button and verified immediate re-render.
+- Root-cause evidence (Fix round 1): the fixture now writes `SESSION_KEY` with `translating:true`, `savedAt:123`, and a minimal saved session, then executes complete `restoreSession()`/`refresh()`/`recoveryBanner()` paths. The first real post-dismiss run failed at `dismiss invalidates snapshot cache and refreshes immediately`; adding the minimal `lastSnapshot=""` invalidation made the same-key refresh render the banner-free state.
 - Authority: `WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately`; `recoveryBanner()`, `refresh()`, `renderStateBody()`.
-- Classification: `STALE_CONTRACT` (no product regression after the complete-function/current-fixture run).
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
-- Red evidence: baseline `-v` run failed before click; complete-function/current-fixture run passed.
-- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately -v` -> `Ran 1 test ... OK`.
+- Classification: `PRODUCT_REGRESSION` (Fix round 1; the real restore/dismiss fixture demonstrated missing snapshot-cache invalidation).
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py` (`lastSnapshot=""` before dismiss refresh).
+- Red evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately` -> `Error: dismiss invalidates snapshot cache and refreshes immediately`.
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_dismiss_recovery_banner_re_renders_immediately` -> `Ran 1 test ... OK`; direct assertions covered `localStorage.getItem(SESSION_KEY)===null`, `sessionRestoredAt===0`, two refresh/render passes, and banner disappearance.
 
 ### WSP-04 `test_fatal_network_stops_outer_file_controller`
 
@@ -308,12 +308,12 @@ Ran 2 tests ... OK
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v`
 - First effective failure (baseline): stale ENOSPC localized-copy token assertion; the later `<patched bundle>` dump is not root-cause evidence.
 - Expected behavior: React remains the owner of controls; the shell dispatches bubbling events, exposes task state, and renders the current recoverable ENOSPC contract.
-- Root-cause evidence: current `renderStateBody()` contains the current space-error copy and retry action; the over-broad global `.click()` assertion also matched unrelated export links in the base bundle. Narrowing the assertion to the managed React button names made the bridge contract run.
+- Root-cause evidence (Fix round 1): complete `triggerReactButton()`, `renderTopbar()`, `fileRow()`, `detailToggle()`, `actionButton()`, `renderStateBody()`, `setWorkshopState()`, and `retryTask()` functions now run in a minimal Node DOM/event fixture. The fixture proves a bubbling click reaches the React control, failed state data attributes are set, ENOSPC renders localized title/raw details/retry, and retry invokes the bridge. The broad `.click()` gate scans the concatenated workshop-runtime functions; unrelated base-bundle anchor clicks are excluded because they are outside those extracted workshop-owned functions, not because of variable-name filtering.
 - Authority: `WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract`; `triggerReactButton()`, `renderStateBody()`.
 - Classification: `STALE_CONTRACT` (not a network/product fix).
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
 - Red evidence: baseline `-v` run failed at the first stale ENOSPC token; no bundle dump was used as root cause.
-- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract -v` -> `Ran 1 test ... OK`.
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_task_runtime_bridges_and_recovery_contract` -> `Ran 1 test ... OK` (real Node fixture; not static bundle-only).
 
 ### WSP-23 `test_translating_state_does_not_replay_card_entrance_animation`
 
@@ -325,7 +325,7 @@ Ran 2 tests ... OK
 - Classification: `STALE_CONTRACT` (product CSS already satisfied both required active phases).
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
 - Red evidence: baseline `-v` run failed on the compacted selector token.
-- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation -v` -> `Ran 1 test ... OK`.
+- Green evidence (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation` -> `Ran 1 test ... OK`.
 
 ### WSP-24 `test_translation_heartbeat_updates_session`
 
@@ -337,7 +337,7 @@ Ran 2 tests ... OK
 - Classification: `STALE_CONTRACT` (no product regression after the full-function/current-fixture run).
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
 - Red evidence: baseline `-v` run failed at the heartbeat assertion.
-- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session -v` -> `Ran 1 test ... OK`.
+- Green evidence (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session` -> `Ran 1 test ... OK`.
 
 ### WSP-25 `test_translation_logs_are_mirrored_into_the_visible_shell`
 

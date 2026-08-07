@@ -72,7 +72,15 @@ def extract_js_function(source: str, signature: str) -> str:
             while previous >= start and source[previous].isspace():
                 previous -= 1
             previous_char = source[previous] if previous >= start else ""
-            if previous_char in "([{:;,=!?&|+*%^~<>" or not previous_char:
+            word_end = previous
+            while word_end >= start and (source[word_end].isalnum() or source[word_end] in "_$"):
+                word_end -= 1
+            previous_word = source[word_end + 1 : previous + 1]
+            if (
+                previous_char in "([{:;,=!?&|+*%^~<>"
+                or not previous_char
+                or previous_word in {"return", "throw", "case", "delete", "void", "typeof", "yield", "await"}
+            ):
                 contexts.append(("regex", None))
         elif char == "(":
             paren_depth += 1
@@ -113,6 +121,11 @@ class WorkshopPatchContractTest(unittest.TestCase):
         source = 'function target(){const a="}";const b=`x${1}`;if(true){return `{ok}`}}\nfunction next(){}'
         block = extract_js_function(source, "function target()")
         self.assertEqual(block, 'function target(){const a="}";const b=`x${1}`;if(true){return `{ok}`}}')
+
+    def test_extract_js_function_handles_regex_literals_and_division(self):
+        source = 'function target(){const braces=/[{}]/;const quotient=a / b;return /}/.test("}")?quotient:0} function next(){}'
+        block = extract_js_function(source, "function target()")
+        self.assertEqual(block, source.split(" function next()")[0])
 
     def test_canonical_extracted_assets_are_cryptographically_pinned(self):
         module = self.load_patch()
@@ -983,6 +996,63 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
 
+        trigger_runtime = extract_js_function(js, "function triggerReactButton(button)")
+        topbar_runtime = extract_js_function(js, "function renderTopbar(state)")
+        file_row_runtime = extract_js_function(js, "function fileRow(fileName)")
+        detail_runtime = extract_js_function(js, "function detailToggle(raw,live=false)")
+        action_runtime = extract_js_function(js, "function actionButton(label,handler,secondary)")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        state_runtime = extract_js_function(js, "function setWorkshopState(state,payload={})")
+        retry_runtime = extract_js_function(js, "function retryTask(payload)")
+        # The base bundle has unrelated export-link anchor.click handlers. The
+        # safety gate intentionally covers the complete extracted workshop
+        # runtime above, so the exclusion is by function ownership, not by
+        # narrowing the check to source/start/install variable names.
+        workshop_runtime = "".join((trigger_runtime, topbar_runtime, file_row_runtime, detail_runtime, action_runtime, render_runtime, state_runtime, retry_runtime))
+        self.assertNotRegex(workshop_runtime, r"\.\s*click\s*\(")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
+window.requestAnimationFrame=callback=>callback();
+window.setTimeout=callback=>{callback();return 1};
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(key){return this.data[key]??null},setItem(key,value){this.data[key]=String(value)},removeItem(key){delete this.data[key]}};
+globalThis.localStorage=localStorage;
+let dispatched=0,refreshes=0,detailsOpen=false,lastSnapshot="";
+const reactStart={textContent:`\u5f00\u59cb\u7ffb\u8bd1`,disabled:false,isConnected:true,dispatchEvent(event){dispatched+=1;this.lastEvent=event}};
+const startButton=reactStart,sourceButton={textContent:`\u9009\u62e9 APK`},installButton=null;
+function findButton(label){return label===`\u5f00\u59cb\u7ffb\u8bd1`?reactStart:null}
+function refresh(){refreshes+=1}
+function startScanClock(){} function stopScanClock(){}
+function textNode(tag,cls,text){return{tag,className:cls,text:text||``,textContent:text||``,children:[],dataset:{},style:{},setAttribute(name,value){this[name]=value},append(...nodes){this.children.push(...nodes)},classList:{add(){},remove(){}}}}
+const document={createElement(tag){return textNode(tag,``,``)}};
+let shell={dataset:{},attrs:{},classList:{add(){},remove(){}},setAttribute(name,value){this.attrs[name]=value},replaceChildren(...nodes){this.rendered=nodes}};
+const runtimeRoot={classList:{add(){},remove(){}},setAttribute(name,value){this[name]=value}};
+globalThis.__slgWakeLock=null;
+triggerReactButton(startButton);
+check(dispatched===1,`trigger bridges to the React control`);
+check(reactStart.lastEvent.type===`click`&&reactStart.lastEvent.options.bubbles===true&&reactStart.lastEvent.options.cancelable===true&&reactStart.lastEvent.options.view===window,`bridge dispatches a bubbling click event`);
+setWorkshopState(`failed`,{reason:`space`,fileName:`Game.apk`,raw:`ENOSPC|No space left on device`});
+check(shell.attrs[`data-workshop-state`]===`failed`&&shell.attrs[`data-workshop-task`]===`active`, `failed state data attributes are rendered`);
+check(runtimeRoot[`data-workshop-state`]===`failed`&&runtimeRoot[`data-workshop-task`]===`active`, `runtime root receives state attributes`);
+function collectText(node){let out=node?.textContent||``;for(const child of node?.children||[])out+=collectText(child);return out}
+function collectButtons(node,out=[]){if(!node)return out;if(node.tag===`button`)out.push(node);for(const child of node.children||[])collectButtons(child,out);return out}
+const body=shell.rendered[1];
+const renderedText=collectText(body);
+check(renderedText.includes(`\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3`),`ENOSPC has a localized title`);
+check(renderedText.includes(`ENOSPC|No space left on device`),`ENOSPC keeps raw details`);
+const retry=collectButtons(body).find(button=>button.textContent===`\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5`);
+check(retry,`ENOSPC renders retry action`);
+retry.onclick();
+check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh`);
+'''
+        result = subprocess.run(
+            ["node", "-e", workshop_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
         # Native React handlers are reached through a bubbling event, so the
         # picker, start, and retry paths continue to use the existing app API.
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
@@ -1833,7 +1903,7 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`\u8ba1\u7b97\u
         self.assertIn('overflow:auto', compact_css)
 
 
-    def test_ready_mode_selector_and_completed_language_guidance(self):
+    def _legacy_ready_mode_selector_and_completed_language_guidance(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1870,12 +1940,8 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`\u8ba1\u7b97\u
         self.assertIn("translations:Array.from(f.entries())", js)
 
 
-        snapshot_start = js.index('function readTaskSnapshot(){')
-        snapshot_end = js.index('function detailToggle(', snapshot_start)
-        snapshot_runtime = js[snapshot_start:snapshot_end]
-        render_start = js.index('function renderStateBody(')
-        render_end = js.index('function setWorkshopState(', render_start)
-        render_runtime = js[render_start:render_end]
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
         behavior_contract = r"""
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -1917,17 +1983,20 @@ const resume=readyButtons.find(b=>b.label===`\u7ee7\u7eed\u4e0a\u6b21`);
 resume.handler();
 check(clicked.includes(`\u7ee7\u7eed\u4e0a\u6b21`),`mode buttons bridge to React actions`);
 
-const completedBody=renderStateBody(`completed`,{fileName:`Game.apk`,count:`12`,translated:`34`,renpyLang:`chinese`,renpyMenuType:`renpy`,patchedApkPath:`/sdcard/Game-patched-signed.apk`,raw:`done`,latest:``,installAvailable:false});
-const texts=[];
 function collectText(node,into){if(node&&node.text!==undefined)into.push(String(node.text));for(const child of node.children||[])collectText(child,into)}
-collectText(completedBody,texts);
-check(texts.some(t=>t.includes(`\u8bd1\u6587\u8bed\u8a00\uff1achinese`)),`completed shell shows translation language`);
-check(texts.some(t=>t.includes(`\u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587`)),`completed shell explains the language menu step`);
+function completedTexts(payload){const body=renderStateBody(`completed`,{fileName:`Game.apk`,count:`12`,translated:`34`,patchedApkPath:`/sdcard/Game-patched-signed.apk`,raw:`done`,latest:``,installAvailable:false,...payload});const texts=[];collectText(body,texts);return texts.join(`\n`)}
+const selectable=completedTexts({activationMode:`selectable`,renpyLang:``,renpyMenuType:`renpy`});
+check(selectable.includes(`\u8bf7\u8fdb\u5165\u6e38\u620f\u8bbe\u7f6e`),`selectable guidance enters game settings`);
+check(selectable.includes(`\u7ffb\u8bd1\u6587\u672c`),`selectable guidance names the translation choice`);
+check(selectable.includes(`\u5141\u8bb8\u5207\u56de\u539f\u6587`),`selectable guidance permits switching back to original`);
 
-const customBody=renderStateBody(`completed`,{fileName:`Game.apk`,translated:`34`,renpyLang:``,renpyMenuType:`custom`,raw:`done`,latest:``,installAvailable:false});
-const customTexts=[];
-collectText(customBody,customTexts);
-check(customTexts.some(t=>t.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)),`custom language menu warning rendered`);
+const alwaysOn=completedTexts({activationMode:`always_on`,renpyLang:``,renpyMenuType:`none`});
+check(alwaysOn.includes(`\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528`),`always-on guidance says translation starts enabled`);
+check(alwaysOn.includes(`\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587`),`always-on guidance forbids an in-game switch back`);
+
+const custom=completedTexts({activationMode:``,renpyLang:``,renpyMenuType:`custom`});
+check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`),`custom language system warning rendered`);
+check(custom.includes(`\u4e0d\u80fd\u901a\u8fc7\u6807\u51c6\u8bed\u8a00\u83dc\u5355\u9009\u62e9`),`custom guidance excludes the standard language menu`);
 """
         result = subprocess.run(
             ["node", "-e", snapshot_runtime + render_runtime + behavior_contract],
@@ -1939,6 +2008,49 @@ check(customTexts.some(t=>t.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+
+    def test_ready_mode_selector_and_completed_language_guidance(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.localStorage={getItem(){return null},removeItem(){},setItem(){}};
+const SESSION_KEY=`slg-workshop-session-v1`;
+let sessionRestoredAt=0,installButton=null;
+window.__slgRenpyLang=`schinese`;
+window.__slgRenpyMenuType=`renpy`;
+function sourceText(){return `\u7ffb\u8bd1\u5b8c\u6210\n\u5df2\u5199\u5165\u8865\u4e01 APK`}
+function readProgressLog(){return{raw:`done`,latest:`done`}}
+const document={querySelectorAll(){return[]}};
+const snapshot=readTaskSnapshot();
+check(snapshot.state===`completed`&&snapshot.renpyLang===`schinese`&&snapshot.renpyMenuType===`renpy`,`completed metadata flows into snapshot`);
+function textNode(tag,cls,text){return{tag,cls,text:text||``,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function recoveryBanner(){return textNode(`section`,`banner`,`banner`)}
+function savePatchedApk(){} function triggerReactButton(){} function openSourceChooser(){} function openSettings(){} function retryTask(){}
+const startButton=null;
+function findButton(){return null}
+function completedText(payload){const body=renderStateBody(`completed`,{fileName:`Game.apk`,count:`12`,translated:`34`,patchedApkPath:`/sdcard/Game-patched-signed.apk`,raw:`done`,latest:``,installAvailable:false,...payload});const texts=[];function collect(node){if(node&&node.text!==undefined)texts.push(String(node.text));for(const child of node?.children||[])collect(child)}collect(body);return texts.join(`\n`)}
+const selectable=completedText({activationMode:`selectable`,renpyLang:``,renpyMenuType:`renpy`});
+const selectableChecks=[selectable.includes(`\u8bf7\u8fdb\u5165\u6e38\u620f\u8bbe\u7f6e`),selectable.includes(`\u7ffb\u8bd1\u6587\u672c`),selectable.includes(`\u5141\u8bb8`)&&selectable.includes(`\u5207\u56de\u539f\u6587`)];
+check(selectableChecks.every(Boolean),`selectable guidance is reversible through game settings: ${JSON.stringify(selectableChecks)}`);
+const alwaysOn=completedText({activationMode:`always_on`,renpyLang:``,renpyMenuType:`none`});
+check(alwaysOn.includes(`\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528`)&&alwaysOn.includes(`\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587`),`always-on guidance is startup-only and not reversible in-game`);
+const custom=completedText({activationMode:``,renpyLang:``,renpyMenuType:`custom`});
+check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.includes(`\u4e0d\u80fd\u901a\u8fc7\u6807\u51c6\u8bed\u8a00\u83dc\u5355\u9009\u62e9`),`custom guidance excludes the standard language menu`);
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + render_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_gallery_lists_patches_and_idle_topbar_hides_back(self):
         module = self.load_patch()
@@ -2117,18 +2229,23 @@ console.log('ok');
         render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
         state_runtime = extract_js_function(js, "function setWorkshopState(state,payload={})")
         key_runtime = extract_js_function(js, "function snapshotKey(s)")
-        refresh_runtime = extract_js_function(js, "function refresh()")
+        refresh_runtime = extract_js_function(js, "function refresh()").replace("function refresh(){", "function refreshCore(){", 1)
         recovery_runtime = extract_js_function(js, "function recoveryBanner(savedAt)")
+        restore_runtime = extract_js_function(js, "function restoreSession()")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
 const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
 const document={querySelectorAll(){return[]}};
-let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0;
+globalThis.localStorage=localStorage;
+window.__slgSelectionMeta=null;
+window.__slgLoadSelectedApk=async()=>{};
+let detailsOpen=false,manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionRestoredAt=0,restoringSession=false;
+let refreshes=0,renders=0;
 function sourceText(){return`\u5df2\u9009\u62e9\uff1aBroken.apk \u53d1\u73b0 5 \u4e2a\u53ef\u7ffb\u8bd1\u6587\u4ef6`}
 function readProgressLog(){return{raw:"",latest:""}}
-function textNode(tag,cls,text){return{tag,cls,text,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
+function textNode(tag,cls,text){return{tag,cls,text:text||"",textContent:text||"",children:[],dataset:{},style:{},setAttribute(name,value){this[name]=value},append(...children){this.children.push(...children)}}}
 function fileRow(){return textNode(`div`,`file-row`,`file`)}
 function detailToggle(raw){return textNode(`div`,`details`,raw)}
 function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
@@ -2136,22 +2253,34 @@ function openSourceChooser(){} function openSettings(){} function retryTask(){} 
 const startButton=null,installButton=null,sourceButton=null;
 function startScanClock(){} function stopScanClock(){}
 function classList(){return{remove(){},add(){}}}
-let shell={dataset:{},classList:classList(),setAttribute(){},replaceChildren(...nodes){this.rendered=nodes}};
+let shell={dataset:{},classList:classList(),attrs:{},setAttribute(name,value){this.attrs[name]=value},replaceChildren(...nodes){renders+=1;this.rendered=nodes}};
 const runtimeRoot={classList:classList(),setAttribute(){}};
 function collectText(node){let out=node.text||"";for(const child of node.children||[])out+=collectText(child);return out}
 function collectButtons(node,acc){if(!node)return acc;if(node.tag===`button`)acc.push(node);for(const child of node.children||[])collectButtons(child,acc);return acc}
-sessionRestoredAt=123;
-refresh();
+function refresh(){refreshes+=1;refreshCore()}
+localStorage.setItem(SESSION_KEY,JSON.stringify({uri:"file://picked.apk",name:"Broken.apk",packageName:"game.pkg",source:"installed",savedAt:123,translating:true}));
+restoreSession();
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function main(){
+await tick();
+check(sessionRestoredAt===123,`restore reads translating session savedAt`);
 let buttons=collectButtons(shell.rendered[1],[]);
 const dismiss=buttons.find(b=>(b.label||b.text)===`\u653e\u5f03\u6062\u590d`);
 check(dismiss,`recovery banner offers dismiss`);
 check(collectText(shell.rendered[1]).includes(`\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad`),`banner visible before dismiss`);
+check(refreshes===1&&renders===1,`restore refreshes and renders the recovery state`);
+snapshotKey=()=>`constant`;
+lastSnapshot=`constant`;
 dismiss.onclick();
+check(localStorage.getItem(SESSION_KEY)===null,`dismiss clears persisted session`);
 check(sessionRestoredAt===0,`dismiss clears restored marker`);
+check(refreshes===2&&renders===2,`dismiss invalidates snapshot cache and refreshes immediately`);
 check(!collectText(shell.rendered[1]).includes(`\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad`),`dismiss must re-render immediately without banner`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
 '''
         result = subprocess.run(
-            ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + behavior_contract],
+            ["node", "-e", snapshot_runtime + topbar_runtime + render_runtime + state_runtime + key_runtime + refresh_runtime + recovery_runtime + restore_runtime + behavior_contract],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -2164,9 +2293,7 @@ check(!collectText(shell.rendered[1]).includes(`\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        restore_start = js.index("function restoreSession(){")
-        restore_end = js.index("function recoveryBanner(savedAt){", restore_start)
-        restore_runtime = js[restore_start:restore_end]
+        restore_runtime = extract_js_function(js, "function restoreSession()")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;

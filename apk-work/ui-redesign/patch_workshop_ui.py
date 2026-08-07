@@ -624,7 +624,7 @@ function setReactInputValue(input,value)""",
         "textNode(\"p\",\"workshop-state-copy\",`" "\u4e2d\u65ad\u65f6\u95f4\uff1a" "${new Date(savedAt).toLocaleTimeString()}`));"
         "const resume=actionButton(\"" "\u7ee7\u7eed\u4e0a\u6b21\u7ffb\u8bd1" "\",()=>triggerReactButton(startButton));"
         "const dismiss=textNode(\"button\",\"workshop-secondary-action\",\"" "\u653e\u5f03\u6062\u590d" "\");dismiss.type=\"button\";"
-        "dismiss.onclick=()=>{try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;refresh()};"
+        "dismiss.onclick=()=>{try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;lastSnapshot=\"\";refresh()};"
         "wrap.append(resume,dismiss);return wrap}\n"
         "function mount(){const _prefs=readSettingsPrefs();if(_prefs.apiKey)pendingApiKey=_prefs.apiKey;"
         "decorate();enableNativeBackHandling();if(!settingsRestored&&applySettingsToReact(readSettingsPrefs()))settingsRestored=true;restoreSession();"
@@ -729,10 +729,10 @@ function setReactInputValue(input,value)""",
     guide_anchor = 'if(payload.patchedApkPath)card.append(textNode("p","workshop-state-copy workshop-scan-elapsed","' + "\u4f4d\u7f6e\uff1a" + '"+payload.patchedApkPath));'
     guide_new = (
         guide_anchor
-        + 'if(payload.activationMode===`selectable`)card.append(textNode("p","workshop-state-copy","' "\u8bf7\u5728\u6e38\u620f\u8bbe\u7f6e\u4e2d\u9009\u62e9\u7ffb\u8bd1\u6587\u672c\u67e5\u770b\u8bd1\u6587" '"));'
+        + 'if(payload.activationMode===`selectable`)card.append(textNode("p","workshop-state-copy","' "\u8bf7\u8fdb\u5165\u6e38\u620f\u8bbe\u7f6e\uff0c\u9009\u62e9\u201c\u7ffb\u8bd1\u6587\u672c\u201d\u67e5\u770b\u8bd1\u6587\uff1b\u5141\u8bb8\u5728\u6e38\u620f\u8bbe\u7f6e\u4e2d\u5207\u56de\u539f\u6587" '"));'
         + 'else if(payload.activationMode===`always_on`)card.append(textNode("p","workshop-state-copy","' "\u6b64\u6e38\u620f\u4e0d\u652f\u6301\u53ef\u9760\u7684\u8bed\u8a00\u83dc\u5355\u6ce8\u5165\uff0c\u4e2d\u6587\u7ffb\u8bd1\u5c06\u5728\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528\uff0c\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587" '"));'
         + 'else if(payload.renpyLang)card.append(textNode("p","workshop-state-copy","' "\u8bd1\u6587\u8bed\u8a00\uff1a" '"+payload.renpyLang+"' "\u2014\u2014 \u5728\u6e38\u620f\u8bbe\u7f6e\u7684\u8bed\u8a00\u4e2d\u9009\u62e9\u5bf9\u5e94\u9009\u9879\u5373\u53ef\u67e5\u770b\u8bd1\u6587" '"));'
-        + 'else if(payload.renpyMenuType==="custom")card.append(textNode("p","workshop-state-copy","' "\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u8bd1\u6587\u53ef\u80fd\u65e0\u6cd5\u901a\u8fc7\u8bed\u8a00\u83dc\u5355\u9009\u62e9" '"));'
+        + 'else if(payload.renpyMenuType==="custom")card.append(textNode("p","workshop-state-copy","' "\u6b64\u6e38\u620f\u4f7f\u7528\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf\uff0c\u4e0d\u80fd\u901a\u8fc7\u6807\u51c6\u8bed\u8a00\u83dc\u5355\u9009\u62e9\u8bd1\u6587" '"));'
     )
     if runtime.count(guide_anchor) != 1:
         raise ValueError("Language guidance signature not found")
