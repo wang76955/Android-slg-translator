@@ -1612,13 +1612,20 @@ check(invocations[0].targetLang==="zh"&&invocations[0].sourceLang==="en","langua
             "plugin.deleteSaveArchive",
             "plugin.listSaveGameApps",
             "plugin.listInstalledApps",
-            "閫夋嫨娓告垙",
-            "淇濆瓨瀛樻。",
-            "瀵煎叆瀛樻。",
-            "瀵煎叆鍒嗕韩瀛樻。",
-            "importSelectedPkg",
+            "选择游戏",
+            "保存存档",
+            "导入存档",
+            "导入分享存档",
+            "saveImportGamePackage",
             "importGameSelect",
             "renderImportArchiveRows",
+            "saveExportGamePackage",
+            "saveImportGamePackage",
+            "saveImportArchiveUri",
+            "saveTransferBusy",
+            "manualIdleBeforeOverlay",
+            "beginOverlay",
+            "endOverlay",
             "exportBtn.textContent",
             "restore.textContent",
             "share.textContent",
@@ -1646,6 +1653,8 @@ globalThis.window=globalThis;
 Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
 let backups=[{name:"com.sample.game-20260804-120000",path:"/backups/1",fileCount:2,modifiedAt:1}];
 const calls={restore:[],delete:[],export:[],share:[],list:0};
+let workshopState="idle";
+function readTaskSnapshot(){return{state:workshopState}}
 window.Capacitor={Plugins:{FileManager:{
   listSaveBackups:async()=>{calls.list++;return{backups}},
   restoreSaves:async input=>{calls.restore.push(input);return{restoredFiles:2}},
@@ -1659,18 +1668,23 @@ function showMenu(){}
 const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
 async function main(){
   check(exportBtn.disabled,"save button is disabled before picking a game");
+  workshopState="translating";updateSavesState();
+  check(exportBtn.disabled,"save actions stay disabled while translation is active");
+  await exportBtn.onclick();
+  check(calls.export.length===0&&savesStatus.textContent.includes("正在处理任务"),"busy save action is rejected without a native call");
+  workshopState="idle";updateSavesState();
   const topButtons=[...savesCard.children].filter(el=>el.tag==="button"&&!el.hidden);
   check(topButtons.length===2,"save page keeps only game picker and save buttons");
-  check(topButtons.some(el=>el.textContent==="閫夋嫨娓告垙")&&topButtons.some(el=>el.textContent==="淇濆瓨瀛樻。"),"save page exposes picker and export intents");
+  check(topButtons.some(el=>el.textContent==="选择游戏")&&topButtons.some(el=>el.textContent==="保存存档"),"save page exposes picker and export intents");
   check(typeof backupBtn==="undefined","backup button is removed from save page");
-  savesSelectedPkg="com.sample.game";savesSelectedLabel="Sample Game";updateSavesState();
+  saveExportGamePackage="com.sample.game";saveExportGameLabel="Sample Game";updateSavesState();
   check(!exportBtn.disabled,"save-to-download enabled when a game is selected");
   await refreshSaves();
   check(savesList.children.length===1,"list renders one backup row");
   const actions=savesList.children[0].children.find(el=>el.cls==="workshop-save-actions");
-  const restore=actions.children.find(el=>el.textContent==="鎭㈠");
-  const del=actions.children.find(el=>el.textContent==="鍒犻櫎");
-  const share=actions.children.find(el=>el.textContent==="鍒嗕韩");
+  const restore=actions.children.find(el=>el.textContent==="恢复");
+  const del=actions.children.find(el=>el.textContent==="删除");
+  const share=actions.children.find(el=>el.textContent==="分享");
   check(restore&&share&&del,"row exposes restore, share and delete buttons");
   globalThis.confirm=()=>true;
   await restore.onclick();
@@ -1679,11 +1693,16 @@ async function main(){
   check(calls.share.length===1&&calls.share[0].backupDir==="/backups/1","share calls native plugin with backupDir");
   await del.onclick();
   check(calls.delete.length===1&&calls.delete[0].backupDir==="/backups/1","delete calls native plugin with backupDir");
-  check(savesList.children.length===1&&savesList.children[0].textContent==="鏆傛棤澶囦唤銆?,"delete refreshes the list");
+  check(savesList.children.length===1&&savesList.children[0].textContent==="暂无备份。","delete refreshes the list");
   await exportBtn.onclick();
   check(calls.export.length===1&&calls.export[0].packageName==="com.sample.game","save to download calls native plugin with packageName");
-  check(exportBtn.textContent==="淇濆瓨瀛樻。"&&!exportBtn.disabled,"save button resets after completion");
-  check(permissionNote.textContent.includes("鎵€鏈夋枃浠惰闂?),"Android 11+ shows permission guidance");
+  check(exportBtn.textContent==="保存存档"&&!exportBtn.disabled,"save button resets after completion");
+  check(permissionNote.textContent.includes("所有文件访问"),"Android 11+ shows permission guidance");
+  const selectedBeforeError=saveExportGamePackage;
+  window.Capacitor.Plugins.FileManager.exportSavesToDownloads=async()=>{throw new Error("native export failed")};
+  await exportBtn.onclick();
+  check(savesStatus.textContent.includes("native export failed"),"native save errors are visible");
+  check(saveExportGamePackage===selectedBeforeError,"native save errors do not corrupt export selection");
   console.log("ok");
 }
 '''
@@ -1709,7 +1728,7 @@ Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},con
 const calls={listInstalled:0,listGames:0,listBackups:0};
 window.Capacitor={Plugins:{FileManager:{
   listInstalledApps:async()=>{calls.listInstalled++;return{apps:[{label:"Chrome",packageName:"com.android.chrome"}]}},
-  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"},{label:"寮備笘鐣?,packageName:"cim.isekai.game"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"Game One",packageName:"zitao.mbml"},{label:"Game Two",packageName:"cim.isekai.game"}]}},
   listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
   restoreSaves:async()=>({}),
   deleteBackup:async()=>({}),
@@ -1727,8 +1746,8 @@ async function main(){
   check(calls.listInstalled===0,"save game picker does not fall back to all installed apps");
   check(gameSelect.children.length===3,"game picker renders placeholder plus apps");
   gameSelect.value="zitao.mbml";gameSelect.onchange();
-  check(savesSelectedPkg==="zitao.mbml","picking a game updates the save page local state");
-  check(gameLabel.textContent.includes("鎭跺コ2.2"),"picked game name is visible");
+  check(saveExportGamePackage==="zitao.mbml","picking a game updates the save page local state");
+  check(gameLabel.textContent.includes("Game One"),"picked game name is visible");
   check(!exportBtn.disabled,"picking a game enables save actions");
   check(calls.listBackups>=1,"picking a game refreshes the backup list");
   console.log("ok");
@@ -1756,7 +1775,7 @@ Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},con
 const calls={listArchives:0,imports:[],deleteArchive:[],listGames:0,listBackups:0};
 window.Capacitor={Plugins:{FileManager:{
   listSaveArchives:async()=>{calls.listArchives++;return{archives:[{name:"zitao.mbml-20260805-120000.zip",path:"/downloads/1.zip",size:2048},{name:"renamed.zip",path:"/downloads/2.zip",size:1024}]}},
-  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"Game One",packageName:"zitao.mbml"}]}},
   importSaveBackup:async input=>{calls.imports.push(input);return{backupDir:"/backups/imported",name:"imported",fileCount:2,packageName:"zitao.mbml"}},
   deleteSaveArchive:async input=>{calls.deleteArchive.push(input);return{deleted:true}},
   listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},
@@ -1779,23 +1798,23 @@ async function main(){
   const archiveRows=(archiveSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
   check(archiveRows.length===2,"all downloaded archives are shown as importable rows");
   globalThis.confirm=()=>true;
-  const delArchive=archiveRows[0].children.find(el=>el.textContent==="鍒犻櫎");
+  const delArchive=archiveRows[0].children.find(el=>el.textContent==="删除");
   check(delArchive,"each archive row exposes a delete action");
   await delArchive.onclick();
   check(calls.deleteArchive.length===1&&calls.deleteArchive[0].path==="/downloads/1.zip","delete calls native plugin with selected archive path");
   const remainingSection=importList.children.find(el=>el.cls==="workshop-archive-section"&&!el.hidden);
   const remainingRows=(remainingSection?.children||[]).filter(el=>el.cls==="workshop-save-row"&&el.children.some(c=>c.textContent.endsWith(".zip")));
   check(remainingRows.length===1,"deleted archive is removed from the panel");
-  const importOne=remainingRows[0].children.find(el=>el.textContent==="瀵煎叆");
+  const importOne=remainingRows[0].children.find(el=>el.textContent==="导入");
   check(importOne,"remaining archive row exposes an import action");
   await importOne.onclick();
   check(calls.imports.length===1&&calls.imports[0].path==="/downloads/2.zip","import calls native plugin with selected path");
-  check(importSelectedPkg==="zitao.mbml","import auto-selects the game from the archive");
+  check(saveImportGamePackage==="zitao.mbml","import auto-selects the game from the archive");
   check(importGameSelect.value==="zitao.mbml","import updates the import page game picker");
-  check(importGameLabel.textContent.includes("鎭跺コ2.2"),"import page shows the auto-selected game label");
+  check(importGameLabel.textContent.includes("Game One"),"import page shows the auto-selected game label");
   check(importList.children.length===0,"imported archive is removed from the downloaded panel");
-  check(importStatus.textContent.includes("宸插鍏?zitao.mbml 鐨勫瓨妗ｃ€?),"import success message is visible");
-  check(importArchiveBtn.textContent==="閲嶆柊閫夋嫨瀛樻。"&&!importArchiveBtn.disabled,"import button resets after completion");
+  check(importStatus.textContent.includes("已导入 zitao.mbml 的存档。"),"import success message is visible");
+  check(importArchiveBtn.textContent==="重新选择存档"&&!importArchiveBtn.disabled,"import button resets after completion");
   check(calls.listBackups===0,"import page does not refresh the transfer page backup list");
   console.log("ok");
 }
@@ -1820,7 +1839,7 @@ function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
 Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
 window.Capacitor={Plugins:{FileManager:{
-  listSaveGameApps:async()=>({apps:[{label:"鎭跺コ2.2",packageName:"zitao.mbml"},{label:"寮備笘鐣?,packageName:"cim.isekai.game"}]}),
+  listSaveGameApps:async()=>({apps:[{label:"Game One",packageName:"zitao.mbml"},{label:"Game Two",packageName:"cim.isekai.game"}]}),
   listSaveBackups:async()=>({backups:[]}),
   restoreSaves:async()=>({}),
   deleteBackup:async()=>({}),
@@ -1840,10 +1859,10 @@ async function main(){
   gameSelect.value="zitao.mbml";gameSelect.onchange();
   await importGameBtn.onclick();
   importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
-  check(savesSelectedPkg==="zitao.mbml","save page keeps its own selected game");
-  check(importSelectedPkg==="cim.isekai.game","import page keeps its own selected game");
-  check(gameLabel.textContent.includes("鎭跺コ2.2"),"save page shows its own game label");
-  check(importGameLabel.textContent.includes("寮備笘鐣?),"import page shows its own game label");
+  check(saveExportGamePackage==="zitao.mbml","save page keeps its own selected game");
+  check(saveImportGamePackage==="cim.isekai.game","import page keeps its own selected game");
+  check(gameLabel.textContent.includes("Game One"),"save page shows its own game label");
+  check(importGameLabel.textContent.includes("Game Two"),"import page shows its own game label");
   check(gameSelect.value==="zitao.mbml"&&importGameSelect.value==="cim.isekai.game","both selectors preserve independent values");
   console.log("ok");
 }

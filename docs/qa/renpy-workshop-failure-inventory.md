@@ -497,3 +497,96 @@ The independent review identified three false-green gaps in the preceding Task 5
 - `test_settings_support_provider_model_and_custom_endpoint` executes the settings bridge, then the production `Ce=async()=>` controller, with an invocation spy at the real `Lo()` translation entry point. Exact provider state, custom endpoint, and custom model values are asserted on that controller-to-translation call.
 
 Current focused GREEN result: `Ran 7 tests in 0.977s`, `OK` — 7 PASS, 0 failures, 0 errors. Fresh related regressions also passed: known bugfixes `Ran 9 tests in 0.719s`, performance `Ran 4 tests in 0.568s`, and translation quality `Ran 15 tests in 10.894s`; each had 0 failures and 0 errors. Python compilation and `git diff --check` passed. Evidence remains limited to extracted-bundle/Node execution and Python orchestration; it does not establish live provider responses, native Android bridge behavior, APK assembly or signing, installation, real-game behavior, or physical-device UI state.
+
+## Task 6 revalidation: save-transfer selection isolation and runtime gates
+
+Task 6 was revalidated with the exact five workshop tests and four native/scanner contracts from the brief. The initial RED command ran before changing either the focused tests or the save-transfer runtime:
+
+```powershell
+python -m unittest [the nine exact test names below] -v
+```
+
+Initial RED evidence: `Ran 9 tests in 11.599s`, `FAILED (failures=5)`. The five failures were UI/fixture boundary failures: the settings contract expected stale mojibake labels, and four Node behavior harnesses failed with JavaScript `SyntaxError` before any plugin method call. The four scanner/native contracts passed (`....`), so no native bridge change was justified at that boundary.
+
+After correcting only the focused harness literals and adding the independent-state/busy/error assertions, the required workshop cluster remained RED as expected: `Ran 5 tests`, `FAILED (failures=3)`. The remaining failures were the missing product variables/busy gate and an archive-row fixture label; the corrected picker and independent-selection behaviors were already executable.
+
+### WSP-27 `test_save_transfer_settings_runtime_contract`
+
+- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_settings_runtime_contract -v`
+- First effective failure: `AssertionError: 'saveExportGamePackage' not found in '<patched bundle>'` after the stale UTF-8 label assertions were corrected.
+- Expected behavior: settings exposes separate save-transfer/import views, current native bridge methods, independent executable selection variables, busy-state gate, and overlay idle restoration.
+- Observed behavior: the runtime had save-aware game/import UI from the prior patch but retained shared/legacy selection names and no explicit busy helper.
+- Authority: Task 6 brief; `patch_saves_runtime()` and `enhance_runtime()` production seams.
+- Classification: `PRODUCT_REGRESSION`
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
+- Red evidence: initial nine-test command (`failures=5`) followed by the focused five-test command after fixture correction (`failures=3`).
+- Green evidence: exact nine-test command below, `Ran 9 tests in 12.369s`, `OK`.
+
+### WSP-28 `test_save_transfer_runtime_actions_and_state_gating`
+
+- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating -v`
+- First effective failure: Node `SyntaxError: missing ) after argument list` in the old mojibake fixture; after fixture correction, the new RED failure was `Error: busy save action is rejected without a native call`.
+- Expected behavior: export/restore/share/delete are disabled or return an explicit busy error during `scanning`, `translating`, and `patching`; native errors remain visible and do not change the export selection.
+- Observed behavior: actions worked when idle but had no explicit runtime gate; native error visibility and selection preservation were not previously executable in this fixture.
+- Authority: Task 6 brief; `saveTransferBusy()`, `updateSavesState()`, and action handlers.
+- Classification: `PRODUCT_REGRESSION` with an initial `FIXTURE_GAP`.
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
+- Red evidence: focused five-test command after fixture correction (`failures=3`), including the busy-action error above.
+- Green evidence: exact focused test and exact nine-test command both report `OK`; the harness also asserts a rejected native export error is visible and `saveExportGamePackage` is unchanged.
+
+### WSP-29 `test_save_transfer_can_pick_game_from_installed_apps`
+
+- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_pick_game_from_installed_apps -v`
+- First effective failure: Node `SyntaxError: Unexpected identifier 'cim'` from an unterminated mojibake label in the fixture.
+- Expected behavior: the picker uses `listSaveGameApps`, does not fall back to the all-installed-app list when the save-aware bridge exists, and updates only the export-side selection.
+- Observed behavior: the product game-picker path was already present; the fixture could not reach it until its malformed string boundary was corrected.
+- Authority: `InstalledAppSource.listSaveGameApps`; `saveExportGamePackage`.
+- Classification: `FIXTURE_GAP`.
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py` only for the shared state/gate contract.
+- Red evidence: initial nine-test command; the corrected picker behavior passed in the second RED cluster.
+- Green evidence: exact focused test and exact nine-test command report `OK`; the harness records one save-aware list call and zero all-installed fallback calls.
+
+### WSP-30 `test_save_transfer_can_import_shared_archive`
+
+- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_import_shared_archive -v`
+- First effective failure: Node `SyntaxError: missing ) after argument list` from a malformed status-string fixture; after fixture correction, the row-action label was the first remaining failure.
+- Expected behavior: the import view lists downloaded archives, deletes only the selected archive, sends only the selected archive URI plus the independent import target, auto-selects a package returned by native import, and leaves export selection untouched.
+- Observed behavior: native archive bridge behavior was not reached by the original fixture; the native contract itself was already green.
+- Authority: `listSaveArchives`, `importSaveBackup`, `deleteSaveArchive`; `saveImportGamePackage` and `saveImportArchiveUri`.
+- Classification: `FIXTURE_GAP` plus `PRODUCT_REGRESSION` for missing independent URI/target wiring.
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
+- Red evidence: initial nine-test command and corrected five-test command (`failures=3`).
+- Green evidence: exact focused test and exact nine-test command report `OK`; the harness verifies selected path, independent target update, archive removal, visible success text, and reset button state.
+
+### WSP-31 `test_save_and_import_game_selection_are_independent`
+
+- Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent -v`
+- First effective failure: Node `SyntaxError: Unexpected identifier 'cim'` from the malformed second-game fixture label.
+- Expected behavior: export and import selectors retain independent package, label, and selector values.
+- Observed behavior: the production picker logic was already independently scoped once the fixture parsed; the required state names were made explicit as `saveExportGamePackage` and `saveImportGamePackage`.
+- Authority: Task 6 brief; save/import settings view state.
+- Classification: `FIXTURE_GAP` with contract hardening.
+- Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
+- Red evidence: initial nine-test command; the corrected cluster passed before product changes.
+- Green evidence: exact focused test and exact nine-test command report `OK`, including both selector values after changing the import target.
+
+### Task 6 native/scanner contracts
+
+The following four tests passed in the initial RED run and in the final exact nine-test run:
+
+- `test_save_game_list_scans_renpy_save_dirs_without_all_apps`
+- `test_save_export_zips_directory_and_counts_files`
+- `test_save_import_extracts_shared_archive_safely`
+- `test_delete_backup_removes_directory_tree`
+
+`SaveTransfer.java` was inspected before any Java edit. Its public methods and private ZIP/copy/delete helpers matched the test contracts, and the JVM harnesses compile the Java source against the repository stubs before executing the reflection/ZIP assertions. This is native/JVM contract evidence only: it does not prove Capacitor registration on a built APK, Android scoped-storage behavior, a real shared URI, an Android device, or end-to-end UI rendering.
+
+### Task 6 final exact evidence
+
+```text
+python -m unittest [the nine exact test names above] -v
+Ran 9 tests in 12.369s
+OK
+```
+
+The final Task 6 change set is limited to the focused workshop test, patch-generation source, and this inventory document. No `SaveTransfer.java` change was required.
