@@ -143,7 +143,7 @@ class TranslationQualityPatchTest(unittest.TestCase):
         self.assertEqual(self.js.count("var _o=`slg-translator-cache:`,vo={}"), 1)
         self.assertNotIn("slg-translator-cache:v2:", self.js)
 
-    def test_marker_keys_keep_cache_and_compile_identity_isolated(self):
+    def test_task8_marker_cache_and_compile_keep_exact_keys(self):
         start = self.js.index("function cacheScopeIdentity(")
         end = self.js.index("function Do()", start)
         cache_runtime = self.js[start:end]
@@ -252,14 +252,40 @@ public final class Task8CorpusHarness {
     RenpyTranslationCorpus.Entry collision = corpus.get("Fine.");
     if (repeated == null || repeated.occurrences.size() != 2 || repeated.contextualCollision) throw new AssertionError("repeat");
     if (collision == null || collision.occurrences.size() != 5 || !collision.contextualCollision) throw new AssertionError("collision");
-    RenpyTextRecord first = collision.occurrences.get(0);
-    if (!"game/a.rpyc".equals(first.sourcePath) || first.sourceLine != 3
-        || first.kind != RenpyTextRecord.Kind.DIALOGUE || !"alice".equals(first.speaker)
-        || !"dialog-a".equals(first.identifier)) throw new AssertionError("record metadata");
+    String[][] expectedRepeated = new String[][] {
+        {"game/a.rpyc", "1", "MENU", "", ""},
+        {"game/a.rpyc", "2", "MENU", "", ""}
+    };
+    for (int i = 0; i < expectedRepeated.length; i++) {
+      RenpyTextRecord actual = repeated.occurrences.get(i);
+      String[] expected = expectedRepeated[i];
+      if (!expected[0].equals(actual.sourcePath) || actual.sourceLine != Integer.parseInt(expected[1])
+          || actual.kind != RenpyTextRecord.Kind.valueOf(expected[2]) || !expected[3].equals(actual.speaker)
+          || !expected[4].equals(actual.identifier)) throw new AssertionError("repeated occurrence " + i);
+    }
+    String[][] expectedCollision = new String[][] {
+        {"game/a.rpyc", "3", "DIALOGUE", "alice", "dialog-a"},
+        {"game/b.rpyc", "4", "DIALOGUE", "bob", "dialog-b"},
+        {"game/c.rpyc", "5", "DIALOGUE", "carol", "dialog-c"},
+        {"game/d.rpyc", "6", "DIALOGUE", "dave", "dialog-d"},
+        {"game/e.rpyc", "7", "DIALOGUE", "erin", "dialog-e"}
+    };
+    for (int i = 0; i < expectedCollision.length; i++) {
+      RenpyTextRecord actual = collision.occurrences.get(i);
+      String[] expected = expectedCollision[i];
+      if (!expected[0].equals(actual.sourcePath) || actual.sourceLine != Integer.parseInt(expected[1])
+          || actual.kind != RenpyTextRecord.Kind.valueOf(expected[2]) || !expected[3].equals(actual.speaker)
+          || !expected[4].equals(actual.identifier)) throw new AssertionError("collision occurrence " + i);
+    }
     String prompt = RenpyTranslationCorpus.contextPrompt(collision);
-    if (!prompt.contains("contexts=5") || !prompt.contains("game/a.rpyc:3")
-        || !prompt.contains("kind=DIALOGUE") || !prompt.contains("speaker=alice")
-        || !prompt.contains("identifier=dialog-a")) throw new AssertionError("prompt metadata");
+    if (!prompt.contains("contexts=5")) throw new AssertionError("prompt count");
+    for (int i = 0; i < 3; i++) {
+      String[] expected = expectedCollision[i];
+      String expectedLine = "- " + expected[0] + ":" + expected[1]
+          + " kind=" + expected[2] + " speaker=" + expected[3]
+          + " identifier=" + expected[4] + "\n";
+      if (!prompt.contains(expectedLine)) throw new AssertionError("prompt context " + i);
+    }
     if (prompt.split("- game/").length - 1 != 3 || prompt.contains("game/d.rpyc")
         || prompt.contains("game/e.rpyc")) throw new AssertionError("prompt context bound");
     if (!prompt.equals(RenpyTranslationCorpus.contextPrompt(collision))) throw new AssertionError("prompt nondeterministic");
