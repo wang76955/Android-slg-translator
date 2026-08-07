@@ -174,8 +174,17 @@ docs/qa/evidence/<sample-id>/device-smoke.txt
 | built APK | `python -m unittest test_built_apk.py -v` | Task 20 fresh 实际为 `4` tests，0 failures，OK；APK hash/signature/version 已在 Task 20 记录 |
 | Java/D8 helper | `python build_fast_scanner.py` | 已实际构建成功；D8 使用 build-local response file 规避 Windows 命令行长度限制 |
 | helper classes | `dexdump` on `generated/classes7.dex` | Task 20 fresh 验证 12 个要求类各恰好一个：FastApkScanner、RenpyTextRecord、RenpyTextValidator、TranslationCoverageReport、RenpyCompatibilityReport、RenpyPreflight、RenpyPatchValidator、RpycPickleWriter、InstalledApkSet、InstalledAppSource、PackageInstallerSupport、RenpyDialogueTranslation |
-| workshop APK | `python build_workshop_apk.py` | Task 20 fresh exit 0；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B1...C974295`；apksigner v2/v3 true；debug certificate only |
+| workshop APK | `python build_workshop_apk.py` | Task 20 fresh exit 0；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295`；apksigner v2/v3 true；debug certificate only |
 | full discover | `python -m unittest discover -s . -p 'test_*.py' -v` | Task 19 fresh 实际为 `192` 项、0 failures/errors、1 个明确 `audit APK/extracted texts not present` skip；真实样本/设备仍 NOT-RUN |
+
+## 5.1 Task 21/22 外部样本与设备前置记录
+
+| requirementId | 只读检查 | 结果 | status | 边界 |
+|---|---|---|---|---|
+| T21-01 | 本地 APK 候选的包名、版本和 Ren'Py 资源入口盘点 | `apk-work/samples/newmanwa.apk` 为 `newmanwa.com`/`Manwa2`，`apk-work/samples/nearbubble_final_hclm67.apk` 与 `apk-work/selected.apk` 为 `com.nearbubble`/`盘丝洞`；候选 ZIP 中未发现 `rpyc`、`rpa`、`renpy`、`assets/game` 或 `libpython` 入口；`com.slgtranslator.app` 候选是工具 APK | NOT-RUN | 没有可确认来源、许可和完整脚本/字体资产的真实 Ren'Py 游戏 APK；不能把这些候选提升为真实样本 |
+| T21-02 | 真实样本 coverage、字体、编译、安装、启动、语言、old save、rollback | 未执行 | NOT-RUN | Task 21 的完整门禁依赖 T21-01 的合法真实样本；控制 fixtures 和本地工具 APK 不替代真实游戏 |
+| T22-01 | 已连接设备只读 inventory | `PEMM20`; Android `13`/SDK `33`; ABI `arm64-v8a,armeabi-v7a,armeabi`; `/data/user/0` 可用 `36,952,844 KiB`; 已安装工具包 `com.slgtranslator.app` versionCode `10`, versionName `1.0.10` | PASS | 仅 inventory PASS；没有安装或启动本次 Task 20 的 `versionCode=7` APK，也没有安装真实游戏；真机安装/启动/译文/old save/rollback 仍 `NOT-RUN` |
+| T22-02 | 真机完整工作流 | 未执行 | NOT-RUN | 无批准真实游戏样本；用户设备锁屏窗口仅用于后续获得样本后的受控测试，不得以工具包 inventory 替代验收 |
 
 ## 6. 矩阵完成规则
 

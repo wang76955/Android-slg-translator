@@ -142,6 +142,10 @@ scan
 
 当前已知的合法外部条件是：没有真实完整 Ren'Py 游戏 APK/对应完整提取语料时，coverage audit 可以显式 skip；这不证明真实游戏 `missing == 0`。生成 DEX 缺失时也只能登记“需先运行 `python build_fast_scanner.py`”，不能把 artifact gate 改成无条件通过。
 
+Task 21/22 前置盘点（2026-08-08）只读完成：本地候选 `samples/newmanwa.apk`（`newmanwa.com`/`Manwa2`）和 `samples/nearbubble_final_hclm67.apk`、`selected.apk`（`com.nearbubble`/`盘丝洞`）均未发现 `rpyc`、`rpa`、`renpy`、`assets/game` 或 `libpython` 入口；`com.slgtranslator.app` 候选是翻译工具本身。它们不具备可确认的真实 Ren'Py 游戏样本资格，因此 Task 21 的 coverage、字体、编译、安装、启动、语言、old save 和 rollback 保持 `NOT-RUN`。
+
+已连接设备只做了只读 inventory：`PEMM20`、Android 13 / SDK 33、ABI `arm64-v8a,armeabi-v7a,armeabi`、`/data/user/0` 可用 `36,952,844 KiB`；设备上的工具包为 `com.slgtranslator.app` versionCode `10` / versionName `1.0.10`。这一行只代表 inventory PASS，不代表应用验收；没有安装或启动 Task 20 的 versionCode 7 APK，也没有安装真实游戏；Task 22 真机完整工作流保持 `NOT-RUN`。
+
 Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip；scanner 为 `77` 项，workshop 为 `60` 项，quality/coverage/performance 合计为 `37` 项并保留同一个明确 skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
 
 如果 `test_workshop_patch.py`、构建测试或其他 discover 测试失败，必须把准确的失败测试名、首个稳定错误和是否属于本批次变更写入 `full-discover.txt`，然后修复或明确阻断发布；不能用“基线已通过”覆盖新的失败。
