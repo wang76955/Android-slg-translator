@@ -4,6 +4,8 @@
 >
 > 当前状态：未批准发布。Task 19 自动化门禁、Task 20 本地产物门禁和 Task 23 文档审计已通过；已对设备上现有的翻译工具 v1.0.10 完成范围受限的启动与入口冒烟测试并记为 PASS，但 Task 21/22 的真实 Ren'Py 游戏样本、安装、启动、语言、old save 和 rollback 仍为 `NOT-RUN`，因此最终发布决策仍是“未批准发布”。
 
+> 真机复验更新（2026-08-08）：上面的设备状态是本次复验前的快照，现已被 §5.6 和 T22-04..T22-06 补充记录覆盖：用户确认的真实 APK 已安装并能启动原始 Ren'Py 游戏；v1.0.7 已安装并完成 104 个 RPYC 的扫描；翻译/补丁/语言/字体/old save/rollback 尚未完成，且真实 `content://` 菜单注入存在 FAIL。因此发布结论仍为“未批准发布”。
+
 ## 1. 发布原则
 
 - 所有未知格式、未知 RPYC 代际和不完整元数据都必须保守失败；`EXTRACT_ONLY` 不得进入当前 writer。
@@ -85,10 +87,10 @@ scan
 
 | 样本 ID | 代际/容器 | 菜单/激活 | 字体 | 单 APK 或 split | report 路径 | 当前状态 |
 |---|---|---|---|---|---|---|
-| 真实样本 1 | 待登记 | 待登记 | 待登记 | 待登记 | `docs/qa/evidence/<id>/` | ☐ |
+| 真实样本 1 | Ren'Py 0.6 / single APK；package `com.yishijietiantang.com` | 原始启动基线 PASS；翻译菜单注入 FAIL（content URI） | 未执行 | single APK；未修改游戏安装/启动 PASS | T22-04/T22-06；设备截图见 evidence ledger | ☑ 基线；发布门禁未通过 |
 | 真实样本 2 | 待登记 | 待登记 | 待登记 | 待登记 | `docs/qa/evidence/<id>/` | ☐ |
 
-若没有真实样本，保留这两行的 `待登记` 和 `☐`；不要填写虚构的包名、文本数量或启动结果。
+第二行仍保留 `待登记` 和 `☐`；第一行只记录已经观察到的真实样本基线，不得把“原始游戏能启动”填写成“翻译成功”。
 
 ## 5. 真机冒烟检查
 
@@ -134,9 +136,21 @@ scan
 - [x] 中文首页、三步流程、APK 选择入口和底部导航渲染正常；入口能够打开“选择来源”面板。
 - [x] “从文件选择 APK”能够调用 `com.android.documentsui/.picker.PickActivity`；未选择文件，显式返回后工具主活动和首页恢复。
 - [x] 观察窗口内 app-specific logcat 未命中 `FATAL EXCEPTION`、`ANR in`、`Fatal signal`、`SIGSEGV` 或 `Process: com.slgtranslator.app`。
-- [ ] 本地重建 v1.0.7 安装/降级、真实 APK 导入、扫描、翻译、补丁安装、真实 Ren'Py 游戏启动、语言、字体、old save 和 rollback：仍未运行。
+- [ ] 本节不覆盖本地重建 v1.0.7 或真实游戏流程；其已执行的部分见 §5.6。翻译、补丁安装、语言、字体、old save 和 rollback 仍未完成。
 
-证据截图：`apk-work/device-smoke-v10-20260808-0620.png`、`apk-work/device-smoke-picker-v10-20260808-0621.png`、`apk-work/device-smoke-documentsui-v10-20260808-0623.png`、`apk-work/device-smoke-v10-final-20260808-0625.png`。本节 PASS 仅适用于设备现有 v1.0.10 工具包，不改变真实 Ren'Py 验收的 `NOT-RUN` 状态。
+证据截图：`apk-work/device-smoke-v10-20260808-0620.png`、`apk-work/device-smoke-picker-v10-20260808-0621.png`、`apk-work/device-smoke-documentsui-v10-20260808-0623.png`、`apk-work/device-smoke-v10-final-20260808-0625.png`。本节 PASS 仅适用于设备现有 v1.0.10 工具包；真实样本的新增证据和未完成边界见 §5.6，不得把 v1.0.10 冒烟当作完整翻译验收。
+
+### 5.6 真实 Ren'Py 样本与本地 v1.0.7 复验（2026-08-08）
+
+- [x] 用户确认手机本地 `异世界天堂0.6翻.apk` 合法、完整且可用于测试；系统确认 package `com.yishijietiantang.com`、versionName `0.6`、versionCode `1755587835`，入口为 `org.renpy.android.PythonSDLActivity`。
+- [x] 本地重建工具 `apk-work/slg-workshop-ui-signed.apk`（versionCode `7` / versionName `1.0.7`，SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295`）通过 `adb install -r -d -t` 安装；`/data/user/0/com.slgtranslator.app` 未被清除。
+- [x] 未修改的真实游戏通过手机本地 APK 安装后，观察到 Ren'Py loading、`Ver. 0.6` 主菜单、新游戏和两段英文对白；目标日志观察窗口未命中 fatal/ANR 模式。
+- [x] v1.0.7 通过 DocumentsUI 选择真实 APK，显示 `104 个脚本`、`发现 104 个可翻译文件`，并列出 RPYC 文件后进入 `已就绪`。
+- [ ] 翻译、lint、编译、签名和译文补丁安装：设备没有可用 API Key，`开始翻译` 未提交，未生成补丁。
+- [ ] 语言菜单/always-on/selectable 激活：`content://` 来源的 `injectTranslatorMenu` 观察到 `补丁源 APK 不存在`，记录为 T22-06 `FAIL`，尚未修复。
+- [ ] 中文字体、译文观察、old save、rollback、跳转、语言切换和 split session：未执行。
+
+证据截图：`apk-work/device-v7-home-20260808-0630.png`、`apk-work/device-v7-after-real-apk-select-20260808-0636.png`、`apk-work/device-v7-real-scan-scroll-20260808-0638.png`、`apk-work/device-v7-real-settings-bottom-20260808-0640.png`、`apk-work/device-renpy-original-launch-20260808-0648.png`、`apk-work/device-renpy-original-menu-20260808-0651.png`、`apk-work/device-renpy-original-newgame-20260808-0654.png`、`apk-work/device-renpy-original-dialogue2-20260808-0656.png`。
 
 ## 6. Skip 与外部条件登记
 
@@ -156,6 +170,8 @@ Task 21/22 前置盘点（2026-08-08）只读完成：本地候选 `samples/newm
 
 已连接设备先完成只读 inventory，随后仅对现有工具包做了不安装、不降级、不清数据的范围受限冒烟：`PEMM20`、Android 13 / SDK 33、ABI `arm64-v8a,armeabi-v7a,armeabi`、`/data/user/0` 可用 `36,952,844 KiB`；设备上的工具包为 `com.slgtranslator.app` versionCode `10` / versionName `1.0.10`。工具包冷启动、首页、来源面板、DocumentsUI 调用和返回恢复记录为 PASS，但这不是真实游戏验收；没有安装或启动 Task 20 的 versionCode 7 APK，也没有安装真实游戏；Task 22 真机完整工作流仍保持 `NOT-RUN`。
 
+以上两段是本次设备复验前的前置快照。后续复验已安装并确认 v1.0.7，安装并启动用户确认的真实 `com.yishijietiantang.com`，完成 v1.0.7 对 104 个 RPYC 的扫描；完整翻译链路仍未完成，且真实 `content://` 菜单注入记录为 FAIL，详见 §5.6 和 QA evidence ledger 的 T22-04..T22-06。
+
 Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个明确的 `audit APK/extracted texts not present` skip；scanner 为 `77` 项，workshop 为 `60` 项，quality/coverage/performance 合计为 `37` 项并保留同一个明确 skip。这个 skip 只说明真实审计 APK/提取语料缺失，不证明真实游戏 `missing == 0`；真实样本和设备门禁仍按 `NOT-RUN` 处理。
 
 如果 `test_workshop_patch.py`、构建测试或其他 discover 测试失败，必须把准确的失败测试名、首个稳定错误和是否属于本批次变更写入 `full-discover.txt`，然后修复或明确阻断发布；不能用“基线已通过”覆盖新的失败。
@@ -167,13 +183,13 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 | 门禁 | 通过条件 | 当前状态 |
 |---|---|---|
 | 自动化测试 | full discover 无失败；所有 skip 有外部条件 | PASS — Task 19 |
-| 真实样本覆盖 | `missing == 0`，或用户明确选择并看到 incomplete test patch | NOT-RUN — 无批准真实样本 |
-| rejected | `rejected == 0` | NOT-RUN — 无批准真实样本 |
+| 真实样本覆盖 | `missing == 0`，或用户明确选择并看到 incomplete test patch | NOT-RUN — 已扫描 104 个 RPYC，但未执行翻译/coverage |
+| rejected | `rejected == 0` | NOT-RUN — 未生成真实语料 coverage/rejected 报告 |
 | 编译产物 | `RenpyPatchValidator` 通过，签名在 validator 之后进行 | PASS — Task 20 本地工具产物；不代表真实游戏 |
 | 字体终检 | `missingCodePoints` 为空，覆盖报告已保存 | NOT-RUN — 真实语料/字体未执行 |
-| 语言激活 | 每种声明支持的激活模式已在设备观察到译文 | NOT-RUN — 未安装真实游戏 |
-| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | NOT-RUN — 工具包入口冒烟 PASS；真实游戏流程未执行 |
-| 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | PASS — controlled unsupported gate；真实样本仍 NOT-RUN |
+| 语言激活 | 每种声明支持的激活模式已在设备观察到译文 | NOT-RUN — 原始游戏启动 PASS，但未观察到译文；菜单注入另有 FAIL |
+| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | NOT-RUN — 未修改单 APK 新游戏基线 PASS；翻译补丁、old save、rollback 未执行 |
+| 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | PASS — controlled unsupported gate；真实菜单注入 FAIL，不能据此发布 |
 
 当前缺任一项都必须保持“未批准发布”。特别是 `EXTRACT_ONLY`/`UNSUPPORTED` 样本被正确阻断，是安全行为，不是可以通过发布门禁的理由。
 
@@ -185,10 +201,10 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 |---|---|---|---|---|---|---|---|
 | C16-01 | engine generation 与 `SAFE`/`WARNING`/`EXTRACT_ONLY`/`UNSUPPORTED` 分类 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | T6–T12 preflight/extractor/coverage fixtures；real text counts `not-run` | real missing/rejected/font `not-run` | controlled build PASS；real install/startup/old save/rollback NOT-RUN | PASS (controlled); real sample NOT-RUN |
 | C16-02 | loose RPYC2、RPA-1/RPA-2/RPA-3、legacy zlib | inherited or EXTRACT_ONLY/UNSUPPORTED | inherited or NONE | RPA/RPYC/legacy parser fixtures；real template/source and counts `not-run` | unknown format blocked; real missing/rejected/font `not-run` | blocked for unknown; real install/startup/save/rollback NOT-RUN | PASS (controlled); real archive NOT-RUN |
-| C16-03 | selectable、always-on、标准/自定义/无菜单和菜单注入失败 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | C13/T12/C15 UI/compile fixtures；real menu/source counts `not-run` | real missing/rejected/font `not-run` | tool build PASS；real activation/startup/old save/rollback NOT-RUN | PASS (controlled); device NOT-RUN |
+| C16-03 | selectable、always-on、标准/自定义/无菜单和菜单注入失败 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | C13/T12/C15 UI/compile fixtures；real scan 104 RPYC；content-URI injection FAIL | real missing/rejected/font `not-run` | tool build PASS；unmodified game startup PASS；translated activation/old save/rollback NOT-RUN | FAIL — observed T22-06 content-URI injection failure |
 | C16-04 | 对话、菜单、角色名、UI、`{#}`、插值、printf、重复语境和字体 | inherited source level | inherited activation; advanced dialogue ID default-off | T8–T11/C15 controlled counts/collision/lint/font；real template/source `not-run` | complete real build requires `missing == 0` and `rejected == 0`; real font `not-run` | controlled gates PASS；real install/startup/save/rollback NOT-RUN | PASS (controlled); real corpus NOT-RUN |
-| C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle; Task 20 helper/APK artifact gate；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295` | real missing/rejected/font `not-run` | local build/signature/asset PASS；v2/v3 true；installed tool v1.0.10 startup/entry smoke PASS；real install/startup/old save/rollback NOT-RUN | PASS (local artifact/tool smoke); real device NOT-RUN |
-| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 23 audit complete；Task 22 tool smoke separately PASS；Task 21–22 real sample/device rows remain NOT-RUN | NOT-RUN — 未批准发布 |
+| C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle; Task 20 helper/APK artifact gate；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295`；real target single APK baseline | real missing/rejected/font `not-run` | local build/signature/asset PASS；v2/v3 true；unmodified real-game install/startup PASS；translated install/old save/rollback NOT-RUN | PASS for local artifact and unmodified baseline; translated device acceptance NOT-RUN |
+| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real sample identity/start/scan recorded; translation/patch/language/font/save/rollback incomplete | mandatory real rows not complete; C16-03 FAIL | Task 23 audit and Task 20 artifact gates PASS；real translated acceptance remains NOT-RUN | NOT-RUN — 未批准发布；T22-06 FAIL |
 
 ## 8. 签字与交接
 
