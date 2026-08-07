@@ -1028,6 +1028,7 @@ async function Lo(e){'''
     new_read = (
         "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}).then(_r=>{"
         "globalThis.__slgCoverageRecords=(globalThis.__slgCoverageRecords||[]).concat((_r&&_r.renpyRecords)||[]);"
+        "globalThis.__slgRegisterDialogueRecords?.((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgCoverageClassifications=Object.assign({},globalThis.__slgCoverageClassifications||{},(_r&&_r.coverageClassifications)||{});"
         "globalThis.__slgAccumulateRenpyCompatibility?.((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgRefreshTranslationCoverage?.();return _r}):"
@@ -1045,6 +1046,7 @@ async function Lo(e){'''
         "E.buildPatchedApk({uri:(window.__slgSelectionMeta?.uri||n),"
         "splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],"
         "apkSet:window.__slgSelectionMeta?.apkSet||null,"
+        "dialogueIdMode:!!window.__slgDialogueIdMode,dialogueTranslations:window.__slgDialogueIdTranslations||[],"
         "files:(()=>{const _f=a.filter(_x=>{let _p=String(_x.path);return !_p.includes(`/tl/`)&&!_p.includes(`x-slgtranslated`)});return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
         "outputDirUri:m,outputName:Me(i),"
         "targetRenpyLanguage:window.__slgCompiledCount>0?'':is(y),sourceRenpyLanguage:window.__slgCompiledCount>0?'':is(g)}"
@@ -1109,7 +1111,7 @@ async function Lo(e){'''
     build_gate = 'return N},2);if(!N&&(a.length>0||oe)){O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
     build_gate_compiled = (
         'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk('
-        "{apkUri:(window.__slgSelectionMeta?.uri||n),baseUri:(window.__slgSelectionMeta?.baseUri||window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],activationMode:window.__slgActivationMode||'always_on',items:a.map(_x=>({path:_x.path,content:_x.content}))}).then("
+        "{apkUri:(window.__slgSelectionMeta?.uri||n),baseUri:(window.__slgSelectionMeta?.baseUri||window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],activationMode:window.__slgActivationMode||'always_on',dialogueIdMode:!!window.__slgDialogueIdMode,dialogueTranslations:window.__slgDialogueIdTranslations||[],items:a.map(_x=>({path:_x.path,content:_x.content}))}).then("
         '_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;(_r&&_r.compiled>0)?O(`  \u5df2\u7f16\u8bd1\u5e76\u5408\u5e76\u53bb\u91cd ${_r.compiled} \u6761\u8bd1\u6587\uff0c\u6e38\u620f\u5c06\u76f4\u63a5\u52a0\u8f7d\u7f16\u8bd1\u7248\u672c`,`success`):O(`  \u6ca1\u6709\u53ef\u7f16\u8bd1\u7684 Ren\'Py \u7ffb\u8bd1\u8d44\u6e90`,`info`)}).catch('
         '_e=>{O(`  \u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: ${_e&&_e.message||_e}`,`error`)});'
         'O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
@@ -1704,6 +1706,46 @@ root.__slgSanitizeRenpyCompatibilityReport=sanitize;root.__slgRenpyCompatibility
 '''
 
 
+dialogue_id_runtime = r'''
+(function(){
+const root=typeof window!==`undefined`?window:globalThis;
+const ID_RE=/^[A-Za-z0-9._:-]{1,256}$/;
+const defaultCapability={extractorVerified:false,writerVerified:false,astVersionVerified:false,rollbackValidated:false};
+root.__slgDialogueIdCapability=Object.assign({},defaultCapability,root.__slgDialogueIdCapability||{});
+root.__slgDialogueIdMode=false;
+root.__slgDialogueIdRecords=[];
+root.__slgDialogueIdTranslations=[];
+root.__slgDialogueIdStatus={enabled:false,available:false,reason:`default_global_string_map`,contextCount:0};
+function reliable(record){return record&&record.kind===`DIALOGUE`&&typeof record.identifier===`string`&&ID_RE.test(record.identifier)&&typeof record.text===`string`&&record.text.length>0&&record.coverageCertain===true}
+function assess(requested){
+const records=root.__slgDialogueIdRecords||[],cap=root.__slgDialogueIdCapability||defaultCapability;
+const ids=new Map,valid=records.filter(reliable);
+for(const record of valid){const prior=ids.get(record.identifier);if(prior&&prior!==record.text){root.__slgDialogueIdMode=false;root.__slgDialogueIdStatus={enabled:false,available:false,reason:`identifier_reused_for_multiple_old`,contextCount:0};render();return root.__slgDialogueIdStatus}ids.set(record.identifier,record.text)}
+const ready=!!cap.extractorVerified&&!!cap.writerVerified&&!!cap.astVersionVerified&&!!cap.rollbackValidated&&valid.length>0;
+let reason=ready?`ready`:(!cap.extractorVerified?`extractor_identifier_unverified`:!cap.writerVerified?`writer_ast_unverified`:!cap.astVersionVerified?`target_ast_version_unverified`:!cap.rollbackValidated?`rollback_not_validated`:`no_reliable_dialogue_identifier`);
+const enabled=!!requested&&ready;
+root.__slgDialogueIdMode=enabled;
+root.__slgDialogueIdStatus={enabled,available:ready,reason:enabled?`enabled`:reason,contextCount:ids.size};
+render();return root.__slgDialogueIdStatus}
+function register(records){
+const prior=root.__slgDialogueIdRecords||[];
+root.__slgDialogueIdRecords=prior.concat((records||[]).filter(reliable));
+return assess(root.__slgDialogueIdMode)}
+function render(){
+if(typeof document===`undefined`)return;
+const host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;
+let panel=document.getElementById(`slg-dialogue-id-mode`);
+if(!panel){panel=document.createElement(`section`);panel.id=`slg-dialogue-id-mode`;panel.className=`workshop-dialogue-id-mode`;panel.style.cssText=`margin:12px 0;padding:12px;border:1px solid color-mix(in srgb,#7c3aed 30%,transparent);border-radius:12px;background:color-mix(in srgb,#7c3aed 6%,transparent)`;host.append(panel)}
+panel.replaceChildren();const label=document.createElement(`label`),box=document.createElement(`input`);box.type=`checkbox`;box.checked=!!root.__slgDialogueIdMode;box.disabled=!root.__slgDialogueIdStatus.available;box.onchange=()=>assess(box.checked);label.append(box,document.createTextNode(` 高级对话 ID 模式（默认关闭）`));const detail=document.createElement(`small`);detail.style.display=`block`;detail.style.marginTop=`6px`;detail.textContent=root.__slgDialogueIdStatus.available?`已验证 ${root.__slgDialogueIdStatus.contextCount} 个对话 ID；菜单、角色名和 UI 仍使用字符串映射。`:`已回退全局字符串映射：${root.__slgDialogueIdStatus.reason}`;panel.append(label,detail)
+}
+root.__slgRegisterDialogueRecords=register;
+root.__slgPrepareDialogueIdMode=(requested,translations)=>{root.__slgDialogueIdTranslations=Array.isArray(translations)?translations:[];return assess(!!requested)};
+root.__slgSetDialogueIdMode=(requested)=>assess(!!requested);
+render();
+})()
+'''
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     verify_canonical_base_text(js, css)
     copy_contract = "\n/* workshop-copy:" + "|".join(WORKSHOP_COPY) + " */\n"
@@ -1721,6 +1763,7 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_translation_quality(patched)
     patched = patch_cache_memory(patched)
     patched += compatibility_report_runtime
+    patched += dialogue_id_runtime
     runtime = patch_saves_runtime(WORKSHOP_RUNTIME)
     runtime = runtime.replace(
         "当前只检查了基础 APK",

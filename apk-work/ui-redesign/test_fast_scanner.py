@@ -15,6 +15,7 @@ FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 SCANNER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
 FONT_SUPPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyFontSupport.java"
 PICKLE_WRITER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycPickleWriter.java"
+DIALOGUE_TRANSLATION = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyDialogueTranslation.java"
 COMPATIBILITY_REPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyCompatibilityReport.java"
 PREFLIGHT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyPreflight.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
@@ -325,6 +326,33 @@ def build_structured_records_fixture_rpyc() -> bytes:
         data_start += len(slot)
     table += struct.pack("<III", 0, 0, 0)
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
+
+
+def build_dialogue_id_fixture_rpyc() -> bytes:
+    """Two TranslateSay nodes share old text but retain different IDs."""
+    p = bytearray()
+    p += b"\x80\x02\x5d\x28"  # PROTO 2, EMPTY_LIST, MARK
+    for identifier, speaker in (("dialogue-a", "Alice"), ("dialogue-b", "Bob")):
+        p += pickle_short("renpy.ast") + pickle_short("TranslateSay") + b"\x93"
+        p += b"\x29\x81\x4e\x7d\x28"
+        p += pickle_short("linenumber") + pickle_int1(10 if identifier.endswith("a") else 20)
+        p += pickle_short("filename") + pickle_short("game/dialogue.rpy")
+        p += pickle_short("identifier") + pickle_short(identifier)
+        p += pickle_short("who") + pickle_short(speaker)
+        p += pickle_short("what") + pickle_short("Fine.")
+        p += pickle_short("new") + pickle_short("unused source translation")
+        p += b"\x75\x86\x62"  # SETITEMS, TUPLE2, BUILD
+    p += b"\x65."
+    import zlib
+    pickle_bytes = bytes(p)
+    slot = zlib.compress(pickle_bytes)
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot
 
 
 def build_official_marked_string_fixture_rpyc() -> bytes:
@@ -3175,6 +3203,151 @@ public final class StructuredRecordsHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_dialogue_id_mode_preserves_context_specific_translations(self):
+        model = DIALOGUE_TRANSLATION.read_text("utf-8")
+        writer = PICKLE_WRITER.read_text("utf-8")
+        extractor = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app"
+                     / "RpycTextExtractor.java").read_text("utf-8")
+        ui = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        for token in (
+            "public final String identifier",
+            "public final String speakerExpression",
+            "public final String oldText",
+            "public final String newText",
+            "public final int sourceLine",
+            "withNewText",
+        ):
+            self.assertIn(token, model)
+        for token in (
+            "extractDialogueTranslations",
+            "TranslateSay",
+            "isSafeIdentifier",
+            "dialogue ID writer is not verified",
+            "buildDialogueTranslationRpyc",
+            "TranslateString",
+        ):
+            self.assertIn(token, extractor + writer)
+        for token in (
+            "__slgDialogueIdMode=false",
+            "default_global_string_map",
+            "identifier_reused_for_multiple_old",
+            "__slgSetDialogueIdMode",
+            "__slgRegisterDialogueRecords",
+            "dialogueIdMode:!!window.__slgDialogueIdMode",
+            "dialogueTranslations:window.__slgDialogueIdTranslations||[]",
+        ):
+            self.assertIn(token, ui)
+
+        fixture = build_dialogue_id_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyDialogueTranslation;
+import com.slgtranslator.app.RpycPickleWriter;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+
+public final class DialogueIdHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] fixture = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        String source = "assets/x-game/game/dialogue.rpyc";
+        List<RenpyDialogueTranslation> extracted =
+                RpycTextExtractor.extractDialogueTranslations(fixture, source);
+        require(extracted.size() == 2, "two existing dialogue IDs must be recovered");
+        require("dialogue-a".equals(extracted.get(0).identifier), "first ID must be preserved");
+        require("dialogue-b".equals(extracted.get(1).identifier), "second ID must be preserved");
+        require("Fine.".equals(extracted.get(0).oldText)
+                && "Fine.".equals(extracted.get(1).oldText),
+                "same old text must remain in both contexts");
+        require(extracted.get(0).sourceLine == 10 && extracted.get(1).sourceLine == 20,
+                "source lines must be read only from serialized linenumber fields");
+
+        List<RenpyDialogueTranslation> translated = new ArrayList<>();
+        translated.add(extracted.get(0).withNewText("很好。"));
+        translated.add(extracted.get(1).withNewText("行。"));
+        List<String[]> strings = new ArrayList<>();
+        strings.add(new String[]{"Continue", "继续"});
+        require(RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY3_MODERN, 17),
+                "the fixture-verified modern AST must be enabled");
+        require(!RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2, 17),
+                "protocol-2 dialogue AST must remain extract-only");
+        byte[] pickle = RpycPickleWriter.buildDialogueTranslationPickle(
+                RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated", "game/dialogue.rpy",
+                translated, strings, 17, "dialogue-key");
+        String raw = new String(pickle, StandardCharsets.UTF_8);
+        require(raw.contains("TranslateSay"), "advanced artifact must contain TranslateSay");
+        require(raw.contains("dialogue-a") && raw.contains("dialogue-b"),
+                "advanced artifact must retain both identifiers");
+        require(raw.contains("很好。") && raw.contains("行。"),
+                "advanced artifact must retain context-specific translations");
+        require(raw.contains("TranslateString") && raw.contains("Continue") && raw.contains("继续"),
+                "menus and UI strings must remain in the mixed string map");
+
+        List<RenpyDialogueTranslation> written =
+                RpycTextExtractor.extractDialogueTranslations(
+                        RpycPickleWriter.buildDialogueTranslationRpyc(
+                                RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated",
+                                "game/dialogue.rpy", translated, strings, 17, "dialogue-key"),
+                        source);
+        require(written.size() == 2, "writer output must remain dialogue-ID addressable");
+        require("dialogue-a".equals(written.get(0).identifier)
+                && "dialogue-b".equals(written.get(1).identifier),
+                "writer must not merge equal old strings by text");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="dialogue-id-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "DialogueIdHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes), "-classpath", third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "DialogueIdHarness", str(fixture_path)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+        runtime_start = ui.index("dialogue_id_runtime = r'''")
+        runtime_end = ui.index("'''", runtime_start + len("dialogue_id_runtime = r'''"))
+        runtime = ui[runtime_start + len("dialogue_id_runtime = r'''"):runtime_end]
+        node_script = runtime + r"""
+globalThis.__slgDialogueIdCapability={extractorVerified:true,writerVerified:true,astVersionVerified:true,rollbackValidated:true};
+__slgRegisterDialogueRecords([
+  {kind:`DIALOGUE`,identifier:`dialogue-a`,text:`Fine.`,coverageCertain:true},
+  {kind:`DIALOGUE`,identifier:`dialogue-b`,text:`Fine.`,coverageCertain:true}
+]);
+let status=__slgPrepareDialogueIdMode(true,[{identifier:`dialogue-a`,oldText:`Fine.`,newText:`很好。`}]);
+if(!status.enabled||status.contextCount!==2)throw new Error(JSON.stringify(status));
+__slgRegisterDialogueRecords([{kind:`DIALOGUE`,identifier:`dialogue-a`,text:`Other`,coverageCertain:true}]);
+if(__slgDialogueIdMode||__slgDialogueIdStatus.reason!==`identifier_reused_for_multiple_old`){throw new Error(`identifier collision was not fail-closed`)}
+"""
+        result = subprocess.run(
+            ["node", "-e", node_script],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rpyc_extractor_matches_official_marked_string_forms(self):
         extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
         source = extractor.read_text("utf-8")
@@ -4411,7 +4584,7 @@ public final class ModernWriterHarness {
             subprocess.run(
                 [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
                  "-d", str(classes), "-classpath", third_party_classpath(),
-                 *map(str, stubs), str(PICKLE_WRITER), str(harness_path)],
+                 *map(str, stubs), str(DIALOGUE_TRANSLATION), str(PICKLE_WRITER), str(harness_path)],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             output = subprocess.run(

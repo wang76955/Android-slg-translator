@@ -25,6 +25,7 @@ public final class RpycTextExtractor {
 
     private static final Set<String> KEY_NAMES = new HashSet<>();
     private static final Set<String> TEXT_KEYS = new HashSet<>();
+    private static final Set<String> DIALOGUE_AST_TYPES = new HashSet<>();
 
     static {
         String[] keys = {
@@ -45,6 +46,8 @@ public final class RpycTextExtractor {
         TEXT_KEYS.add("old");
         TEXT_KEYS.add("text");
         TEXT_KEYS.add("text_value");
+        DIALOGUE_AST_TYPES.add("Say");
+        DIALOGUE_AST_TYPES.add("TranslateSay");
     }
 
     private RpycTextExtractor() {
@@ -75,6 +78,28 @@ public final class RpycTextExtractor {
     }
 
     /**
+     * Returns only dialogue records whose compiled AST supplied an existing,
+     * safe identifier.  Empty results are intentional: callers must fall back
+     * to the global string map instead of inventing IDs.
+     */
+    public static List<RenpyDialogueTranslation> extractDialogueTranslations(
+            byte[] rpyc, String sourcePath) throws java.io.IOException {
+        List<RenpyTextRecord> records = extractRecords(rpyc, sourcePath, false);
+        List<RenpyDialogueTranslation> result = new ArrayList<>();
+        for (RenpyTextRecord record : records) {
+            if (record.kind != RenpyTextRecord.Kind.DIALOGUE
+                    || !record.coverageCertain
+                    || record.identifier == null || record.identifier.isEmpty()) {
+                continue;
+            }
+            result.add(RenpyDialogueTranslation.source(
+                    record.identifier, record.speaker, record.text,
+                    record.sourcePath, record.sourceLine));
+        }
+        return result;
+    }
+
+    /**
      * Extracts user-visible records from one compiled rpyc script. The source
      * path is supplied by the caller so paths inside RPA archives retain their
      * virtual {@code archive.rpa!/game/script.rpyc} identity.
@@ -98,7 +123,12 @@ public final class RpycTextExtractor {
         for (int i = 0; i < ops.size(); i++) {
             int[] op = ops.get(i);
             int code = op[0];
-            if (code == 0x8c || code == 0x58) { // SHORT_BINUNICODE / BINUNICODE
+            if (code == 0x81) { // NEWOBJ: begin a serialized AST object
+                state.beginObject();
+            } else if (code == 0x4b || code == 0x4d || code == 0x4a) {
+                // BININT1 / BININT2 / BININT
+                state.consumeInteger(integerPayload(pickle, op));
+            } else if (code == 0x8c || code == 0x58) { // SHORT_BINUNICODE / BINUNICODE
                 String s = LanguageMenuSupport.stringPayload(pickle, ops, i);
                 state.consumeString(s);
             } else if (code == 0x68 || code == 0x6a) { // BINGET / LONG_BINGET
@@ -137,6 +167,20 @@ public final class RpycTextExtractor {
         return state.records;
     }
 
+    private static int integerPayload(byte[] pickle, int[] op) {
+        switch (op[0]) {
+            case 0x4b: // BININT1
+                return pickle[op[1] + 1] & 0xff;
+            case 0x4d: // BININT2
+                return (pickle[op[1] + 1] & 0xff)
+                        | ((pickle[op[1] + 2] & 0xff) << 8);
+            case 0x4a: // BININT
+                return le32(pickle, op[1] + 1);
+            default:
+                return Integer.MIN_VALUE;
+        }
+    }
+
     private static final class ExtractState {
         final List<RenpyTextRecord> records = new ArrayList<>();
         final List<String> choices = new ArrayList<>();
@@ -145,6 +189,12 @@ public final class RpycTextExtractor {
         final boolean onlyOld;
         String lastString;
         String lastKey;
+        String pendingAstModule = "";
+        String pendingAstType = "";
+        String currentAstType = "";
+        String currentIdentifier = "";
+        String speakerExpression = "";
+        int sourceLine = -1;
         String pendingSpeaker = "";
         boolean pyCodeObject;
         boolean itemsMode;
@@ -155,11 +205,31 @@ public final class RpycTextExtractor {
             this.onlyOld = onlyOld;
         }
 
+        void beginObject() {
+            currentAstType = pendingAstType;
+            pendingAstType = "";
+            currentIdentifier = "";
+            speakerExpression = "";
+            sourceLine = -1;
+            lastKey = null;
+            lastString = null;
+        }
+
+        void consumeInteger(int value) {
+            if ("linenumber".equals(lastKey) && value != Integer.MIN_VALUE
+                    && value >= 0) {
+                sourceLine = value;
+            }
+            lastKey = null;
+            lastString = null;
+        }
+
         void consumeString(String value) throws java.io.IOException {
             if (value == null) {
                 afterTuple3 = false;
                 return;
             }
+            observeAstType(value);
             String fieldKey = lastKey;
             boolean sourceField = "source".equals(fieldKey) || "code".equals(fieldKey);
             boolean visibleTextField = fieldKey != null && TEXT_KEYS.contains(fieldKey);
@@ -176,15 +246,25 @@ public final class RpycTextExtractor {
             }
             if ("who".equals(lastKey)) {
                 pendingSpeaker = value;
+                if (isDialogueAstType(currentAstType)) {
+                    speakerExpression = value;
+                }
                 lastKey = null;
             } else if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
                 if (isUserText(value)) {
                     String speaker = "what".equals(lastKey) ? pendingSpeaker : "";
-                    addRecord(value, kindFor(lastKey),
-                            speaker, true);
+                    String identifier = "what".equals(lastKey)
+                            && isDialogueAstType(currentAstType)
+                            ? currentIdentifier : "";
+                    addRecord(value, kindFor(lastKey), speaker, identifier, true);
                 }
                 if ("what".equals(lastKey)) {
                     pendingSpeaker = "";
+                }
+                lastKey = null;
+            } else if ("identifier".equals(lastKey)) {
+                if (isDialogueAstType(currentAstType) && isSafeIdentifier(value)) {
+                    currentIdentifier = value;
                 }
                 lastKey = null;
             } else if (KEY_NAMES.contains(value)) {
@@ -208,6 +288,17 @@ public final class RpycTextExtractor {
             afterTuple3 = false;
         }
 
+        private void observeAstType(String value) {
+            if ("renpy.ast".equals(value)) {
+                pendingAstModule = value;
+                return;
+            }
+            if (!pendingAstModule.isEmpty()) {
+                pendingAstType = DIALOGUE_AST_TYPES.contains(value) ? value : "";
+                pendingAstModule = "";
+            }
+        }
+
         void addRecord(String text, RenpyTextRecord.Kind kind, String speaker,
                        boolean coverageCertain) throws java.io.IOException {
             addRecord(text, kind, speaker, "", coverageCertain);
@@ -225,7 +316,7 @@ public final class RpycTextExtractor {
             int occurrence = previous == null ? 1 : previous + 1;
             occurrences.put(occurrenceKey, occurrence);
             records.add(new RenpyTextRecord(text, kind, speaker, identifier, sourcePath,
-                    -1, occurrence, coverageCertain));
+                    sourceLine, occurrence, coverageCertain));
         }
 
         void addDiagnosticRecord(String identifier) throws java.io.IOException {
@@ -244,6 +335,15 @@ public final class RpycTextExtractor {
             return RenpyTextRecord.Kind.TRANSLATION_OLD;
         }
         return RenpyTextRecord.Kind.UI_STRING;
+    }
+
+    private static boolean isDialogueAstType(String value) {
+        return value != null && DIALOGUE_AST_TYPES.contains(value);
+    }
+
+    private static boolean isSafeIdentifier(String value) {
+        return value != null && value.length() <= 256
+                && value.matches("[A-Za-z0-9._:-]{1,256}");
     }
 
     /**
