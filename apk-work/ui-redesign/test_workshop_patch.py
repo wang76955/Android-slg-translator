@@ -10,6 +10,74 @@ BASE_JS = ROOT.parent / "extracted" / "assets" / "public" / "assets" / "index-CJ
 BASE_CSS = ROOT.parent / "extracted" / "assets" / "public" / "assets" / "index-C044IUg3.css"
 
 
+def extract_js_function(source: str, signature: str) -> str:
+    start = source.find(signature)
+    assert start >= 0, f"JavaScript function signature not found: {signature!r}"
+
+    contexts = [("code", None)]
+    escaped = False
+    paren_depth = 0
+    brace_depth = 0
+    body_started = False
+
+    index = start
+    while index < len(source):
+        char = source[index]
+        mode, template_boundary = contexts[-1]
+
+        if mode in ("single", "double", "template"):
+            if escaped:
+                escaped = False
+                index += 1
+                continue
+            if char == "\\":
+                escaped = True
+                index += 1
+                continue
+            if mode == "template":
+                if char == "`":
+                    contexts.pop()
+                elif char == "$" and index + 1 < len(source) and source[index + 1] == "{":
+                    contexts.append(("code", brace_depth))
+                    index += 2
+                    continue
+            elif char == ("'" if mode == "single" else '"'):
+                contexts.pop()
+            index += 1
+            continue
+
+        if char == "'":
+            contexts.append(("single", None))
+        elif char == '"':
+            contexts.append(("double", None))
+        elif char == "`":
+            contexts.append(("template", None))
+        elif char == "(":
+            paren_depth += 1
+        elif char == ")":
+            assert paren_depth > 0, "unbalanced JavaScript parentheses"
+            paren_depth -= 1
+        elif char == "{":
+            if not body_started:
+                if paren_depth == 0:
+                    body_started = True
+                    brace_depth = 1
+            else:
+                brace_depth += 1
+        elif char == "}":
+            if template_boundary is not None and brace_depth == template_boundary:
+                contexts.pop()
+            elif body_started:
+                brace_depth -= 1
+                if brace_depth == 0:
+                    return source[start : index + 1]
+
+        index += 1
+
+    assert body_started and brace_depth == 0, f"unclosed JavaScript function: {signature!r}"
+    raise AssertionError(f"unclosed JavaScript function: {signature!r}")
+
+
 class WorkshopPatchContractTest(unittest.TestCase):
     def load_patch(self):
         module_path = ROOT / "patch_workshop_ui.py"
@@ -18,6 +86,11 @@ class WorkshopPatchContractTest(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def test_extract_js_function_ignores_braces_inside_strings_and_templates(self):
+        source = 'function target(){const a="}";const b=`x${1}`;if(true){return `{ok}`}}\nfunction next(){}'
+        block = extract_js_function(source, "function target()")
+        self.assertEqual(block, 'function target(){const a="}";const b=`x${1}`;if(true){return `{ok}`}}')
 
     def test_canonical_extracted_assets_are_cryptographically_pinned(self):
         module = self.load_patch()
