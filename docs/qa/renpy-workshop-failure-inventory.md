@@ -4,7 +4,7 @@
 
 ### Classification status
 
-本清单中的所有 `Classification` 都是 Phase 0 的 preliminary candidate observation，不是最终根因结论。Phase 1/后续任务必须逐项结合当前实现行为、权威行为来源，以及 fixture 输入/输出和必要的字节或 UTF-8 证据进行确认；若证据不支持当前候选标签，必须替换为允许集合中的其他值。尤其是 `ENCODING_BOUNDARY` 只表示当前观察值得调查，不表示已经证明发生了字节、UTF-8、Node 输入或生产输出转换。
+Task 1 baseline entries remain Phase 0 preliminary candidate observations; they are historical evidence and are not retroactively changed by Task 3. Task 3 revalidation entries (WSP-05/WSP-06/WSP-20/WSP-21) are final for the stated Node harness scope, with explicit residual risks below. No entry claims a native Android/device PASS, and no entry claims validation against a real split-APK sample.
 
 本轮没有分配某个候选标签（例如 `EXTERNAL` 数量为 0）不等于排除该根因；这只是本轮没有分配候选标签，后续仍需调查。
 
@@ -96,7 +96,9 @@ Ran 2 tests ... OK
 - Classification: `STALE_CONTRACT`
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（过具体 token）；`apk-work/ui-redesign/patch_workshop_ui.py`（metadata 生成输出，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract -v` → `AssertionError: 'window.__slgSelectionMeta=e' not found in '<patched bundle>'`（bundle dump 已省略）。
-- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract` → `Ran 1 test in 0.067s; OK`；测试改为验证完整 SourceSet 与 shared scanner 行为，未修改运行时 metadata 逻辑。
+- Green evidence: static chooser contract — `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_app_source_chooser_contract` → `Ran 1 test ... OK`; semantic shared-loader behavior — `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_shared_apk_loader_and_installed_selection_behavior` → `Ran 1 test ... OK`. The harness asserts complete file SourceSet fields and installed split metadata; this is not a native/device PASS.
+- Task 3 evidence level: final Node harness only; no real Android/device run and no real split-APK sample.
+- Residual risk: native picker payload normalization, package/version fidelity from real bridges, and split resource readability remain unverified on device.
 
 ### WSP-06 `test_installed_list_and_selection_epochs_ignore_stale_requests`
 
@@ -109,7 +111,9 @@ Ran 2 tests ... OK
 - Classification confidence: Confirmed; the harness had an unterminated template literal in its busy-state assertion, so Node could not reach epoch behavior.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（修复 Node harness 语法、改用可控 deferred 与语义断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests -v` → `SyntaxError: missing ) after argument list`（`[eval]:55`）。
-- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests` → `Ran 1 test in 0.122s; OK`；两个 list request 与两个 selection request 均通过逆序 settlement/stale rejection 验证。
+- Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_installed_list_and_selection_epochs_ignore_stale_requests` → `Ran 1 test ... OK`；可控 deferred 覆盖 old-list resolve、old-list reject、old-selection resolve、old-selection reject，并确认 current list/selection rejection 显示错误。
+- Task 3 evidence level: final Node harness only; no real Android/device run and no real split-APK sample.
+- Residual risk: native modal lifecycle, bridge cancellation semantics, and split-installed selection behavior remain unverified on device.
 
 ### WSP-07 `test_long_running_phases_are_not_reported_as_directory_scanning`
 
@@ -290,6 +294,8 @@ Ran 2 tests ... OK
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（loader fake-timer/deferred harness 与失败 UI 行为断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（扫描失败状态增加 retry/file fallback）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement -v` → `Error: timeout contract`。
 - Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_shared_loader_has_deadline_and_stale_safe_settlement` → `Ran 1 test in 0.176s; OK`；fake timer 跨过 65000 ms deadline，late resolve 未覆盖失败状态，retry/file fallback 均可执行。
+- Task 3 evidence level: final Node harness only; fake clock/deferred semantics do not establish native timing or device behavior.
+- Residual risk: native scan duration, process suspension, and split-APK entry availability remain unverified.
 
 ### WSP-21 `test_source_modals_handle_android_back_focus_and_file_fallback`
 
@@ -302,6 +308,8 @@ Ran 2 tests ... OK
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（modal harness 改为稳定 DOM/action 语义断言）；`apk-work/ui-redesign/patch_workshop_ui.py`（source modal 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback -v` → `Error: error state exposes retry and file fallback`。
 - Green evidence: `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback` → `Ran 1 test in 0.119s; OK`；Android Back 仅消费可见 source/installed modal，恢复 opener focus，file fallback 可执行。
+- Task 3 evidence level: final Node harness only; the “Android Back” contract is a JavaScript/native-bridge seam simulation, not a device PASS.
+- Residual risk: Capacitor/native Back dispatch ordering, accessibility focus on OEM surfaces, and file picker return payloads remain unverified.
 
 ### WSP-22 `test_task_runtime_bridges_and_recovery_contract`
 

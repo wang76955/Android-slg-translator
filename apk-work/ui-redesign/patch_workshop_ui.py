@@ -415,7 +415,8 @@ if(payload.reason==="network"){const title=textNode("h2","workshop-error-title",
 const title=textNode("h2","workshop-error-title","手机空间不足");const copy=textNode("p","workshop-state-copy","请释放空间后重试。"),details=detailToggle(payload.raw||"ENOSPC|No space left");card.append(title,copy,details);body.append(card,actionButton("释放空间后重试",()=>retryTask({fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}
 function setWorkshopState(state,payload={}){if(!shell)return;shell.dataset.workshopState=state;shell.setAttribute("data-workshop-state",state);shell.dataset.workshopTask=state==="idle"?"idle":"active";const task=shell.dataset.workshopTask;shell.setAttribute("data-workshop-task",shell.dataset.workshopTask);runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",task);shell.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");shell.classList.add(`workshop-state-${state}`);runtimeRoot?.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");runtimeRoot?.classList.add(`workshop-state-${state}`);shell.replaceChildren(renderTopbar(state),renderStateBody(state,payload))}
 function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.current||"",s.total||"",s.translated||"",s.reason||"",s.splitApk?`split-${s.splitCount||0}`:"",s.raw||""].join("|")}
-function retryTask(payload){retrying=true;triggerReactButton(startButton||sourceButton);setWorkshopState("scanning",payload);window.setTimeout(()=>{retrying=false;refresh()},600)}
+function retryScanTask(payload){const selection=window.__slgSelectionMeta;if(!selection?.uri||typeof window.__slgLoadSelectedApk!=="function"){triggerReactButton(sourceButton);return}retrying=true;let pending;try{pending=window.__slgLoadSelectedApk(selection);setWorkshopState("scanning",{...payload,fileName:selection.name||selection.label||payload?.fileName||""})}catch(error){retrying=false;window.__slgSelectionError={message:error?.message||String(error),fileName:selection.name||selection.label||""};setWorkshopState("failed",{...payload,reason:"scan",fileName:selection.name||selection.label||"",raw:window.__slgSelectionError.message});return}Promise.resolve(pending).catch(()=>{}).finally(()=>{retrying=false;lastSnapshot="";refresh()})}
+function retryTask(payload){if(payload?.reason==="scan"){retryScanTask(payload);return}retrying=true;triggerReactButton(startButton||sourceButton);setWorkshopState("scanning",payload);window.setTimeout(()=>{retrying=false;refresh()},600)}
 function refresh(){if(!shell||retrying||settingsOpen)return;const snap=readTaskSnapshot();const active=snap.state==='scanning'||snap.state==='translating'||snap.state==='patching'||snap.state==='completed'||snap.state==='failed';if(manualIdle&&!active)return;if(snap.state==='translating'){try{const now=Date.now();if(now-sessionLastBeat>=10000){sessionLastBeat=now;const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=now;localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}}catch{}}const key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)}
  function decorate(){const heading=[...document.querySelectorAll("#root h2")].find(el=>el.textContent&&el.textContent.includes("选择游戏 APK"));if(heading?.parentElement)heading.parentElement.classList.add("workshop-picker-source");startButton=findButton("开始翻译");if(startButton){startButton.classList.add("workshop-start-button");startButton.setAttribute("aria-hidden","true")}installButton=findButton("安装补丁版");if(installButton)installButton.setAttribute("aria-hidden","true");sourceButton=findButton("选择");if(sourceButton){sourceButton.classList.add("workshop-source-button");sourceButton.setAttribute("aria-label","选择 APK 文件");sourceButton.setAttribute("aria-hidden","true")}applyApiKeyToReact()}
 
@@ -443,11 +444,36 @@ def patch_scan_flow(js: str) -> str:
     if js.count(old_flow) != 1:
         raise ValueError("APK scan flow signature is not unique")
     patched = js.replace(old_flow, SCAN_FLOW, 1)
+    normalize_marker = "scanSelectedApk=async(e,selectionEpoch)=>{"
+    normalize_replacement = (
+        "normalizeSelection=e=>{const s=e||{};const splitUris=Array.isArray(s.splitUris)?s.splitUris:[];"
+        "const splitNames=Array.isArray(s.splitNames)?s.splitNames:[];s.uri=s.uri||\"\";"
+        "s.baseUri=s.baseUri||s.uri;s.splitUris=splitUris;s.splitNames=splitNames;"
+        "s.splitCount=Number(s.splitCount??splitUris.length??0);s.packageName=s.packageName||\"\";"
+        "s.versionCode=s.versionCode??\"\";s.source=s.source===\"installed\"||(!s.source&&s.packageName)?\"installed\":\"file\";"
+        "return s},scanSelectedApk=async(e,selectionEpoch)=>{"
+    )
+    if patched.count(normalize_marker) != 1:
+        raise ValueError("APK scan normalizer signature is not unique")
+    patched = patched.replace(normalize_marker, normalize_replacement, 1)
+    timeout_timer_marker = "timeoutMs);Promise.resolve().then(promiseFactory)"
+    if patched.count(timeout_timer_marker) != 1:
+        raise ValueError("APK scan timeout timer signature is not unique")
+    patched = patched.replace(
+        timeout_timer_marker,
+        "timeoutMs);watchdog.timerId=timer;Promise.resolve().then(promiseFactory)",
+        1,
+    )
     # Normalize the installed-app payload once so every native call receives
     # the constrained APK-set shape.  The base URI remains for old bridges.
     patched = patched.replace(
         "window.__slgSelectionMeta=e,r(e.uri)",
         "window.__slgSelectionMeta=Object.assign(e,{baseUri:e.baseUri||e.uri,splitUris:Array.isArray(e.splitUris)?e.splitUris:[],splitNames:Array.isArray(e.splitNames)?e.splitNames:[],splitCount:Number(e.splitCount||e.splitUris?.length||0)}),e=window.__slgSelectionMeta,e.splitCount&&O(`已复制基础 APK 与 ${e.splitCount} 个 split，准备合并扫描`,`info`),r(e.uri)",
+        1,
+    )
+    patched = patched.replace(
+        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{try{globalThis.localStorage?.setItem",
+        "loadSelectedApk=window.__slgLoadSelectedApk=e=>{e=normalizeSelection(e),window.__slgSelectionMeta=e,window.__slgScanWatchdog?.timerId&&window.clearTimeout(window.__slgScanWatchdog.timerId);try{globalThis.localStorage?.setItem",
         1,
     )
     patched = patched.replace(
@@ -795,6 +821,20 @@ function setReactInputValue(input,value)""",
     if runtime.count(local_return) != 1:
         raise ValueError("Local translation return signature not found")
     runtime = runtime.replace(local_return, local_return_new, 1)
+
+    scan_retry_start = runtime.find('if(payload.reason==="scan"){')
+    scan_retry_end = runtime.find('if(payload.reason==="network")', scan_retry_start)
+    if scan_retry_start < 0 or scan_retry_end < 0:
+        raise ValueError("Scan retry state signature not found")
+    scan_retry_section = runtime[scan_retry_start:scan_retry_end]
+    scan_retry_call = '()=>retryTask({fileName:payload.fileName,raw:""})'
+    if scan_retry_section.count(scan_retry_call) != 1:
+        raise ValueError("Scan retry action signature is not unique")
+    runtime = runtime[:scan_retry_start] + scan_retry_section.replace(
+        scan_retry_call,
+        '()=>retryTask({reason:"scan",fileName:payload.fileName,raw:""})',
+        1,
+    ) + runtime[scan_retry_end:]
 
     return runtime
 

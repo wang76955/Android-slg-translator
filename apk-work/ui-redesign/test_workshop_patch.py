@@ -116,23 +116,26 @@ def extract_js_expression(source: str, signature: str) -> str:
     escaped = False
     regex_class = False
     paren_depth = brace_depth = bracket_depth = 0
+    control_parens = []
+    closed_control_paren = False
     index = start
     while index < len(source):
         char = source[index]
         mode, template_boundary = contexts[-1]
         if mode == "regex":
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == "[":
-                    regex_class = True
-                elif char == "]":
-                    regex_class = False
-                elif char == "/" and not regex_class:
-                    contexts.pop()
-                index += 1
-                continue
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "[":
+                regex_class = True
+            elif char == "]":
+                regex_class = False
+            elif char == "/" and not regex_class:
+                contexts.pop()
+                regex_class = False
+            index += 1
+            continue
         if mode in ("single", "double", "template"):
             if escaped:
                 escaped = False
@@ -171,12 +174,28 @@ def extract_js_expression(source: str, signature: str) -> str:
                 or not previous_char
                 or previous_word
                 in {"return", "throw", "case", "delete", "void", "typeof", "yield", "await"}
+                or (previous_char == ")" and closed_control_paren)
             ):
                 contexts.append(("regex", None))
+                regex_class = False
         elif char == "(":
             paren_depth += 1
+            previous = index - 1
+            while previous >= start and source[previous].isspace():
+                previous -= 1
+            word_end = previous
+            while word_end >= start and (
+                source[word_end].isalnum() or source[word_end] in "_$"
+            ):
+                word_end -= 1
+            control_parens.append(
+                source[word_end + 1 : previous + 1]
+                in {"if", "while", "for", "with", "switch", "catch"}
+            )
+            closed_control_paren = False
         elif char == ")":
             paren_depth -= 1
+            closed_control_paren = bool(control_parens.pop()) if control_parens else False
         elif char == "{":
             brace_depth += 1
         elif char == "}":
@@ -191,7 +210,9 @@ def extract_js_expression(source: str, signature: str) -> str:
         elif char == "," and not (paren_depth or brace_depth or bracket_depth):
             return source[start:index]
         index += 1
-    return source[start:]
+    raise AssertionError(
+        f"top-level JavaScript expression terminator not found: {signature!r}"
+    )
 
 
 class WorkshopPatchContractTest(unittest.TestCase):
@@ -214,9 +235,13 @@ class WorkshopPatchContractTest(unittest.TestCase):
         self.assertEqual(block, source.split(" function next()")[0])
 
     def test_extract_js_expression_handles_regex_classes_escapes_and_division(self):
-        source = r"loader=()=>{const suffix=/\.rp(?:y|ym)c$/i;const literal=/}/;const classPattern=/[{}\\]/;const slash=/\//;const quotient=a / b;const message=`${literal} ${`inner ${quotient}`}`;return {suffix,literal,classPattern,slash,quotient,message}},next=()=>{}"
+        source = r"loader=()=>{if (ready) /[{}\\]/giu.test(value);const suffix=/\.rp(?:y|ym)c$/i;const literal=/}/;const classPattern=/[{}\\]/;const slash=/\//;const quotient=a / b;const conditional=ready?/}/:a / b;const message=`${literal} ${`inner ${quotient}`}`;return {suffix,literal,classPattern,slash,quotient,conditional,message}},next=()=>{}"
         expression = extract_js_expression(source, "loader=")
         self.assertEqual(expression, source.split(",next=")[0])
+
+    def test_extract_js_expression_fails_closed_without_top_level_terminator(self):
+        with self.assertRaisesRegex(AssertionError, "terminator not found"):
+            extract_js_expression("loader=()=>{return /[{}]/i}", "loader=")
 
     def test_canonical_extracted_assets_are_cryptographically_pinned(self):
         module = self.load_patch()
@@ -418,6 +443,15 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
 
         for token in (
             "loadSelectedApk=window.__slgLoadSelectedApk=e=>",
+            "normalizeSelection=e=>",
+            "s.baseUri=s.baseUri||s.uri",
+            "s.splitUris=splitUris",
+            "s.splitNames=splitNames",
+            "s.splitCount=Number(s.splitCount",
+            "s.packageName=s.packageName||\"\"",
+            "s.versionCode=s.versionCode??\"\"",
+            "s.source=s.source===\"installed\"",
+            "function retryScanTask(payload)",
             "Object.assign(e,{baseUri:e.baseUri||e.uri",
             "splitUris:Array.isArray(e.splitUris)",
             "splitNames:Array.isArray(e.splitNames)",
@@ -483,6 +517,7 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
         )
         loader_initializer = loader_expression[len("loadSelectedApk=") :]
         timeout_runtime = extract_js_expression(js, "withTimeout=") + ";"
+        normalize_runtime = extract_js_expression(js, "normalizeSelection=") + ";"
         scan_runtime = extract_js_expression(js, "scanSelectedApk=") + ";"
         xe_expression = extract_js_expression(js, "xe=async()=>")
         xe_initializer = xe_expression[len("xe=") :]
@@ -514,7 +549,8 @@ const E={{
   getApkPackageName:async input=>{{calls.push([`package`,input.uri]);return{{packageName:`fallback.pkg`}}}},
   pickApkFile:async()=>{{calls.push([`pick`]);return{{uri:`file://picked.apk`,name:`Picked.apk`}}}},
 }};
-let withTimeout,scanSelectedApk;
+let normalizeSelection,withTimeout,scanSelectedApk;
+{normalize_runtime}
 {timeout_runtime}
 {scan_runtime}
 const loadSelectedApk={loader_initializer};
@@ -541,6 +577,9 @@ async function main(){{
   await xe();
   check(calls[0][0]===`pick`&&calls[1][0]===`list`&&calls[1][1]===`file://picked.apk`,`real file picker enters shared URI scanner`);
   check(uri===`file://picked.apk`&&name===`Picked.apk`,`file selection metadata loaded`);
+  check(window.__slgSelectionMeta.uri===`file://picked.apk`&&window.__slgSelectionMeta.baseUri===`file://picked.apk`,`file SourceSet preserves uri and baseUri`);
+  check(Array.isArray(window.__slgSelectionMeta.splitUris)&&window.__slgSelectionMeta.splitUris.length===0&&Array.isArray(window.__slgSelectionMeta.splitNames)&&window.__slgSelectionMeta.splitNames.length===0&&window.__slgSelectionMeta.splitCount===0,`file SourceSet preserves empty split fields`);
+  check(window.__slgSelectionMeta.packageName===``&&window.__slgSelectionMeta.versionCode===``&&window.__slgSelectionMeta.source===`file`,`file SourceSet defines package version and source`);
   check(entries.length===1&&failure===null&&progress.length===0,`old task reset`);
 
   E.listApkEntries=async input=>{{calls.push([`list`,input.uri]);return{{entries:[],scanDurationMs:5}}}};
@@ -613,6 +652,76 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         result = subprocess.run(
             ["node", "--input-type=module"],
             input=filter_runtime + list_runtime + choose_runtime + snapshot_runtime + render_runtime + behavior_contract,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_scan_retry_reuses_current_sourceset_and_replaces_watchdog(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        loader = extract_js_expression(
+            js, "loadSelectedApk=window.__slgLoadSelectedApk="
+        )
+        loader = loader[len("loadSelectedApk=") :]
+        helper = "\n".join(
+            (
+                extract_js_expression(js, "normalizeSelection=") + ";",
+                extract_js_expression(js, "withTimeout=") + ";",
+                extract_js_expression(js, "scanSelectedApk=") + ";",
+            )
+        )
+        retry_runtime = "\n".join(
+            (
+                extract_js_function(js, "function retryScanTask(payload)"),
+                extract_js_function(js, "function retryTask(payload)"),
+            )
+        )
+        contract = rf'''
+function check(condition,label){{if(!condition)throw new Error(label)}}
+globalThis.window=globalThis;
+let now=1000;Date.now=()=>now;
+const timers=[];window.setTimeout=(callback,delay)=>{{timers.push({{callback,delay,at:now+delay,cleared:false}});return timers.length}};window.clearTimeout=id=>{{if(timers[id-1])timers[id-1].cleared=true}};
+window.__slgScanTimeoutMs=65000;
+const scanning=[],entries=[],logs=[],requests=[];let uri="",name="",pkg="",failure=null;const he={{current:[]}};
+function r(value){{uri=value}} function a(value){{name=value}} function s(value){{entries.splice(0,entries.length,...value)}} function p(value){{pkg=value}}
+function fe(value){{failure=value}} function w(){{}} function d(value){{scanning.push(value)}} function O(value){{logs.push(value)}}
+function Jo(value){{return value}} function Oe(){{return{{rpy:1}}}} const ds={{rpy:"rpy"}},c="all",g="zh";
+const E={{listApkEntries(input){{return new Promise((resolve,reject)=>requests.push({{input,resolve,reject}}))}},getApkPackageName:async()=>({{packageName:""}})}};
+let normalizeSelection,withTimeout,scanSelectedApk;
+{helper}
+const loadSelectedApk={loader};const loadCalls=[];window.__slgLoadSelectedApk=selection=>{{loadCalls.push(selection);return loadSelectedApk(selection)}};
+let retrying=false,lastSnapshot="",settingsOpen=false,refreshes=0,triggered=0,states=[];
+function refresh(){{refreshes+=1}} function setWorkshopState(state,payload){{states.push({{state,payload}})}}
+function triggerReactButton(){{triggered+=1}} const sourceButton={{}};const startButton=null;
+{retry_runtime}
+async function main(){{
+ const selection={{uri:"file://retry.apk",baseUri:"file://retry.apk",splitUris:[],splitNames:[],splitCount:0,packageName:"retry.pkg",versionCode:9,source:"file",name:"Retry.apk"}};
+ const first=window.__slgLoadSelectedApk(selection);await Promise.resolve();await Promise.resolve();
+ check(requests.length===1&&scanning.at(-1)===true,"initial scan starts through shared loader");
+ const oldWatchdog=window.__slgScanWatchdog,oldTimer=timers[0],oldEpoch=window.__slgSelectionEpoch;
+ retryTask({{reason:"scan",fileName:"Retry.apk",raw:""}});
+ await Promise.resolve();await Promise.resolve();
+ const newWatchdog=window.__slgScanWatchdog;
+ check(requests.length===2&&window.__slgSelectionEpoch>oldEpoch&&oldWatchdog!==newWatchdog&&oldTimer.cleared,"scan retry replaces and invalidates old watchdog");
+ check(triggered===0&&states.at(-1).state==="scanning","scan retry does not click the React start or file button");
+ const retried=loadCalls[1];
+ check(retried.uri===selection.uri&&retried.baseUri===selection.baseUri&&retried.splitUris.length===0&&retried.splitNames.length===0&&retried.splitCount===0&&retried.packageName===selection.packageName&&retried.versionCode===9&&retried.source==="file","scan retry reuses complete current SourceSet");
+ requests[0].resolve({{entries:[{{name:"stale",fileType:"rpy"}}]}});
+ await first;
+ requests[1].resolve({{entries:[{{name:"current",fileType:"rpy"}}]}});
+ await Promise.resolve();await Promise.resolve();
+ check(entries[0].name==="current"&&window.__slgScanWatchdog===newWatchdog&&window.__slgSelectionError===null,"stale watchdog settlement cannot overwrite retried scan");
+}}
+main().catch(error=>{{console.error(error);process.exitCode=1}})
+'''
+        result = subprocess.run(
+            ["node", "--input-type=module"],
+            input=contract,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -715,21 +824,17 @@ check(search.focusCalls>=4,`choose failure re-show can focus a valid target`);
         self.assertIn("enableWorkshopBackHandling", js)
         self.assertIn("function openSettings(){armModalHistory()", js)
         self.assertIn("if(settingsOpen){modalHistoryArmed=false;closeSettings(true);return}", js)
-        helper_start = js.index("function armModalHistory()")
-        helper_end = js.index("function filterInstalledApps(", helper_start)
-        helpers = js[helper_start:helper_end]
-        settings_start = js.index("function closeSettings(")
-        settings_end = js.index("function openSettings()", settings_start)
-        settings_close = js[settings_start:settings_end]
-        installed_start = js.index("function closeInstalledApps(")
-        installed_end = js.index("function findButton(", installed_start)
-        installed_close = js[installed_start:installed_end]
-        pop_start = js.index("function handleWorkshopPopState()")
-        pop_end = js.index("function schedule()", pop_start)
-        pop_handler = js[pop_start:pop_end]
-        start = js.index("window.__slgHandleAndroidBack=")
-        end = js.index('document.addEventListener("click"', start)
-        handler = js[start:end]
+        helpers = "\n".join(
+            (
+                extract_js_function(js, "function armModalHistory()"),
+                extract_js_function(js, "function releaseModalHistory()"),
+                extract_js_function(js, "function closeSourceChooser("),
+            )
+        )
+        settings_close = extract_js_function(js, "function closeSettings(")
+        installed_close = extract_js_function(js, "function closeInstalledApps(")
+        pop_handler = extract_js_function(js, "function handleWorkshopPopState()")
+        handler = extract_js_function(js, "window.__slgHandleAndroidBack=")
         contract = r'''
 function check(value,label){if(!value)throw new Error(label)}
 globalThis.window=globalThis;
@@ -796,6 +901,7 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         self.assertNotIn("withTimeout(E.listApkEntries", js)
         helper = "\n".join(
             (
+                extract_js_expression(js, "normalizeSelection=") + ";",
                 extract_js_expression(js, "withTimeout=") + ";",
                 extract_js_expression(js, "scanSelectedApk=") + ";",
             )
@@ -807,7 +913,9 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         render_state = extract_js_function(js, "function renderStateBody(state,payload)")
         contract = rf'''
 globalThis.window=globalThis;
-const timers=[];window.setTimeout=(callback,delay)=>{{timers.push({{callback,delay,cleared:false}});return timers.length}};window.clearTimeout=id=>{{timers[id-1].cleared=true}};
+let now=100000;Date.now=()=>now;
+const timers=[];window.setTimeout=(callback,delay)=>{{timers.push({{callback,delay,at:now+delay,cleared:false,fired:false}});return timers.length}};window.clearTimeout=id=>{{if(timers[id-1])timers[id-1].cleared=true}};
+function advance(ms){{now+=ms;for(const timer of timers)if(!timer.cleared&&!timer.fired&&timer.at<=now){{timer.fired=true;timer.callback()}}}}
 window.__slgScanTimeoutMs=65000;
 const scanning=[];let uri=``,name=``,entries=[],pkg=``,failure=null;const logs=[];
 function r(v){{uri=v}} function a(v){{name=v}} function s(v){{entries=v}} function p(v){{pkg=v}}
@@ -815,7 +923,7 @@ function fe(v){{failure=v}} const he={{current:[]}};function w(){{}} function d(
 function Jo(v){{return v}} function Oe(){{return {{rpy:1}}}} const ds={{rpy:`rpy`}},c=`all`,g=`zh`;
 let mode=`pending`,lateResolve;
 const E={{listApkEntries(){{if(mode===`pending`)return new Promise(resolve=>lateResolve=resolve);if(mode===`reject`)return Promise.reject(new Error(`native reject`));return Promise.resolve({{entries:[{{name:`fresh`,fileType:`rpy`}}]}})}},getApkPackageName:async()=>({{packageName:``}})}};
-let withTimeout,scanSelectedApk;
+let normalizeSelection,withTimeout,scanSelectedApk;
 {helper}
 const loadSelectedApk={loader};
 function textNode(tag,cls,text){{return{{tag,cls,textContent:text,children:[],style:{{}},append(...nodes){{this.children.push(...nodes)}},setAttribute(){{}}}}}}
@@ -827,12 +935,14 @@ function triggerReactButton(){{}} const sourceButton=null,startButton=null,insta
 async function main(){{
  if(window.__slgScanTimeoutMs!==65000)throw new Error(`production deadline is not observable`);
  const pending=loadSelectedApk({{uri:`pending`,name:`Pending.apk`}});
- if(timers.length!==1||timers[0].delay!==65000)throw new Error(`deadline timer contract`);
+  if(timers.length!==1||timers[0].delay!==65000||window.__slgScanWatchdog.deadlineAt!==165000)throw new Error(`deadline timer contract`);
  await Promise.resolve();
  if(scanning.at(-1)!==true)throw new Error(`scan did not start before deadline`);
- timers[0].callback();
+  advance(64999);await Promise.resolve();
+  if(window.__slgSelectionError!==null||timers[0].fired)throw new Error(`deadline fired before exact fake time`);
+  advance(1);await Promise.resolve();
  let timeout=``;try{{await pending}}catch(e){{timeout=e.message}}
- if(!timeout.includes(`\u8d85\u65f6`)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout)throw new Error(`timeout contract`);
+  if(!timeout.includes(`\u8d85\u65f6`)||scanning.at(-1)!==false||window.__slgSelectionError?.message!==timeout||!timers[0].cleared||!timers[0].fired)throw new Error(`timeout contract`);
  const failedBody=renderStateBody(`failed`,{{reason:`scan`,fileName:`Pending.apk`,raw:timeout}}),failedButtons=[];
  function visit(node){{if(!node)return;if(node.tag===`button`)failedButtons.push(node);for(const child of node.children||[])visit(child)}}
  visit(failedBody);
@@ -859,9 +969,14 @@ main().catch(e=>{{console.error(e);process.exitCode=1}})
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        declaration_start = js.index("withTimeout=(")
-        declaration_end = js.index(",xe=async()=>", declaration_start)
-        declarations = js[declaration_start:declaration_end]
+        declarations = "\n".join(
+            (
+                extract_js_expression(js, "normalizeSelection=") + ";",
+                extract_js_expression(js, "withTimeout=") + ";",
+                extract_js_expression(js, "scanSelectedApk=") + ";",
+                extract_js_expression(js, "loadSelectedApk=window.__slgLoadSelectedApk=") + ";",
+            )
+        )
         contract = rf'''
 function check(value,label){{if(!value)throw new Error(label)}}
 globalThis.window=globalThis;window.__slgScanTimeoutMs=25;
@@ -952,13 +1067,21 @@ async function main(){
   listResolvers[0].resolve({apps:[{label:`Old`,packageName:`old.pkg`}]});await first;
   check(installedApps.length===1&&installedApps[0].packageName===`new.pkg`,`slow old list cannot overwrite fast new list`);
 
+  installedDialog.hidden=false;installedError=``;
+  const oldReject=loadInstalledApps(),currentResolve=loadInstalledApps();
+  listResolvers[3].resolve({apps:[{label:`Current`,packageName:`current.pkg`}]});await currentResolve;
+  listResolvers[2].reject(new Error(`stale list failed`));await oldReject;
+  check(installedApps.length===1&&installedApps[0].packageName===`current.pkg`&&installedError===``,`stale list rejection cannot overwrite current list`);
+  const currentReject=loadInstalledApps();listResolvers[4].reject(new Error(`current list failed`));await currentReject;
+  check(installedError===`current list failed`&&installedApps[0].packageName===`current.pkg`,`current list rejection surfaces error`);
+
   const beforeClose=installedApps;
   const closing=loadInstalledApps();closeInstalledApps(true);listResolvers[2].resolve({apps:[{label:`Closed stale`,packageName:`closed.pkg`}]});await closing;
   check(installedDialog.hidden&&installedApps===beforeClose,`closed dialog invalidates pending list response`);
 
   installedDialog.hidden=false;installedApps=[{label:`One`,packageName:`one.pkg`},{label:`Two`,packageName:`two.pkg`}];installedError=``;
-  const chooseResolvers={};
-  window.Capacitor.Plugins.FileManager.selectInstalledApp=({packageName})=>new Promise((resolve,reject)=>{chooseResolvers[packageName]={resolve,reject}});
+  const chooseResolvers=[];
+  window.Capacitor.Plugins.FileManager.selectInstalledApp=({packageName})=>new Promise((resolve,reject)=>{chooseResolvers.push({packageName,resolve,reject})});
   const loaded=[];window.__slgLoadSelectedApk=async selection=>{loaded.push(selection)};
   const chooseOne=chooseInstalledApp(installedApps[0]);
   const chooseTwo=chooseInstalledApp(installedApps[1]);
@@ -967,11 +1090,23 @@ async function main(){
   check(findNodes(content.children,node=>node.tag===`button`).every(button=>button.disabled),`busy disables rows and source operations`);
   check(cancelAction.disabled,`busy disables modal source cancellation action`);
   check(findNode(content.children,node=>node.cls===`workshop-installed-status`),`busy copy is visible`);
-  chooseResolvers[`two.pkg`].resolve({uri:`file://two.apk`,baseUri:`file://two.apk`,splitUris:[],splitNames:[],splitCount:0,name:`Two.apk`,packageName:`two.pkg`,versionCode:2,source:`installed`});await chooseTwo;
-  chooseResolvers[`one.pkg`].reject(new Error(`stale select failed`));await chooseOne;
-  check(loaded.length===1&&loaded[0].packageName===`two.pkg`,`stale choose rejection cannot close or load`);
+  chooseResolvers[1].resolve({uri:`file://two.apk`,baseUri:`file://two.apk`,splitUris:[],splitNames:[],splitCount:0,name:`Two.apk`,packageName:`two.pkg`,versionCode:2,source:`installed`});await chooseTwo;
+  chooseResolvers[0].resolve({uri:`file://one.apk`,baseUri:`file://one.apk`,splitUris:[],splitNames:[],splitCount:0,name:`One.apk`,packageName:`one.pkg`,versionCode:1,source:`installed`});await chooseOne;
+  check(loaded.length===1&&loaded[0].packageName===`two.pkg`,`stale choose resolution cannot close or load`);
   check(loaded[0].uri===`file://two.apk`&&loaded[0].baseUri===`file://two.apk`&&loaded[0].splitCount===0&&loaded[0].versionCode===2&&loaded[0].source===`installed`,`new selection preserves complete SourceSet`);
   check(installedError===``,`stale choose rejection cannot render error`);
+
+  installedDialog.hidden=false;installedError=``;installedBusy=false;
+  const chooseThree=chooseInstalledApp(installedApps[0]);
+  const chooseFour=chooseInstalledApp(installedApps[1]);
+  chooseResolvers[3].resolve({uri:`file://four.apk`,baseUri:`file://four.apk`,splitUris:[],splitNames:[],splitCount:0,name:`Four.apk`,packageName:`four.pkg`,versionCode:4,source:`installed`});await chooseFour;
+  chooseResolvers[2].reject(new Error(`stale select failed`));await chooseThree;
+  check(loaded.length===2&&loaded[1].packageName===`four.pkg`&&installedError===``,`stale choose rejection cannot replace current selection`);
+
+  installedDialog.hidden=false;installedError=``;installedBusy=false;
+  const currentChooseReject=chooseInstalledApp(installedApps[0]);
+  chooseResolvers[4].reject(new Error(`current select failed`));await currentChooseReject;
+  check(installedError===`current select failed`&&!installedDialog.hidden,`current selection rejection surfaces error`);
 
   installedDialog.hidden=false;installedApps=[];installedLoading=false;installedError=``;installedBusy=false;renderInstalledApps();
   check(findNode(content.children,node=>node.cls===`workshop-installed-status`),`complete empty guidance`);
@@ -1088,9 +1223,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        start = js.index("function mount(){")
-        end = js.index("function handleWorkshopPopState(){", start)
-        mount_runtime = js[start:end]
+        mount_runtime = extract_js_function(js, "function mount(){")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
@@ -1521,12 +1654,8 @@ async function main(){
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
-        start = js.index("function triggerReactButton(button)")
-        end = js.index("function sourceText()", start)
-        trigger_runtime = js[start:end]
-        render_start = js.index("function renderStateBody(state,payload)")
-        render_end = js.index("function setWorkshopState(state,payload={})", render_start)
-        render_runtime = js[render_start:render_end]
+        trigger_runtime = extract_js_function(js, "function triggerReactButton(button)")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 let dispatched=[];
