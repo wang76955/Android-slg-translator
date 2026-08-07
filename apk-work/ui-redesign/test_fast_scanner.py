@@ -1250,6 +1250,163 @@ public final class WorkshopBackHandlerHarness {
         self.assertIn(".method public final listSaveGameApps(Lcom/getcapacitor/PluginCall;)V", builder)
         self.assertIn("Lcom/slgtranslator/app/InstalledAppSource;->listSaveGameApps", builder)
 
+        # Execute the worker against a temporary shared-storage root.  The
+        # repository stubs do not retain JSObject values, so this fixture uses
+        # equivalent test-only Capacitor/Environment stubs and compiles the
+        # actual InstalledAppSource.java unchanged.
+        custom_stubs = {
+            "android/os/Environment.java": r'''
+package android.os;
+import java.io.File;
+public final class Environment {
+    public static File getExternalStorageDirectory() {
+        return new File(System.getProperty("test.external.root"));
+    }
+}
+''',
+            "com/getcapacitor/JSObject.java": r'''
+package com.getcapacitor;
+import java.util.LinkedHashMap;
+import java.util.Map;
+public class JSObject {
+    public final Map<String,Object> values = new LinkedHashMap<>();
+    public JSObject put(String key, Object value) { values.put(key, value); return this; }
+}
+''',
+            "com/getcapacitor/JSArray.java": r'''
+package com.getcapacitor;
+import java.util.ArrayList;
+import java.util.List;
+public class JSArray {
+    public final List<Object> values = new ArrayList<>();
+    public void put(Object value) { values.add(value); }
+    public int length() { return values.size(); }
+}
+''',
+            "com/getcapacitor/PluginCall.java": r'''
+package com.getcapacitor;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+public class PluginCall {
+    public JSObject resolved;
+    public String rejected;
+    private final CountDownLatch done = new CountDownLatch(1);
+    public String getString(String key) { return null; }
+    public JSArray getArray(String key) { return null; }
+    public void resolve(JSObject value) { resolved = value; done.countDown(); }
+    public void reject(String message) { rejected = message; done.countDown(); }
+    public boolean await() throws InterruptedException { return done.await(5, TimeUnit.SECONDS); }
+}
+''',
+        }
+        harness = r'''
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.InstalledAppSource;
+import java.io.File;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+public final class SaveGameListHarness {
+    public static void main(String[] args) throws Exception {
+        File root = new File(args[0]);
+        File saves = new File(root, "Documents/RenPy_Saves");
+        require(new File(saves, "zitao.mbml").mkdirs(), "create first save directory");
+        require(new File(saves, "cim.isekai.game").mkdirs(), "create second save directory");
+        require(new File(saves, "README").mkdirs(), "create non-package directory");
+        require(new File(saves, "ignored.game").createNewFile(), "create non-directory package-shaped entry");
+
+        TestPackageManager packageManager = new TestPackageManager();
+        packageManager.labels.put("zitao.mbml", "Game One");
+        packageManager.labels.put("cim.isekai.game", "Game Two");
+        TestContext context = new TestContext(packageManager, "host.translator");
+        PluginCall call = new PluginCall();
+        InstalledAppSource.listSaveGameApps(context, call);
+        require(call.await(), "save-game worker must settle");
+        require(call.rejected == null, "save-game worker must resolve: " + call.rejected);
+        JSArray apps = (JSArray) call.resolved.values.get("apps");
+        require(apps != null && apps.length() == 2, "only two save directories should be returned");
+        Set<String> packages = new HashSet<>();
+        for (Object value : apps.values) {
+            packages.add(String.valueOf(((JSObject) value).values.get("packageName")));
+        }
+        require(packages.contains("zitao.mbml") && packages.contains("cim.isekai.game"), "returned package names: " + packages);
+        System.out.println("save-game-packages=" + packages);
+        System.exit(0);
+    }
+
+    private static final class TestContext extends Context {
+        private final PackageManager packageManager;
+        private final String packageName;
+        TestContext(PackageManager packageManager, String packageName) {
+            this.packageManager = packageManager;
+            this.packageName = packageName;
+        }
+        @Override public PackageManager getPackageManager() { return packageManager; }
+        @Override public String getPackageName() { return packageName; }
+    }
+
+    private static final class TestPackageManager extends PackageManager {
+        final Map<String,String> labels = new HashMap<>();
+        @Override public ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException {
+            if (!labels.containsKey(packageName)) throw new NameNotFoundException();
+            ApplicationInfo info = new ApplicationInfo();
+            info.packageName = packageName;
+            return info;
+        }
+        @Override public CharSequence getApplicationLabel(ApplicationInfo info) { return labels.get(info.packageName); }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="save-game-list-test-") as temporary:
+            temporary_path = Path(temporary)
+            external_root = temporary_path / "external"
+            external_root.mkdir()
+            classes = temporary_path / "classes"
+            classes.mkdir()
+            source_paths = []
+            for relative, content in custom_stubs.items():
+                path = temporary_path / "custom-stubs" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                source_paths.append(path)
+            harness_path = temporary_path / "SaveGameListHarness.java"
+            harness_path.write_text(harness, encoding="utf-8")
+            repository_stubs = [
+                path for path in sorted((FAST_SCAN / "stubs").rglob("*.java"))
+                if path.name not in {"Environment.java", "JSObject.java", "JSArray.java", "PluginCall.java"}
+            ]
+            compile_result = subprocess.run(
+                [
+                    str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes), "-classpath", third_party_classpath(),
+                    *map(str, repository_stubs), *map(str, source_paths),
+                    str(INSTALLED_APPS), str(FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java"),
+                    str(harness_path),
+                ],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            result = subprocess.run(
+                [
+                    str(JAVA), f"-Dtest.external.root={external_root}",
+                    "-cp", str(classes), "SaveGameListHarness", str(external_root),
+                ],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertIn("zitao.mbml", result.stdout)
+            self.assertIn("cim.isekai.game", result.stdout)
+
     def test_installed_app_contract_detects_copy_buffer_regression(self):
         source = INSTALLED_APPS.read_text("utf-8")
         broken = source.replace("1024 * 1024", "8192", 1)

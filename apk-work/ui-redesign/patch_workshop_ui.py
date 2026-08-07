@@ -596,6 +596,11 @@ def patch_saves_runtime(js: str) -> str:
             1,
         )
     saves_new = saves_new.replace(
+        'share.onclick=async()=>{share.disabled=true;',
+        'share.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}share.disabled=true;',
+        1,
+    )
+    saves_new = saves_new.replace(
         'exportBtn.onclick=async()=>{const pkg=saveExportGamePackage;if(!pkg)return;',
         'exportBtn.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}const pkg=saveExportGamePackage;if(!pkg)return;',
         1,

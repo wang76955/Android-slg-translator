@@ -503,12 +503,22 @@ Current focused GREEN result: `Ran 7 tests in 0.977s`, `OK` — 7 PASS, 0 failur
 Task 6 was revalidated with the exact five workshop tests and four native/scanner contracts from the brief. The initial RED command ran before changing either the focused tests or the save-transfer runtime:
 
 ```powershell
-python -m unittest [the nine exact test names below] -v
+Set-Location 'D:\文件翻译\apk-work\ui-redesign'
+python -m unittest `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_settings_runtime_contract `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_pick_game_from_installed_apps `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_import_shared_archive `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent `
+  test_fast_scanner.FastApkScannerContractTest.test_save_game_list_scans_renpy_save_dirs_without_all_apps `
+  test_fast_scanner.FastApkScannerContractTest.test_save_export_zips_directory_and_counts_files `
+  test_fast_scanner.FastApkScannerContractTest.test_save_import_extracts_shared_archive_safely `
+  test_fast_scanner.FastApkScannerContractTest.test_delete_backup_removes_directory_tree -v
 ```
 
-Initial RED evidence: `Ran 9 tests in 11.599s`, `FAILED (failures=5)`. The five failures were UI/fixture boundary failures: the settings contract expected stale mojibake labels, and four Node behavior harnesses failed with JavaScript `SyntaxError` before any plugin method call. The four scanner/native contracts passed (`....`), so no native bridge change was justified at that boundary.
+Initial RED evidence after writing the behavior tests and before the production edit: the focused five-test command ran `Ran 5 tests in 0.615s` and failed with one error in `test_save_transfer_runtime_actions_and_state_gating`; the diagnostic was `scanning busy actions must not call native methods: {"before":[0,0,0,0,1,0,0,2],"after":[0,0,1,0,1,0,0,2]}`. The changed counter was `share`, proving the missing busy guard in the generated action. The temporary JVM save-directory fixture was then run independently and passed, so no `SaveTransfer.java` edit was justified.
 
-After correcting only the focused harness literals and adding the independent-state/busy/error assertions, the required workshop cluster remained RED as expected: `Ran 5 tests`, `FAILED (failures=3)`. The remaining failures were the missing product variables/busy gate and an archive-row fixture label; the corrected picker and independent-selection behaviors were already executable.
+The test-only harness corrections were limited to executable DOM/stub setup: `textNode`/`buildLocalEngineSection` for the settings runtime and temporary `Environment`/Capacitor result stubs plus `InstalledApkSet.java` for the JVM scan. After those corrections, the remaining RED was the single production `share` busy-gate failure above.
 
 ### WSP-27 `test_save_transfer_settings_runtime_contract`
 
@@ -520,19 +530,19 @@ After correcting only the focused harness literals and adding the independent-st
 - Classification: `PRODUCT_REGRESSION`
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
 - Red evidence: initial nine-test command (`failures=5`) followed by the focused five-test command after fixture correction (`failures=3`).
-- Green evidence: exact nine-test command below, `Ran 9 tests in 12.369s`, `OK`.
+- Green evidence: exact nine-test command below, `Ran 9 tests in 13.892s`, `OK`.
 
 ### WSP-28 `test_save_transfer_runtime_actions_and_state_gating`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating -v`
-- First effective failure: Node `SyntaxError: missing ) after argument list` in the old mojibake fixture; after fixture correction, the new RED failure was `Error: busy save action is rejected without a native call`.
+- First effective failure: the behavior harness reported `share` native calls increasing during `scanning` (`before ... [0,0,0,0,1,0,0,2]`, `after ... [0,0,1,0,1,0,0,2]`).
 - Expected behavior: export/restore/share/delete are disabled or return an explicit busy error during `scanning`, `translating`, and `patching`; native errors remain visible and do not change the export selection.
-- Observed behavior: actions worked when idle but had no explicit runtime gate; native error visibility and selection preservation were not previously executable in this fixture.
+- Observed behavior: export/restore/delete had the gate, but `share.onclick` still entered the native call path during busy states; native error visibility and selection preservation were not previously executable in this fixture.
 - Authority: Task 6 brief; `saveTransferBusy()`, `updateSavesState()`, and action handlers.
 - Classification: `PRODUCT_REGRESSION` with an initial `FIXTURE_GAP`.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
-- Red evidence: focused five-test command after fixture correction (`failures=3`), including the busy-action error above.
-- Green evidence: exact focused test and exact nine-test command both report `OK`; the harness also asserts a rejected native export error is visible and `saveExportGamePackage` is unchanged.
+- Red evidence: the focused five-test command (`Ran 5 tests in 0.615s`, one failure) with the exact counter diagnostic above.
+- Green evidence: exact focused test and exact nine-test command both report `OK`; the harness covers `scanning`, `translating`, and `patching`, all eight save/archive/picker actions, no native-call count increase, visible busy text, retained selectors, and idle export recovery. It also asserts a rejected native export error is visible and `saveExportGamePackage` is unchanged.
 
 ### WSP-29 `test_save_transfer_can_pick_game_from_installed_apps`
 
@@ -556,7 +566,7 @@ After correcting only the focused harness literals and adding the independent-st
 - Classification: `FIXTURE_GAP` plus `PRODUCT_REGRESSION` for missing independent URI/target wiring.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
 - Red evidence: initial nine-test command and corrected five-test command (`failures=3`).
-- Green evidence: exact focused test and exact nine-test command report `OK`; the harness verifies selected path, independent target update, archive removal, visible success text, and reset button state.
+- Green evidence: exact focused test and exact nine-test command report `OK`; the harness verifies `path === "/downloads/first.zip"` and `packageName === "cim.isekai.game"` on native import, clears the one-shot URI after success and rejection, preserves import target/label/selector and export package/label/selector on rejection, leaves the archive row retryable, then removes only the successfully imported row.
 
 ### WSP-31 `test_save_and_import_game_selection_are_independent`
 
@@ -568,25 +578,68 @@ After correcting only the focused harness literals and adding the independent-st
 - Classification: `FIXTURE_GAP` with contract hardening.
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`.
 - Red evidence: initial nine-test command; the corrected cluster passed before product changes.
-- Green evidence: exact focused test and exact nine-test command report `OK`, including both selector values after changing the import target.
+- Green evidence: exact focused test and exact nine-test command report `OK`; the harness checks both directions: import `cim.isekai.game` then export `zitao.mbml`, followed by export `com.yishijietiantang.com` then import `zitao.mbml`, preserving package, label, and selector in the opposite view each time.
 
 ### Task 6 native/scanner contracts
 
-The following four tests passed in the initial RED run and in the final exact nine-test run:
+The following four tests passed in the final exact nine-test run:
 
 - `test_save_game_list_scans_renpy_save_dirs_without_all_apps`
 - `test_save_export_zips_directory_and_counts_files`
 - `test_save_import_extracts_shared_archive_safely`
 - `test_delete_backup_removes_directory_tree`
 
-`SaveTransfer.java` was inspected before any Java edit. Its public methods and private ZIP/copy/delete helpers matched the test contracts, and the JVM harnesses compile the Java source against the repository stubs before executing the reflection/ZIP assertions. This is native/JVM contract evidence only: it does not prove Capacitor registration on a built APK, Android scoped-storage behavior, a real shared URI, an Android device, or end-to-end UI rendering.
+`SaveTransfer.java` was inspected before any Java edit. Its public methods and private ZIP/copy/delete helpers matched the test contracts, and the JVM harnesses compile the Java source against the repository stubs before executing the reflection/ZIP assertions. `test_save_game_list_scans_renpy_save_dirs_without_all_apps` now also compiles the actual `InstalledAppSource.java` and `InstalledApkSet.java` against temporary test-only `Environment`, `JSObject`, `JSArray`, and `PluginCall` stubs, creates a temporary `Documents/RenPy_Saves` tree, and prints the two returned package names. This is native/JVM contract evidence only: it does not prove Capacitor registration on a built APK, Android scoped-storage behavior, a real shared URI, MediaStore, an Android device, or end-to-end UI rendering.
 
 ### Task 6 final exact evidence
 
 ```text
-python -m unittest [the nine exact test names above] -v
-Ran 9 tests in 12.369s
+Set-Location 'D:\文件翻译\apk-work\ui-redesign'
+python -m unittest `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_settings_runtime_contract `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_runtime_actions_and_state_gating `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_pick_game_from_installed_apps `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_transfer_can_import_shared_archive `
+  test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent `
+  test_fast_scanner.FastApkScannerContractTest.test_save_game_list_scans_renpy_save_dirs_without_all_apps `
+  test_fast_scanner.FastApkScannerContractTest.test_save_export_zips_directory_and_counts_files `
+  test_fast_scanner.FastApkScannerContractTest.test_save_import_extracts_shared_archive_safely `
+  test_fast_scanner.FastApkScannerContractTest.test_delete_backup_removes_directory_tree -v
+Ran 9 tests in 13.892s
 OK
 ```
 
 The final Task 6 change set is limited to the focused workshop test, patch-generation source, and this inventory document. No `SaveTransfer.java` change was required.
+
+### Task 6 review-remediation verification boundaries
+
+- `test_save_transfer_settings_runtime_contract`: executes the generated `openSettings()`/`closeSettings()` runtime with the real patched settings function body. It checks hidden state for the task shell, settings shell, save view, and import view; checks save/import action buttons; and proves `manualIdle` returns to its pre-overlay value while the `translating` task state is unchanged. It is a Node fixture, not a Capacitor or Android view.
+- `test_save_transfer_runtime_actions_and_state_gating`: executes generated save/import action handlers for `scanning`, `translating`, and `patching`. It covers export, restore, share, delete, archive list, archive import, archive delete, and import game picker. Each action must leave native counters unchanged, expose busy text, and preserve both selections; the same fixture proves export works again after returning to idle.
+- `test_save_transfer_can_pick_game_from_installed_apps`: executes the save-aware picker and asserts one `listSaveGameApps` call, zero all-installed fallback calls, and package/label/selector propagation into the export side.
+- `test_save_transfer_can_import_shared_archive`: executes both rejecting and successful native import branches. The native spy receives the hand-selected archive URI and independent `cim.isekai.game` package, the URI is cleared after each one-shot attempt, rejection remains visible and retryable, and neither import nor export selection is polluted.
+- `test_save_and_import_game_selection_are_independent`: executes both ordering directions and asserts independent package, label, and selector values rather than only static variable names.
+- `test_save_game_list_scans_renpy_save_dirs_without_all_apps`: runs the temporary Java/JVM fixture described above; the static source assertions remain only as supplemental bridge/build-contract checks. The other three scanner tests execute the existing Java reflection/ZIP/delete fixtures.
+
+Related overlay/JavaScript verification from the shared checkout:
+
+```powershell
+Set-Location 'D:\文件翻译\apk-work\ui-redesign'
+python -m unittest `
+  test_workshop_patch.WorkshopPatchContractTest.test_patched_javascript_is_syntactically_valid `
+  test_workshop_patch.WorkshopPatchContractTest.test_source_modals_handle_android_back_focus_and_file_fallback `
+  test_workshop_patch.WorkshopPatchContractTest.test_native_android_back_handler_consumes_only_visible_overlays `
+  test_workshop_patch.WorkshopPatchContractTest.test_overlay_close_preserves_manual_idle_state -v
+```
+
+Result: `Ran 4 tests`, `OK`. The separate pre-existing `test_task_runtime_bridges_and_recovery_contract` failure is outside Task 6; it asserts an older generic save-copy token and was not changed by this remediation.
+
+The complete scanner module was also run from the same working directory:
+
+```powershell
+Set-Location 'D:\文件翻译\apk-work\ui-redesign'
+python -m unittest test_fast_scanner.py -v
+```
+
+Result: `Ran 70 tests in 107.755s`, `FAILED (failures=1)`. The sole failure was the existing `test_workshop_patch_propagates_activation_mode_and_guidance` assertion for a Chinese activation-guidance token at `test_fast_scanner.py:1892`; it is outside Task 6, was not caused by the save-transfer changes, and was not modified. All Task 6 scanner contracts, including the executable Ren'Py save-directory JVM fixture, passed in the exact nine-test command above. This full-module result must not be reported as a Task 6 regression.
+
+No `SaveTransfer.java` change was made because the public bridge methods and JVM helper contracts matched. None of the Node/JVM results should be described as a real APK, Capacitor registration, MediaStore/scoped-storage, Android device, or real-game result.

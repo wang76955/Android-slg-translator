@@ -1595,7 +1595,7 @@ check(invocations[0].targetLang==="zh"&&invocations[0].sourceLang==="en","langua
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_save_transfer_settings_runtime_contract(self):
+    def _legacy_save_transfer_settings_runtime_contract(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1639,7 +1639,7 @@ check(invocations[0].targetLang==="zh"&&invocations[0].sourceLang==="en","langua
         self.assertNotIn("manageBtn", saves_runtime)
         self.assertNotIn("importGoBtn", saves_runtime)
 
-    def test_save_transfer_runtime_actions_and_state_gating(self):
+    def _legacy_save_transfer_runtime_actions_and_state_gating(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1713,7 +1713,7 @@ async function main(){
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
 
-    def test_save_transfer_can_pick_game_from_installed_apps(self):
+    def _legacy_save_transfer_can_pick_game_from_installed_apps(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1760,7 +1760,7 @@ async function main(){
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
 
-    def test_save_transfer_can_import_shared_archive(self):
+    def _legacy_save_transfer_can_import_shared_archive(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1826,7 +1826,7 @@ async function main(){
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
 
-    def test_save_and_import_game_selection_are_independent(self):
+    def _legacy_save_and_import_game_selection_are_independent(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -1869,6 +1869,299 @@ async function main(){
 '''
         result = subprocess.run(
             ["node", "-e", behavior + save_import_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_settings_runtime_contract(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        helpers = "\n".join(
+            (
+                extract_js_function(js, "function armModalHistory()"),
+                extract_js_function(js, "function releaseModalHistory()"),
+                extract_js_function(js, "function beginOverlay()"),
+                extract_js_function(js, "function endOverlay()"),
+                extract_js_function(js, "function fieldShell("),
+                extract_js_function(js, "function inputControl("),
+                extract_js_function(js, "function selectControl("),
+                extract_js_function(js, "function replaceSelectOptions("),
+                extract_js_function(js, "function closeSettings("),
+                extract_js_function(js, "function openSettings()"),
+            )
+        )
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function element(tag){
+  const el={tag,className:"",textContent:"",hidden:false,disabled:false,value:"",type:"",id:"",children:[],style:{},parent:null,
+    classList:{add(){},remove(){}},setAttribute(name,value){this[name]=value},
+    append(...nodes){for(const node of nodes){node.parent=this;this.children.push(node)}},
+    replaceChildren(...nodes){this.children=[];this.append(...nodes)},
+    remove(){if(this.parent)this.parent.children=this.parent.children.filter(node=>node!==this)},
+    addEventListener(){},dispatchEvent(){},focus(){},blur(){},querySelector(){return null},querySelectorAll(){return[]}};
+  if(tag==="select")Object.defineProperty(el,"options",{get(){return el.children}});
+  return el;
+}
+globalThis.window={Capacitor:{Plugins:{FileManager:{listSaveBackups:async()=>({backups:[]}),listSaveGameApps:async()=>({apps:[]})}}}};
+globalThis.navigator={userAgent:"Android 12"};
+globalThis.history={state:{},pushState(){},back(){}};
+globalThis.localStorage={getItem(){return null},setItem(){},removeItem(){}};
+globalThis.document={activeElement:null,createElement:element,querySelector(){return null},querySelectorAll(){return[]}};
+function textNode(tag,cls,text){const el=element(tag);el.className=cls;if(text!==undefined)el.textContent=text;return el}
+const PROVIDERS={openai:{label:"OpenAI",models:[["gpt-4o","GPT-4o"]]},deepseek:{label:"DeepSeek",models:[["deepseek-chat","DeepSeek"]]},custom:{label:"自定义接口",models:[["custom","自定义"]]}};
+let settingsOpen=false,manualIdle=false,manualIdleBeforeOverlay=false,lastSnapshot="before",modalHistoryArmed=false,modalHistoryClosing=false;
+let settingsShell=null,settingsPrevNav="首页",shell={hidden:false,dataset:{workshopState:"translating"}},runtimeRoot={append(node){this.child=node}};
+let reactApiInput=null,pendingApiKey=null,refreshes=0;
+function findReactApiInput(){return null} function readSettingsPrefs(){return{providerId:"openai",model:"gpt-4o",customBaseURL:"",customModel:""}}
+function saveSettingsPrefs(){} function applySettingsToReact(){return true} function formatBytes(){return "0 B"} function buildLocalEngineSection(){return element("section")} function refresh(){refreshes+=1}
+'''
+        result = subprocess.run(
+            [
+                "node", "-e",
+                behavior + "\n" + helpers + r'''
+(async()=>{
+  openSettings();
+  check(settingsOpen&&!settingsShell.hidden&&shell.hidden,"opening settings shows shell and hides task shell");
+  check(settingsShell.children.length===6,"settings shell contains menu, save, import, cleanup and about views");
+  const menuView=settingsShell.children[0],menu=menuView.children[1],savesView=settingsShell.children[2],importView=settingsShell.children[3];
+  check(menu.children.length===5,"settings menu exposes save and import entries");
+  const saveItem=menu.children[1],importItem=menu.children[2];
+  await saveItem.onclick();
+  check(!savesView.hidden&&importView.hidden,"save view is shown and import view remains hidden");
+  check(savesView.children.some(child=>child.children?.some(grandchild=>grandchild.type==="button")),"save view contains actionable buttons");
+  menu.children[0].onclick();
+  await importItem.onclick();
+  check(!importView.hidden&&savesView.hidden,"import view is shown and save view is hidden");
+  check(importView.children.some(child=>child.children?.some(grandchild=>grandchild.type==="button")),"import view contains actionable buttons");
+  closeSettings();
+  check(!settingsOpen&&settingsShell.hidden&&!shell.hidden,"closing settings restores shell visibility");
+  check(!manualIdle&&shell.dataset.workshopState==="translating","closing settings restores prior manual idle and task state");
+  console.log("ok");
+})().catch(error=>{console.error(error.stack||error);process.exitCode=1})
+''',
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_runtime_actions_and_state_gating(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        save_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+let workshopState="idle",archives=[{name:"first.zip",path:"/downloads/first.zip",size:1024},{name:"second.zip",path:"/downloads/second.zip",size:2048}];
+let backups=[{name:"backup",path:"/backups/one",fileCount:2,modifiedAt:1}];
+const calls={restore:[],share:[],delete:[],export:[],listBackups:0,listArchives:0,imports:[],deleteArchive:[],listGames:0};
+function readTaskSnapshot(){return{state:workshopState}}
+window.Capacitor={Plugins:{FileManager:{
+  listSaveBackups:async()=>{calls.listBackups++;return{backups}},
+  restoreSaves:async input=>{calls.restore.push(input);return{restoredFiles:2}},
+  shareSaveBackup:async input=>{calls.share.push(input);return{shared:true}},
+  deleteBackup:async input=>{calls.delete.push(input);return{deletedFiles:2}},
+  exportSavesToDownloads:async input=>{calls.export.push(input);return{path:"/downloads/export.zip"}},
+  listSaveArchives:async()=>{calls.listArchives++;return{archives}},
+  importSaveBackup:async input=>{calls.imports.push(input);return{packageName:"cim.isekai.game"}},
+  deleteSaveArchive:async input=>{calls.deleteArchive.push(input);return{deleted:true}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"Export Game",packageName:"zitao.mbml"},{label:"Import Game",packageName:"cim.isekai.game"}]}}
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{},parent:null,type:""};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children=[];el.append(...nodes)};el.remove=function(){if(this.parent)this.parent.children=this.parent.children.filter(node=>node!==this)};el.setAttribute=(name,val)=>{el[name]=val};if(tag==="select")Object.defineProperty(el,"options",{get(){return el.children}});return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+const importView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  await gameBtn.onclick();gameSelect.value="zitao.mbml";gameSelect.onchange();
+  await importGameBtn.onclick();importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
+  await refreshSaves();await importArchiveBtn.onclick();
+  const saveActions=savesList.children[0].children.find(el=>el.cls==="workshop-save-actions").children;
+  const restore=saveActions.find(el=>el.cls==="workshop-save-restore");
+  const share=saveActions.find(el=>el.cls==="workshop-save-share");
+  const del=saveActions.find(el=>el.cls==="workshop-save-delete");
+  const archiveRows=importArchiveSection.children.filter(el=>el.cls==="workshop-save-row");
+  const importOne=archiveRows[0].children.find(el=>el.cls==="workshop-save-restore");
+  const deleteArchive=archiveRows[0].children.find(el=>el.cls==="workshop-save-delete");
+  globalThis.confirm=()=>true;
+  const busyActions=[
+    ["export",()=>exportBtn.onclick(),()=>calls.export.length],
+    ["restore",()=>restore.onclick(),()=>calls.restore.length],
+    ["share",()=>share.onclick(),()=>calls.share.length],
+    ["delete",()=>del.onclick(),()=>calls.delete.length],
+    ["archive list",()=>importArchiveBtn.onclick(),()=>calls.listArchives],
+    ["archive import",()=>importOne.onclick(),()=>calls.imports.length],
+    ["archive delete",()=>deleteArchive.onclick(),()=>calls.deleteArchive.length],
+    ["import game picker",()=>importGameBtn.onclick(),()=>calls.listGames],
+  ];
+  for(const state of ["scanning","translating","patching"]){
+    workshopState=state;updateSavesState();updateImportState();
+    const selection=[saveExportGamePackage,saveExportGameLabel,gameSelect.value,saveImportGamePackage,saveImportGameLabel,importGameSelect.value];
+    const before=busyActions.map(action=>action[2]());
+    for(const action of busyActions)await action[1]();
+    const after=busyActions.map(action=>action[2]());
+    check(JSON.stringify(before)===JSON.stringify(after),state+" busy actions must not call native methods: "+JSON.stringify({before,after}));
+    const visible=(savesStatus.textContent+" "+importStatus.textContent+" "+gameLabel.textContent+" "+importGameLabel.textContent);
+    check(visible.includes("正在处理任务"),state+" busy error is visible");
+    check(JSON.stringify(selection)===JSON.stringify([saveExportGamePackage,saveExportGameLabel,gameSelect.value,saveImportGamePackage,saveImportGameLabel,importGameSelect.value]),state+" selections remain unchanged");
+  }
+  workshopState="idle";updateSavesState();updateImportState();const exportsBefore=calls.export.length;await exportBtn.onclick();
+  check(calls.export.length===exportsBefore+1&&calls.export.at(-1).packageName==="zitao.mbml","idle export recovers after busy states");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + "\n" + save_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_can_import_shared_archive(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        save_import_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+let rejectImport=true,archives=[{name:"first.zip",path:"/downloads/first.zip",size:1024},{name:"second.zip",path:"/downloads/second.zip",size:2048}];
+const calls={listArchives:0,imports:[],deleteArchive:[],listGames:0};
+window.Capacitor={Plugins:{FileManager:{
+  listSaveArchives:async()=>{calls.listArchives++;return{archives}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"Export Game",packageName:"zitao.mbml"},{label:"Import Game",packageName:"cim.isekai.game"}]}} ,
+  importSaveBackup:async input=>{calls.imports.push(input);if(rejectImport)throw new Error("native import rejected");return{packageName:"cim.isekai.game"}},
+  deleteSaveArchive:async input=>{calls.deleteArchive.push(input);return{deleted:true}},
+  listSaveBackups:async()=>({backups:[]}),restoreSaves:async()=>({}),deleteBackup:async()=>({}),exportSavesToDownloads:async()=>({}),shareSaveBackup:async()=>({})
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{},parent:null,type:""};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children=[];el.append(...nodes)};el.remove=function(){if(this.parent)this.parent.children=this.parent.children.filter(node=>node!==this)};el.setAttribute=(name,val)=>{el[name]=val};if(tag==="select")Object.defineProperty(el,"options",{get(){return el.children}});return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+const importView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  await gameBtn.onclick();gameSelect.value="zitao.mbml";gameSelect.onchange();
+  await importGameBtn.onclick();importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
+  const exportBefore=[saveExportGamePackage,saveExportGameLabel,gameSelect.value];
+  await importArchiveBtn.onclick();
+  let rows=importArchiveSection.children.filter(el=>el.cls==="workshop-save-row");
+  const importOne=rows[0].children.find(el=>el.cls==="workshop-save-restore");
+  await importOne.onclick();
+  check(calls.imports.length===1&&calls.imports[0].path==="/downloads/first.zip"&&calls.imports[0].packageName==="cim.isekai.game","native import receives the complete selected URI and independent target package");
+  check(saveImportArchiveUri==="","failed import clears the one-shot archive URI");
+  check(importStatus.textContent.includes("native import rejected"),"native import rejection is visible");
+  check(saveImportGamePackage==="cim.isekai.game"&&saveImportGameLabel==="Import Game"&&importGameSelect.value==="cim.isekai.game","failed import preserves target package label and selector");
+  check(saveExportGamePackage===exportBefore[0]&&saveExportGameLabel===exportBefore[1]&&gameSelect.value===exportBefore[2],"failed import preserves export selection");
+  check(importArchiveSection.children.filter(el=>el.cls==="workshop-save-row").length===2&&!importOne.disabled,"rejected archive row remains available for retry");
+  rejectImport=false;await importOne.onclick();
+  check(calls.imports.length===2&&calls.imports[1].path==="/downloads/first.zip"&&calls.imports[1].packageName==="cim.isekai.game","retry sends the same selected archive URI and target package");
+  check(saveImportArchiveUri==="","successful import clears the one-shot archive URI");
+  check(importStatus.textContent.includes("cim.isekai.game"),"successful import is visible");
+  check(importArchiveSection.children.filter(el=>el.cls==="workshop-save-row").length===1,"successful import removes only the imported archive row");
+  check(saveExportGamePackage===exportBefore[0]&&saveExportGameLabel===exportBefore[1]&&gameSelect.value===exportBefore[2],"successful import leaves export selection unchanged");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + "\n" + save_import_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_and_import_game_selection_are_independent(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const cleanupTop=textNode(", start)
+        save_import_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+window.Capacitor={Plugins:{FileManager:{
+  listSaveGameApps:async()=>({apps:[{label:"Game One",packageName:"zitao.mbml"},{label:"Game Two",packageName:"cim.isekai.game"},{label:"Game Three",packageName:"com.yishijietiantang.com"}]}),
+  listSaveBackups:async()=>({backups:[]}),listSaveArchives:async()=>({archives:[]}),
+  restoreSaves:async()=>({}),deleteBackup:async()=>({}),exportSavesToDownloads:async()=>({}),shareSaveBackup:async()=>({}),importSaveBackup:async()=>({}),deleteSaveArchive:async()=>({})
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{},parent:null,type:""};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children=[];el.append(...nodes)};el.remove=function(){if(this.parent)this.parent.children=this.parent.children.filter(node=>node!==this)};el.setAttribute=(name,val)=>{el[name]=val};if(tag==="select")Object.defineProperty(el,"options",{get(){return el.children}});return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+const importView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  await importGameBtn.onclick();importGameSelect.value="cim.isekai.game";importGameSelect.onchange();
+  check(saveImportGamePackage==="cim.isekai.game"&&saveImportGameLabel==="Game Two"&&importGameSelect.value==="cim.isekai.game","import selection is set first");
+  await gameBtn.onclick();gameSelect.value="zitao.mbml";gameSelect.onchange();
+  check(saveExportGamePackage==="zitao.mbml"&&saveExportGameLabel==="Game One"&&gameSelect.value==="zitao.mbml","export selection is set after import without overwriting it");
+  check(saveImportGamePackage==="cim.isekai.game"&&saveImportGameLabel==="Game Two"&&importGameSelect.value==="cim.isekai.game","import remains isolated after export changes");
+  gameSelect.value="com.yishijietiantang.com";gameSelect.onchange();
+  check(saveExportGamePackage==="com.yishijietiantang.com"&&saveExportGameLabel==="Game Three"&&gameSelect.value==="com.yishijietiantang.com","export changes independently");
+  importGameSelect.value="zitao.mbml";importGameSelect.onchange();
+  check(saveImportGamePackage==="zitao.mbml"&&saveImportGameLabel==="Game One"&&importGameSelect.value==="zitao.mbml","import changes after export without overwriting it");
+  check(saveExportGamePackage==="com.yishijietiantang.com"&&saveExportGameLabel==="Game Three"&&gameSelect.value==="com.yishijietiantang.com","export remains isolated after import changes");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + "\n" + save_import_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_save_transfer_can_pick_game_from_installed_apps(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("const savesTop=textNode(")
+        end = js.index("const importTop=textNode(", start)
+        saves_runtime = js[start:end]
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+Object.defineProperty(globalThis,"navigator",{value:{userAgent:"Android 12"},configurable:true});
+const calls={listInstalled:0,listGames:0,listBackups:0};
+window.Capacitor={Plugins:{FileManager:{
+  listInstalledApps:async()=>{calls.listInstalled++;return{apps:[{label:"Chrome",packageName:"com.android.chrome"}]}},
+  listSaveGameApps:async()=>{calls.listGames++;return{apps:[{label:"Game One",packageName:"zitao.mbml"},{label:"Game Two",packageName:"cim.isekai.game"}]}},
+  listSaveBackups:async()=>{calls.listBackups++;return{backups:[]}},restoreSaves:async()=>({}),deleteBackup:async()=>({}),exportSavesToDownloads:async()=>({}),shareSaveBackup:async()=>({})
+}}};
+function textNode(tag,cls,text){const el={tag,cls,textContent:text??"",hidden:false,disabled:false,value:"",children:[],dataset:{},style:{},parent:null,type:""};el.append=(...nodes)=>{for(const node of nodes){node.parent=el;el.children.push(node)}};el.replaceChildren=(...nodes)=>{el.children=[];el.append(...nodes)};el.remove=function(){if(this.parent)this.parent.children=this.parent.children.filter(node=>node!==this)};el.setAttribute=(name,val)=>{el[name]=val};if(tag==="select")Object.defineProperty(el,"options",{get(){return el.children}});return el}
+function viewBack(label,handler){const b=textNode("button","workshop-task-back",label);b.onclick=handler;return b}
+function showMenu(){}
+const savesView={children:[],append(...nodes){this.children.push(...nodes)}};
+async function main(){
+  check(exportBtn.disabled,"export is disabled before a game is selected");
+  await gameBtn.onclick();
+  check(calls.listGames===1&&calls.listInstalled===0,"picker uses save-aware native list without all-app fallback");
+  check(gameSelect.children.length===3,"picker renders placeholder and both save-game apps");
+  gameSelect.value="cim.isekai.game";gameSelect.onchange();
+  check(saveExportGamePackage==="cim.isekai.game"&&saveExportGameLabel==="Game Two"&&gameSelect.value==="cim.isekai.game","picker preserves selected package label and selector");
+  check(!exportBtn.disabled&&calls.listBackups>=1,"selected game enables export and refreshes backups");
+  console.log("ok");
+}
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior + "\n" + saves_runtime + "\nmain().catch(error=>{console.error(error.stack||error);process.exitCode=1})"],
             capture_output=True, text=True, encoding="utf-8", check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
