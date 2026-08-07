@@ -155,14 +155,22 @@ EXIT_CODE=1
 Each item below was then run with the stable focus command shown in the
 `command` column. The first diagnostic is normalized only by removing the
 multi-megabyte generated-JavaScript right-hand side from `not found in`
-assertions; no bundle dump is pasted here. Categories are the fixed design
-categories: `C1` product/generated-asset regression, `C2` test still asserts
-old behavior, `C3` test depends on compressed JavaScript internals, `C4`
-product/generated-asset encoding boundary, `C5` fixture lacks current
-React/Capacitor state, and `C6` external condition missing. No C2 or C6 item
-was observed in this baseline.
+assertions; no bundle dump is pasted here. The first diagnostic is failure
+evidence, not a root-cause conclusion. The Category column contains only a
+preliminary observation/candidate classification based on that first signal;
+it is not a confirmed root cause. Phase 0 did not establish current
+implementation behavior, authoritative product behavior, or fixture state
+for each item. Phase 1 must confirm or replace every candidate classification
+with those sources. `C1` means a candidate product/generated-asset
+regression, `C2` a candidate old-behavior test expectation, `C3` a candidate
+compressed-JavaScript internal dependency, `C4` a candidate
+product/generated-asset encoding boundary, `C5` a candidate fixture lacking
+current React/Capacitor state, and `C6` a candidate missing external
+condition. This round assigns no C2 or C6 candidate labels; that is not an
+exclusion, and whether any item belongs to C2 or C6 remains for Phase 1
+item-by-item investigation.
 
-| # | Result | Test name | command | First valid diagnostic | Category |
+| # | Result | Test name | command | First valid diagnostic | Candidate category (preliminary observation; Phase 1 root-cause confirmation pending) |
 |---:|---|---|---|---|---|
 | 1 | ERROR | `test_translation_cache_is_reused_across_models` | `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_cache_is_reused_across_models -v` | `ValueError: substring not found` | C3 |
 | 2 | FAIL | `test_completed_zero_entry_scan_is_an_empty_result_not_scanning` | `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_completed_zero_entry_scan_is_an_empty_result_not_scanning -v` | `Error: settled zero-entry scan misclassified: {"state":"idle"}` | C5 |
@@ -190,6 +198,11 @@ was observed in this baseline.
 | 24 | FAIL | `test_translation_heartbeat_updates_session` | `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session -v` | `Error: heartbeat refreshes savedAt while translating` | C5 |
 | 25 | FAIL | `test_translation_logs_are_mirrored_into_the_visible_shell` | `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_logs_are_mirrored_into_the_visible_shell -v` | `AssertionError: details mirror marker not found in <bundle dump omitted>` | C3 |
 | 26 | FAIL | `test_translation_progress_emits_starting_batch_before_request` | `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_progress_emits_starting_batch_before_request -v` | `Error: both batches translate` | C5 |
+
+Every `C1`, `C3`, or `C5` value in the last column is a candidate label for
+Phase 1 investigation, not a confirmed root cause. This baseline does not
+claim that C2 or C6 is absent; this round simply did not assign either code,
+and Phase 1 must investigate those possibilities item by item.
 
 The focused runs all returned exit code 1. The exact test name and command
 template are retained for reruns; the concise first diagnostics above are

@@ -61,3 +61,12 @@ No task review has run yet.
 | APK provenance gate | PASS | Repository, fixed commit, raw URL, local path, SHA256, and stop-on-mismatch rule recorded |
 | Phase 0 scope ruling | PASS | Authority design §5.1 explicitly permits only the non-product evidence-schema assertion |
 | Fix-round verification | PASS_WITH_CONCERNS | Workshop: 49 tests, 25 failures, 1 error; discover: 168 tests, 25 failures, 1 error, 1 skipped |
+
+## Fix round 2
+
+| Item | Status | Evidence |
+|---|---|---|
+| Candidate classifications qualified | PASS | Baseline Category column and adjacent explanation now state preliminary observation and Phase 1 root-cause confirmation pending |
+| C2/C6 non-exclusion clarified | PASS | Baseline says no C2/C6 candidate labels were assigned, not that either category is absent |
+| Failure evidence preserved | PASS | All 26 names, focus commands, and first diagnostics retained; bundle dumps remain omitted |
+| Documentation verification | PASS_WITH_CONCERNS | Markdown/report checks and `git diff --check` required; full suite not rerun per scoped request |

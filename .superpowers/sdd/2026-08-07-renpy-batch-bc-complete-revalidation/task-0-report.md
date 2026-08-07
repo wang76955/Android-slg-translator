@@ -463,3 +463,83 @@ documents and unrelated untracked files remain untouched.
 - The failure inventory classifies observed evidence for Phase 0; it does not
   decide whether later Phase 1 work should change a product implementation,
   a behavior test, a fixture, or a compressed-bundle contract.
+
+## Fix round 2 — scoped re-review remediation
+
+### Finding addressed
+
+The scoped re-review identified an audit ambiguity in
+`docs/qa/renpy-revalidation-baseline.md`: the first-diagnostic labels C1/C3/C5
+could be read as confirmed root causes, and the text appeared to exclude C2
+and C6 without current implementation, authoritative behavior, or fixture
+evidence. That could steer Phase 1 investigation incorrectly.
+
+### Changes
+
+- Reworded the failure-inventory explanation to state that the first
+  diagnostic is failure evidence only, not a root-cause conclusion.
+- Renamed the Category column to
+  `Candidate category (preliminary observation; Phase 1 root-cause confirmation pending)`.
+- Added an explicit requirement that Phase 1 confirm or replace each
+  candidate using current implementation behavior, authoritative product
+  behavior, and fixture state.
+- Replaced the exclusionary wording with: this round assigns no C2/C6
+  candidate labels, but their absence is not claimed and Phase 1 must assess
+  those possibilities item by item.
+- Preserved all 26 test names, stable focus commands, and first valid
+  diagnostics; no bundle dump was added.
+- Updated the plan-specific `progress.md` with this fix round.
+
+### Real checks and outputs
+
+The existing focused assertion was run after the wording-only repair:
+
+```powershell
+python -m unittest test_translation_coverage.TranslationCoverageLogicTest.test_revalidation_evidence_uses_only_explicit_statuses -v
+```
+
+Actual output:
+
+```text
+test_revalidation_evidence_uses_only_explicit_statuses (...) ... ok
+
+Ran 1 test in 0.001s
+
+OK
+EXIT_CODE=0
+```
+
+The Markdown/report content check confirmed the corrected semantics:
+
+```text
+HAS_PRELIMINARY_WORDING=True
+HAS_ROOT_CAUSE_DISCLAIMER=True
+HAS_C2_C6_NONEXCLUSION=True
+FAILURE_ROW_COUNT=26
+HAS_BUNDLE_DUMP=False
+```
+
+`git diff --check` completed with no output and exit code 0. The full suite was
+not rerun in this documentation-only round, as requested; the latest relevant
+full-suite evidence remains `168 tests, 25 failures, 1 error, 1 skipped` from
+Fix round 1.
+
+### Fix round 2 files
+
+- `docs/qa/renpy-revalidation-baseline.md`
+- `.superpowers/sdd/2026-08-07-renpy-batch-bc-complete-revalidation/progress.md`
+- this report
+
+No product file, test file, evidence ledger row, protected user document, or
+unrelated untracked file was modified.
+
+### Remaining risks
+
+- C1/C3/C5 remain candidate labels only; Phase 1 still must establish each
+  root cause with implementation, authoritative behavior, and fixture
+  evidence.
+- C2/C6 were not assigned as candidates in this round, but are not ruled out.
+- The underlying 25 failures, 1 error, and 1 skipped test remain unchanged;
+  this round only prevents the baseline from overclaiming their causes.
+- Java and Android build/device tools remain unavailable as recorded in the
+  baseline; no APK or device evidence was added.
