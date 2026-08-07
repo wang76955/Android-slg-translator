@@ -66,7 +66,11 @@ public final class InstalledApkSet {
         }
         List<String> names = new ArrayList<>();
         for (int index = 0; index < copiedSplits.size(); index++) {
-            names.add(safeSplitName(splitNames.get(index)));
+            String name = safeSplitName(splitNames.get(index));
+            if (names.contains(name)) {
+                throw new IllegalArgumentException("duplicate splitName metadata");
+            }
+            names.add(name);
         }
         this.splitNames = Collections.unmodifiableList(names);
     }

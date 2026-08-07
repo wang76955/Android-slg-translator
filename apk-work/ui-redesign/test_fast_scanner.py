@@ -1568,6 +1568,558 @@ public final class CacheOwnershipHarness {
                 stderr=subprocess.PIPE,
             )
 
+    def test_installed_split_selection_preserves_manifest_split_names(self):
+        """Execute the installed-app copy path with two manifest-declared splits."""
+        if not JAVA.exists() or not JAVAC.exists():
+            self.skipTest("JDK is not present for executable split ownership test")
+        custom_stubs = {
+            "android/content/Context.java": r'''
+package android.content;
+import android.content.pm.PackageManager;
+import java.io.File;
+public class Context {
+    public PackageManager getPackageManager() { return null; }
+    public String getPackageName() { return null; }
+    public File getExternalFilesDir(String type) { return null; }
+    public File getFilesDir() { return null; }
+}
+''',
+            "android/content/pm/ApplicationInfo.java": r'''
+package android.content.pm;
+public class ApplicationInfo {
+    public String packageName;
+    public String sourceDir;
+    public String[] splitSourceDirs;
+    public String[] splitNames;
+}
+''',
+            "android/content/pm/PackageInfo.java": r'''
+package android.content.pm;
+public class PackageInfo {
+    public String packageName;
+    public int versionCode;
+    public String[] splitNames;
+    public long getLongVersionCode() { return versionCode; }
+}
+''',
+            "android/content/pm/PackageManager.java": r'''
+package android.content.pm;
+import android.content.Intent;
+import java.util.List;
+public class PackageManager {
+    public List<ResolveInfo> queryIntentActivities(Intent intent, int flags) { return null; }
+    public ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException { return null; }
+    public CharSequence getApplicationLabel(ApplicationInfo info) { return null; }
+    public PackageInfo getPackageArchiveInfo(String path, int flags) { return null; }
+    public static class NameNotFoundException extends Exception {}
+}
+''',
+            "android/net/Uri.java": r'''
+package android.net;
+import android.os.Parcelable;
+import java.io.File;
+public class Uri implements Parcelable {
+    private final String value;
+    private Uri(String value) { this.value = value; }
+    public static Uri parse(String value) { return new Uri(value); }
+    public String getPath() { return value.startsWith("file://") ? value.substring(7) : value; }
+    public static Uri fromFile(File file) { return new Uri("file://" + file.getAbsolutePath()); }
+    public String toString() { return value; }
+}
+''',
+            "com/getcapacitor/JSObject.java": r'''
+package com.getcapacitor;
+import java.util.LinkedHashMap;
+import java.util.Map;
+public class JSObject {
+    public final Map<String,Object> values = new LinkedHashMap<>();
+    public JSObject put(String key, Object value) { values.put(key, value); return this; }
+}
+''',
+            "com/getcapacitor/JSArray.java": r'''
+package com.getcapacitor;
+import java.util.ArrayList;
+import java.util.List;
+public class JSArray {
+    public final List<Object> values = new ArrayList<>();
+    public void put(Object value) { values.add(value); }
+    public int length() { return values.size(); }
+    public Object opt(int index) { return index < values.size() ? values.get(index) : null; }
+}
+''',
+            "com/getcapacitor/PluginCall.java": r'''
+package com.getcapacitor;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+public class PluginCall {
+    public JSObject resolved;
+    public String rejected;
+    public String packageName;
+    private final CountDownLatch done = new CountDownLatch(1);
+    public String getString(String key) { return "packageName".equals(key) ? packageName : null; }
+    public JSArray getArray(String key) { return null; }
+    public void resolve(JSObject value) { resolved = value; done.countDown(); }
+    public void reject(String message) { rejected = message; done.countDown(); }
+    public boolean await() throws InterruptedException { return done.await(5, TimeUnit.SECONDS); }
+}
+''',
+        }
+        harness = r'''
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.InstalledAppSource;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.Collections;
+
+public final class InstalledSplitSelectionHarness {
+    public static void main(String[] args) throws Exception {
+        int exit = 0;
+        try {
+            run(args);
+        } catch (Throwable error) {
+            error.printStackTrace();
+            exit = 1;
+        }
+        System.exit(exit);
+    }
+
+    private static void run(String[] args) throws Exception {
+        File root = new File(args[0]);
+        File base = write(root, "base.apk", "base");
+        File splitA = write(root, "arbitrary-a.apk", "split-a");
+        File splitB = write(root, "arbitrary-b.apk", "split-b");
+
+        ApplicationInfo app = new ApplicationInfo();
+        app.packageName = "com.example.game";
+        app.sourceDir = base.getAbsolutePath();
+        app.splitSourceDirs = new String[] {splitA.getAbsolutePath(), splitB.getAbsolutePath()};
+        app.splitNames = new String[] {"feature_a", "feature_b"};
+        TestPackageManager packageManager = new TestPackageManager(app);
+        TestContext context = new TestContext(packageManager, root, "com.slgtranslator.app");
+        PluginCall call = new PluginCall();
+        InstalledAppSource.selectInstalledApp(context, callWithPackage(call, "com.example.game"));
+        require(call.await(), "selection worker must settle");
+        require(call.rejected == null, "split selection must resolve: " + call.rejected);
+        require(call.resolved != null, "split selection result is missing");
+        require(((Number) call.resolved.values.get("splitCount")).intValue() == 2,
+                "both splits must be returned");
+        JSArray names = (JSArray) call.resolved.values.get("splitNames");
+        require(names != null && names.values.equals(Arrays.asList("feature_a", "feature_b")),
+                "manifest split names must stay ordered: " + (names == null ? null : names.values));
+        File copied = new File(root, "installed-apks");
+        require(hasSuffix(copied, "-feature_a"), "feature_a private copy is missing");
+        require(hasSuffix(copied, "-feature_b"), "feature_b private copy is missing");
+        System.out.println("split-names=" + names.values);
+    }
+
+    private static PluginCall callWithPackage(PluginCall call, String packageName) {
+        call.packageName = packageName;
+        return call;
+    }
+
+    private static File write(File root, String name, String value) throws Exception {
+        File file = new File(root, name);
+        Files.write(file.toPath(), value.getBytes(StandardCharsets.UTF_8));
+        return file;
+    }
+
+    private static boolean hasSuffix(File directory, String suffix) {
+        File[] files = directory.listFiles();
+        if (files == null) return false;
+        for (File file : files) if (file.getName().endsWith(suffix)) return true;
+        return false;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    private static final class TestContext extends Context {
+        private final PackageManager packageManager;
+        private final File root;
+        private final String packageName;
+        TestContext(PackageManager packageManager, File root, String packageName) {
+            this.packageManager = packageManager;
+            this.root = root;
+            this.packageName = packageName;
+        }
+        @Override public PackageManager getPackageManager() { return packageManager; }
+        @Override public File getExternalFilesDir(String type) { return root; }
+        @Override public File getFilesDir() { return root; }
+        @Override public String getPackageName() { return packageName; }
+    }
+
+    private static final class TestPackageManager extends PackageManager {
+        private final ApplicationInfo app;
+        TestPackageManager(ApplicationInfo app) { this.app = app; }
+        @Override public java.util.List<ResolveInfo> queryIntentActivities(Intent intent, int flags) {
+            ResolveInfo result = new ResolveInfo();
+            result.activityInfo = new ActivityInfo();
+            result.activityInfo.applicationInfo = app;
+            return Collections.singletonList(result);
+        }
+        @Override public ApplicationInfo getApplicationInfo(String packageName, int flags) {
+            return app;
+        }
+        @Override public CharSequence getApplicationLabel(ApplicationInfo info) { return "Fixture Game"; }
+        @Override public PackageInfo getPackageArchiveInfo(String path, int flags) {
+            PackageInfo info = new PackageInfo();
+            info.packageName = app.packageName;
+            info.versionCode = 17;
+            return info;
+        }
+    }
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="installed-split-selection-") as temporary:
+            temporary_path = Path(temporary)
+            classes = temporary_path / "classes"
+            root = temporary_path / "fixture"
+            classes.mkdir()
+            root.mkdir()
+            source_paths = []
+            for relative, content in custom_stubs.items():
+                path = temporary_path / "custom-stubs" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                source_paths.append(path)
+            harness_path = temporary_path / "InstalledSplitSelectionHarness.java"
+            harness_path.write_text(harness, encoding="utf-8")
+            excluded = {
+                "Context.java", "ApplicationInfo.java", "PackageManager.java",
+                "JSObject.java", "JSArray.java", "PluginCall.java", "Uri.java",
+            }
+            repository_stubs = [
+                path for path in sorted((FAST_SCAN / "stubs").rglob("*.java"))
+                if path.name not in excluded
+            ]
+            compile_result = subprocess.run(
+                [
+                    str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes), "-classpath", third_party_classpath(),
+                    *map(str, repository_stubs), *map(str, source_paths),
+                    str(INSTALLED_APPS), str(INSTALLED_APK_SET), str(harness_path),
+                ],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            result = subprocess.run(
+                [str(JAVA), "-cp", str(classes), "InstalledSplitSelectionHarness", str(root)],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("split-names=[feature_a, feature_b]", result.stdout)
+
+    def test_split_installer_validates_metadata_abandons_write_failure_and_preserves_order(self):
+        """Execute split installer validation, session abort and write order."""
+        custom_stubs = {
+            "android/content/Context.java": r'''
+package android.content;
+import android.content.pm.PackageManager;
+import java.io.File;
+public class Context {
+    public static final int RECEIVER_NOT_EXPORTED = 0x4;
+    public static final int RECEIVER_EXPORTED = 0x2;
+    public PackageManager getPackageManager() { return null; }
+    public String getPackageName() { return null; }
+    public Context getApplicationContext() { return this; }
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) { return null; }
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, int flags) { return null; }
+    public void unregisterReceiver(BroadcastReceiver receiver) {}
+    public void startActivity(Intent intent) {}
+}
+''',
+            "android/content/pm/PackageManager.java": r'''
+package android.content.pm;
+public class PackageManager {
+    public PackageInstaller getPackageInstaller() { return null; }
+    public PackageInfo getPackageArchiveInfo(String path, int flags) { return null; }
+}
+''',
+            "android/content/pm/PackageInfo.java": r'''
+package android.content.pm;
+public class PackageInfo {
+    public String packageName;
+    public String[] splitNames;
+    public Object[] signatures;
+    public long versionCode;
+    public long getLongVersionCode() { return versionCode; }
+}
+''',
+            "android/content/pm/PackageInstaller.java": r'''
+package android.content.pm;
+import android.content.IntentSender;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+public class PackageInstaller {
+    public static final int MODE_FULL_INSTALL = 1;
+    public static final String ACTION_PACKAGE_INSTALLED = "android.content.pm.action.PACKAGE_INSTALLED";
+    public static final String EXTRA_SESSION_ID = "android.content.pm.extra.SESSION_ID";
+    public static final String EXTRA_STATUS = "android.content.pm.extra.STATUS";
+    public static final int STATUS_PENDING_USER_ACTION = -1;
+    public static final int STATUS_SUCCESS = 0;
+    public static final int STATUS_FAILURE = 1;
+    public final List<String> writes = new ArrayList<>();
+    public boolean failWrite;
+    public boolean committed;
+    public boolean closed;
+    public int createCount;
+    public int abandonedSession = -1;
+    public Session session;
+
+    public int createSession(SessionParams params) {
+        createCount++;
+        session = new Session(this);
+        return 42;
+    }
+    public Session openSession(int sessionId) { return session; }
+    public void abandonSession(int sessionId) { abandonedSession = sessionId; }
+
+    public static class SessionParams {
+        public static final int MODE_FULL_INSTALL = 1;
+        public SessionParams(int mode) {}
+        public void setAppPackageName(String packageName) {}
+    }
+    public static class Session {
+        private final PackageInstaller owner;
+        Session(PackageInstaller owner) { this.owner = owner; }
+        public OutputStream openWrite(final String name, long offsetBytes, long lengthBytes) {
+            if (owner.failWrite) throw new IllegalStateException("fixture write failure");
+            owner.writes.add(name);
+            return new ByteArrayOutputStream();
+        }
+        public void fsync(OutputStream out) throws IOException {}
+        public void commit(IntentSender statusReceiver) { owner.committed = true; }
+        public void close() { owner.closed = true; }
+    }
+}
+''',
+            "android/app/PendingIntent.java": r'''
+package android.app;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentSender;
+public class PendingIntent {
+    public static final int FLAG_MUTABLE = 0x02000000;
+    private final IntentSender sender = new IntentSender();
+    public static PendingIntent getBroadcast(Context context, int requestCode, Intent intent, int flags) {
+        return new PendingIntent();
+    }
+    public IntentSender getIntentSender() { return sender; }
+}
+''',
+            "com/getcapacitor/JSObject.java": r'''
+package com.getcapacitor;
+import java.util.LinkedHashMap;
+import java.util.Map;
+public class JSObject {
+    public final Map<String,Object> values = new LinkedHashMap<>();
+    public JSObject put(String key, Object value) { values.put(key, value); return this; }
+}
+''',
+            "com/getcapacitor/JSArray.java": r'''
+package com.getcapacitor;
+public class JSArray {
+    public int length() { return 0; }
+    public Object opt(int index) { return null; }
+}
+''',
+            "com/getcapacitor/PluginCall.java": r'''
+package com.getcapacitor;
+public class PluginCall {
+    public String rejected;
+    public void resolve(JSObject value) {}
+    public void reject(String message) { rejected = message; }
+    public String getString(String key) { return null; }
+    public JSArray getArray(String key) { return null; }
+}
+''',
+        }
+        harness = r'''
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
+import android.content.pm.PackageManager;
+import com.getcapacitor.PluginCall;
+import com.slgtranslator.app.InstalledApkSet;
+import com.slgtranslator.app.PackageInstallerSupport;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Arrays;
+
+public final class SplitInstallerHarness {
+    private static final String PACKAGE = "com.example.game";
+
+    public static void main(String[] args) throws Exception {
+        int exit = 0;
+        try {
+            run(new File(args[0]));
+        } catch (Throwable error) {
+            error.printStackTrace();
+            exit = 1;
+        }
+        System.exit(exit);
+    }
+
+    private static void run(File root) throws Exception {
+        File base = write(root, "base.apk");
+        File splitA = write(root, "split-a.apk");
+        File splitB = write(root, "split-b.apk");
+        InstalledApkSet valid = newSet(base, splitA, splitB,
+                "feature_a.apk", "feature_b.apk");
+
+        TestPackageManager validManager = new TestPackageManager();
+        TestContext validContext = new TestContext(validManager);
+        PluginCall validCall = new PluginCall();
+        PackageInstallerSupport.installApkSet(validContext, valid, validCall);
+        require(validManager.installer.committed, "valid set must commit one session");
+        require(validManager.installer.abandonedSession == -1, "valid session must not be abandoned");
+        require(validManager.installer.writes.equals(Arrays.asList(
+                "base.apk", "feature_a.apk", "feature_b.apk")),
+                "write order must be base then declared splits: " + validManager.installer.writes);
+
+        expectRejectedBeforeSession("package", valid, new TestPackageManager(Mode.PACKAGE));
+        expectRejectedBeforeSession("version", valid, new TestPackageManager(Mode.VERSION));
+        expectRejectedBeforeSession("signature", valid, new TestPackageManager(Mode.SIGNATURE));
+        expectRejectedBeforeSession("split", valid, new TestPackageManager(Mode.SPLIT));
+
+        TestPackageManager writeFailure = new TestPackageManager();
+        writeFailure.installer.failWrite = true;
+        PluginCall failedCall = new PluginCall();
+        PackageInstallerSupport.installApkSet(new TestContext(writeFailure), valid, failedCall);
+        require(!writeFailure.installer.committed, "write failure must not commit");
+        require(writeFailure.installer.abandonedSession == 42,
+                "write failure must abandon the opened session");
+        require(failedCall.rejected != null, "write failure must reject the call");
+
+        boolean duplicateRejected = false;
+        try {
+            newSet(base, splitA, splitB, "feature_a.apk", "feature_a.apk");
+        } catch (IllegalArgumentException expected) {
+            duplicateRejected = true;
+        }
+        require(duplicateRejected, "duplicate split names must be rejected before installation");
+        System.out.println("writes=" + validManager.installer.writes + ", abandoned="
+                + writeFailure.installer.abandonedSession);
+    }
+
+    private static void expectRejectedBeforeSession(String label, InstalledApkSet set,
+                                                     TestPackageManager manager) {
+        PluginCall call = new PluginCall();
+        PackageInstallerSupport.installApkSet(new TestContext(manager), set, call);
+        require(!manager.installer.committed, label + " mismatch must not commit");
+        require(manager.installer.createCount == 0,
+                label + " mismatch must be validated before session creation");
+        require(manager.installer.abandonedSession == -1,
+                label + " mismatch must not create a session to abandon");
+        require(call.rejected != null, label + " mismatch must reject the call");
+    }
+
+    private static InstalledApkSet newSet(File base, File splitA, File splitB,
+                                           String nameA, String nameB) {
+        return new InstalledApkSet(base, Arrays.asList(splitA, splitB), PACKAGE, 17,
+                Arrays.asList(nameA, nameB));
+    }
+
+    private static File write(File root, String name) throws Exception {
+        File file = new File(root, name);
+        Files.write(file.toPath(), name.getBytes(StandardCharsets.UTF_8));
+        return file;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    private enum Mode { NONE, PACKAGE, VERSION, SIGNATURE, SPLIT }
+
+    public static final class TestContext extends Context {
+        private final TestPackageManager manager;
+        TestContext(TestPackageManager manager) { this.manager = manager; }
+        @Override public PackageManager getPackageManager() { return manager; }
+        @Override public String getPackageName() { return "com.slgtranslator.app"; }
+        @Override public Context getApplicationContext() { return this; }
+    }
+
+    public static final class TestPackageManager extends PackageManager {
+        final PackageInstaller installer = new PackageInstaller();
+        private final Mode mode;
+        TestPackageManager() { this(Mode.NONE); }
+        TestPackageManager(Mode mode) { this.mode = mode; }
+        @Override public PackageInstaller getPackageInstaller() { return installer; }
+        @Override public PackageInfo getPackageArchiveInfo(String path, int flags) {
+            PackageInfo info = new PackageInfo();
+            info.packageName = mode == Mode.PACKAGE && path.endsWith("split-b.apk")
+                    ? "com.other.game" : PACKAGE;
+            info.versionCode = mode == Mode.VERSION && path.endsWith("split-b.apk") ? 18 : 17;
+            String split = path.endsWith("split-a.apk") ? "feature_a"
+                    : path.endsWith("split-b.apk") ? "feature_b" : null;
+            if (mode == Mode.SPLIT && path.endsWith("split-b.apk")) split = "wrong_name";
+            info.splitNames = split == null ? new String[0] : new String[] {split};
+            info.signatures = new Object[] {
+                    mode == Mode.SIGNATURE && path.endsWith("split-b.apk") ? "other" : "same"
+            };
+            return info;
+        }
+    }
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="split-installer-test-") as temporary:
+            temporary_path = Path(temporary)
+            classes = temporary_path / "classes"
+            fixture = temporary_path / "fixture"
+            classes.mkdir()
+            fixture.mkdir()
+            source_paths = []
+            for relative, content in custom_stubs.items():
+                path = temporary_path / "custom-stubs" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                source_paths.append(path)
+            harness_path = temporary_path / "SplitInstallerHarness.java"
+            harness_path.write_text(harness, encoding="utf-8")
+            excluded = {
+                "Context.java", "PackageManager.java", "PackageInstaller.java",
+                "JSObject.java", "JSArray.java", "PluginCall.java", "PendingIntent.java",
+            }
+            repository_stubs = [
+                path for path in sorted((FAST_SCAN / "stubs").rglob("*.java"))
+                if path.name not in excluded
+            ]
+            compile_result = subprocess.run(
+                [
+                    str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes), "-classpath", third_party_classpath(),
+                    *map(str, repository_stubs), *map(str, source_paths),
+                    str(INSTALLED_APK_SET),
+                    str(FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "PackageInstallerSupport.java"),
+                    str(harness_path),
+                ],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            result = subprocess.run(
+                [str(JAVA), "-cp", str(classes), "SplitInstallerHarness", str(fixture)],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("base.apk", result.stdout)
+
     def test_manifest_pipeline_adds_launcher_queries_without_broad_permission(self):
         builder = BUILDER.read_text("utf-8")
         workshop = WORKSHOP_BUILDER.read_text("utf-8")

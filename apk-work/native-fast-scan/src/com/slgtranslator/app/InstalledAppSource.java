@@ -225,7 +225,6 @@ public final class InstalledAppSource {
                 }
                 partials.remove(splitPartial);
                 splitOutputs.add(splitOutput);
-                splitNames.add(splitName);
             }
 
             int splitCount = splitOutputs.size();
