@@ -147,7 +147,9 @@ public final class CoverageReportHarness {
       new RenpyTextRecord("Hello", RenpyTextRecord.Kind.DIALOGUE, "alice", "", "game/a.rpyc", 11, 2, true),
       new RenpyTextRecord("Missing", RenpyTextRecord.Kind.DIALOGUE, "bob", "", "game/b.rpyc", 20, 1, true),
       new RenpyTextRecord("Rejected", RenpyTextRecord.Kind.UI_STRING, "", "", "game/b.rpyc", 21, 1, true),
-      new RenpyTextRecord("Uncertain", RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", "", "game/c.rpyc", 30, 1, false)
+      new RenpyTextRecord("Uncertain", RenpyTextRecord.Kind.CUSTOM_STATEMENT, "", "", "game/c.rpyc", 30, 1, false),
+      new RenpyTextRecord("MissingLater", RenpyTextRecord.Kind.DIALOGUE, "", "", "game/d.rpyc", 40, 1, true),
+      new RenpyTextRecord("MissingAgain", RenpyTextRecord.Kind.DIALOGUE, "", "", "game/d.rpyc", 41, 1, true)
     );
     Map<String, String> validated = new LinkedHashMap<>();
     validated.put("Hello", "你好");
@@ -159,17 +161,40 @@ public final class CoverageReportHarness {
     classifications.put("game/common.rpyc\tDeveloper", "developer_console");
     TranslationCoverageReport report = TranslationCoverageReport.build(
       records, validated, rejected, candidates, uncertain, classifications);
-    require(report.uniqueSourceCount == 4, "unique source count");
-    require(report.occurrenceCount == 5, "occurrence count");
+    require(report.uniqueSourceCount == 6, "unique source count");
+    require(report.occurrenceCount == 7, "occurrence count");
     require(report.translatedCount == 1, "validated only count");
-    require(report.missingCount == 1, "missing count");
+    require(report.missingCount == 3, "missing count");
     require(report.rejectedCount == 1, "rejected count");
     require(report.collisionCount == 1, "collision count");
     require(report.uncertainCount == 1, "uncertain count");
-    require(report.files.get("game/b.rpyc").missingCount == 1, "per-file missing");
-    require(report.topMissing().size() == 1 && "Missing".equals(report.topMissing().get(0).exactOld), "top missing");
+    require(report.files.size() == 4, "file count");
+    TranslationCoverageReport.FileCoverage a = report.files.get("game/a.rpyc");
+    require(a != null && a.sourceCount == 1 && a.occurrenceCount == 2
+        && a.translatedCount == 1 && a.missingCount == 0 && a.rejectedCount == 0
+        && a.collisionCount == 1 && a.uncertainCount == 0, "game/a.rpyc counts");
+    TranslationCoverageReport.FileCoverage b = report.files.get("game/b.rpyc");
+    require(b != null && b.sourceCount == 2 && b.occurrenceCount == 2
+        && b.translatedCount == 0 && b.missingCount == 1 && b.rejectedCount == 1
+        && b.collisionCount == 0 && b.uncertainCount == 0, "game/b.rpyc counts");
+    TranslationCoverageReport.FileCoverage c = report.files.get("game/c.rpyc");
+    require(c != null && c.sourceCount == 1 && c.occurrenceCount == 1
+        && c.translatedCount == 0 && c.missingCount == 0 && c.rejectedCount == 0
+        && c.collisionCount == 0 && c.uncertainCount == 1, "game/c.rpyc counts");
+    TranslationCoverageReport.FileCoverage d = report.files.get("game/d.rpyc");
+    require(d != null && d.sourceCount == 2 && d.occurrenceCount == 2
+        && d.translatedCount == 0 && d.missingCount == 2 && d.rejectedCount == 0
+        && d.collisionCount == 0 && d.uncertainCount == 0, "game/d.rpyc counts");
+    List<TranslationCoverageReport.FileCoverage> topFiles = report.topMissingFiles();
+    require(topFiles.size() == 2, "top missing file count");
+    require("game/d.rpyc".equals(topFiles.get(0).filePath)
+        && "game/b.rpyc".equals(topFiles.get(1).filePath), "top missing file ordering");
+    require(report.topMissing().size() == 3 && "Missing".equals(report.topMissing().get(0).exactOld)
+        && "MissingAgain".equals(report.topMissing().get(1).exactOld)
+        && "MissingLater".equals(report.topMissing().get(2).exactOld), "top missing ordering");
     String json = report.toSanitizedJson();
-    require(json.contains("uniqueSourceCount") && json.contains("game/b.rpyc"), "json fields");
+    require(json.contains("uniqueSourceCount") && json.contains("game/b.rpyc")
+        && json.contains("\"topMissingFiles\":[{\"sourceCount\":2,\"occurrenceCount\":2,\"translatedCount\":0,\"missingCount\":2,\"rejectedCount\":0,\"collisionCount\":0,\"uncertainCount\":0},{\"sourceCount\":2,\"occurrenceCount\":2,\"translatedCount\":0,\"missingCount\":1,\"rejectedCount\":1,\"collisionCount\":0,\"uncertainCount\":0}]"), "json fields and top files");
     require(!json.contains("你好") && !json.contains("您好"), "translations must not be exported");
     require(report.shouldBlockCompleteBuild(), "missing/rejected must block complete build");
     require(report.canGenerateIncompleteTestPatch(), "incomplete test patch remains available");
@@ -294,6 +319,176 @@ process.stdout.write(JSON.stringify({{initial,after,reset}}));
         self.assertEqual(result["after"]["collisionCount"], 1)
         self.assertEqual(result["reset"]["uniqueSourceCount"], 0)
         self.assertEqual(result["reset"]["occurrenceCount"], 0)
+
+    def test_task10_generated_ui_build_branch_blocks_incomplete_and_warns_incomplete_patch(self):
+        """Run the exact generated build gate, including both coverage branches."""
+        if not (BASE_JS.exists() and BASE_CSS.exists()):
+            self.skipTest("canonical workshop assets not present")
+        patcher = load_patch_workshop_ui()
+        patched, _ = patcher.patch_assets(BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="coverage-build-gate-") as temporary:
+            js_path = Path(temporary) / "patched.js"
+            js_path.write_text(patched, encoding="utf-8")
+            script = f"""
+const fs = require('fs');
+const js = fs.readFileSync({json.dumps(str(js_path))}, 'utf-8');
+const marker = 'if(!N&&(a.length>0||oe)){{globalThis.__slgRefreshTranslationCoverage?.()';
+const start = js.indexOf(marker);
+const end = js.indexOf('}},we=async', start);
+if (start < 0 || end < 0) throw new Error('generated build gate missing');
+const branch = js.slice(start, end);
+if (!branch.includes('missingCount>0||_coverage.rejectedCount>0') || !branch.includes('incomplete test patch')) throw new Error('wrong build branch extracted');
+async function run(selected) {{
+  const logs=[]; let compileCalls=0, buildCalls=0;
+  let N='', a=[{{path:'game/tl.rpy',content:'translated'}}], oe=false, r=false, o='', s='', c=false, l=false;
+  let n='source.apk', m='output', y='zh', g='en', f='', i='source.apk';
+  const window=globalThis;
+  window.__slgIncompleteTestPatchSelected=selected;
+  window.__slgBuildCoverage={{missingCount:1,rejectedCount:selected?0:1}};
+  window.__slgRefreshTranslationCoverage=()=>{{}};
+  const O=(message)=>logs.push(String(message));
+  const ue=()=>{{}};
+  const Me=value=>String(value||'translated.apk');
+  const is=value=>String(value||'');
+  const ce=()=>{{}};
+  const fe=()=>{{}};
+  const E={{
+    compileTranslationsIntoApk: async()=>{{compileCalls++;return {{compiled:1}}}},
+    buildPatchedApk: async()=>{{buildCalls++;return {{uri:'file:///patched.apk',path:'patched.apk',signed:true,signatureVerified:true,fileCount:1,replacedCount:1}}}}
+  }};
+  const runBranch=new Function('N','a','oe','r','o','s','c','l','n','m','y','g','f','i','O','ue','Me','is','ce','fe','E','window',`return (async()=>{{${{branch}}}})()`);
+  let branchResult;
+  try {{ branchResult=await runBranch(N,a,oe,r,o,s,c,l,n,m,y,g,f,i,O,ue,Me,is,ce,fe,E,window); }} catch (error) {{ logs.push('ERROR:'+error.message); }}
+  return {{selected,compileCalls,buildCalls,logs,branchResult}};
+}}
+Promise.all([run(false),run(true)]).then(value=>process.stdout.write(JSON.stringify(value)));
+"""
+            result = json.loads(run_node(script))
+        blocked, incomplete = result
+        self.assertEqual(blocked["compileCalls"], 0)
+        self.assertEqual(blocked["buildCalls"], 0)
+        self.assertTrue(any("coverage incomplete" in message for message in blocked["logs"]))
+        self.assertEqual(incomplete["compileCalls"], 1)
+        self.assertEqual(incomplete["buildCalls"], 1)
+        self.assertTrue(any("incomplete test patch" in message for message in incomplete["logs"]))
+
+    def test_task10_generated_ui_export_sanitizes_values_and_secrets(self):
+        """Execute the generated report and its real export button handler."""
+        if not (BASE_JS.exists() and BASE_CSS.exists()):
+            self.skipTest("canonical workshop assets not present")
+        patcher = load_patch_workshop_ui()
+        patched, _ = patcher.patch_assets(BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="coverage-export-") as temporary:
+            js_path = Path(temporary) / "patched.js"
+            js_path.write_text(patched, encoding="utf-8")
+            script = f"""
+const fs = require('fs');
+const js = fs.readFileSync({json.dumps(str(js_path))}, 'utf-8');
+const nodes=new Map(), buttons=[];
+const host={{append(){{}},replaceChildren(){{}}}}; nodes.set('root',host);
+function element(tag){{return {{tagName:tag.toUpperCase(),id:'',className:'',style:{{}},hidden:false,children:[],append(...items){{this.children.push(...items)}},replaceChildren(...items){{this.children=items}},click(){{if(this.onclick)this.onclick()}},set textContent(value){{this._text=String(value)}},get textContent(){{return this._text||''}}}}}}
+globalThis.document={{querySelector:()=>host,getElementById:id=>nodes.get(id)||null,createElement:tag=>{{const item=element(tag);if(tag==='button')buttons.push(item);const originalId=Object.getOwnPropertyDescriptor(item,'id');Object.defineProperty(item,'id',{{get(){{return item._id||''}},set(value){{item._id=String(value);nodes.set(item._id,item)}}}});return item}}}};
+globalThis.window=globalThis;
+let exported=''; globalThis.Blob=class{{constructor(parts){{exported=parts.join('')}}}};
+globalThis.URL={{createObjectURL:()=> 'blob:coverage',revokeObjectURL:()=>{{}}}};
+const marker=js.indexOf('function asMap(value)');
+const start=js.lastIndexOf('(function(){{',marker);
+const end=js.indexOf('}})()',start)+4;
+if(start<0||end<=start)throw new Error('coverage report IIFE missing');
+eval(js.slice(start,end));
+const records=[{{text:'Hello',sourcePath:'game/a.rpyc',translation:'你好',apiKey:'API-SECRET',secret:'PRIVATE',token:'TOKEN'}}];
+globalThis.__slgCoverageRecords=records;
+const report=globalThis.__slgBuildTranslationCoverageReport(records,new Map([['Hello','你好']]),new Set(),new Map(),[],new Map());
+const button=buttons.find(item=>item.textContent==='导出覆盖率 JSON');
+if(!button||typeof button.onclick!=='function')throw new Error('real coverage export handler missing');
+button.onclick();
+process.stdout.write(JSON.stringify({{report,exported:JSON.parse(exported)}}));
+"""
+            result = json.loads(run_node(script))
+        exported = json.dumps(result["exported"], ensure_ascii=False)
+        for value in ("你好", "您好", "API-SECRET", "PRIVATE", "TOKEN"):
+            self.assertNotIn(value, exported)
+        self.assertEqual(result["exported"]["uniqueSourceCount"], 1)
+        self.assertIn("game/a.rpyc", exported)
+
+    def test_task10_generated_ui_reset_clears_every_coverage_state_container(self):
+        """Call the generated reset entry and inspect every mutable state holder."""
+        if not (BASE_JS.exists() and BASE_CSS.exists()):
+            self.skipTest("canonical workshop assets not present")
+        patcher = load_patch_workshop_ui()
+        patched, _ = patcher.patch_assets(BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="coverage-reset-") as temporary:
+            js_path = Path(temporary) / "patched.js"
+            js_path.write_text(patched, encoding="utf-8")
+            script = f"""
+const fs=require('fs'); const js=fs.readFileSync({json.dumps(str(js_path))},'utf-8');
+const marker=js.indexOf('function asMap(value)'); const start=js.lastIndexOf('(function(){{',marker);
+const firstEnd=js.indexOf('}})()',start)+4; const secondStart=js.indexOf('\\n(function(){{',firstEnd)+1;
+const secondEnd=js.indexOf('}})()',secondStart)+4; const thirdStart=js.indexOf('\\n(function(){{',secondEnd)+1;
+const thirdEnd=js.indexOf('}})()',thirdStart)+4; if(start<0||thirdEnd<=thirdStart)throw new Error('coverage reset IIFEs missing');
+globalThis.window=globalThis; eval(js.slice(start,firstEnd)); eval(js.slice(secondStart,secondEnd)); eval(js.slice(thirdStart,thirdEnd));
+globalThis.__slgCoverageRecords=[{{text:'stale',sourcePath:'game/a.rpyc'}}];
+globalThis.__slgCoverageUncertain=['stale']; globalThis.__slgCoverageClassifications={{stale:'uncertain'}};
+globalThis.__slgValidatorApprovedTranslations=new Map([['stale','旧译文']]);
+globalThis.__slgRejectedTranslations=new Set(['stale']);
+globalThis.__slgTranslationCollisionCandidates=new Map([['stale',['a','b']]]);
+globalThis.__slgTranslationCollisionEntries=[{{old:'stale'}}];
+globalThis.__slgIncompleteTestPatchSelected=true;
+globalThis.__slgResetTranslationCoverage();
+process.stdout.write(JSON.stringify({{records:globalThis.__slgCoverageRecords,uncertain:globalThis.__slgCoverageUncertain,classifications:globalThis.__slgCoverageClassifications,approved:Array.from(globalThis.__slgValidatorApprovedTranslations),rejected:Array.from(globalThis.__slgRejectedTranslations),candidates:Array.from(globalThis.__slgTranslationCollisionCandidates),entries:globalThis.__slgTranslationCollisionEntries,incomplete:globalThis.__slgIncompleteTestPatchSelected}}));
+"""
+            result = json.loads(run_node(script))
+        self.assertEqual(result["records"], [])
+        self.assertEqual(result["uncertain"], [])
+        self.assertEqual(result["classifications"], {})
+        self.assertEqual(result["approved"], [])
+        self.assertEqual(result["rejected"], [])
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(result["entries"], [])
+        self.assertFalse(result["incomplete"])
+
+    def test_task10_incremental_cache_hit_cannot_bypass_generated_coverage_gate(self):
+        """Compose generated incremental selection, coverage, and build gate."""
+        if not (BASE_JS.exists() and BASE_CSS.exists()):
+            self.skipTest("canonical workshop assets not present")
+        patcher = load_patch_workshop_ui()
+        patched, _ = patcher.patch_assets(BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="coverage-cache-gate-") as temporary:
+            js_path = Path(temporary) / "patched.js"
+            js_path.write_text(patched, encoding="utf-8")
+            script = f"""
+async function main() {{
+const fs=require('fs'); const js=fs.readFileSync({json.dumps(str(js_path))},'utf-8');
+const marker=js.indexOf('function asMap(value)'); const start=js.lastIndexOf('(function(){{',marker);
+const firstEnd=js.indexOf('}})()',start)+4; const secondStart=js.indexOf('\\n(function(){{',firstEnd)+1;
+const secondEnd=js.indexOf('}})()',secondStart)+4; const thirdStart=js.indexOf('\\n(function(){{',secondEnd)+1;
+const thirdEnd=js.indexOf('}})()',thirdStart)+4; if(start<0||thirdEnd<=thirdStart)throw new Error('coverage IIFEs missing');
+globalThis.window=globalThis; eval(js.slice(start,firstEnd)); eval(js.slice(secondStart,secondEnd)); eval(js.slice(thirdStart,thirdEnd));
+const diff=globalThis.__slgTranslationCoverageIncrementalDiff(['Hello','Missing','New'],new Map([['Hello','你好']]),['Rejected'],[]);
+globalThis.__slgCoverageRecords=[{{text:'Hello',sourcePath:'game/a.rpyc'}},{{text:'Missing',sourcePath:'game/b.rpyc'}},{{text:'Rejected',sourcePath:'game/b.rpyc'}}];
+globalThis.__slgValidatorApprovedTranslations=new Map([['Hello','你好']]);
+globalThis.__slgRejectedTranslations=new Set(['Rejected']);
+globalThis.__slgRefreshTranslationCoverage();
+const coverage=globalThis.__slgBuildCoverage;
+let compileCalls=0,buildCalls=0,logs=[]; let N='',a=[{{path:'game/tl.rpy',content:'translated'}}],oe=false,r=false,o='',s='',c=false,l=false,n='source.apk',m='output',y='zh',g='en',f='',i='source.apk';
+window.__slgIncompleteTestPatchSelected=false; const O=message=>logs.push(String(message)); const ue=()=>{{}}; const Me=value=>String(value||'translated.apk'); const is=value=>String(value||'');
+const E={{compileTranslationsIntoApk:async()=>{{compileCalls++;return {{compiled:1}}}},buildPatchedApk:async()=>{{buildCalls++;return {{uri:'file:///patched.apk',path:'patched.apk',signed:true,signatureVerified:true}}}}}};
+const marker2='if(!N&&(a.length>0||oe)){{globalThis.__slgRefreshTranslationCoverage?.()'; const branchStart=js.indexOf(marker2); const branchEnd=js.indexOf('}},we=async',branchStart); if(branchStart<0||branchEnd<0)throw new Error('generated gate missing');
+const branch=js.slice(branchStart,branchEnd);
+const ce=()=>{{}}; const fe=()=>{{}};
+const runBranch=new Function('N','a','oe','r','o','s','c','l','n','m','y','g','f','i','O','ue','Me','is','ce','fe','E','window',`return (async()=>{{${{branch}}}})()`);
+await runBranch(N,a,oe,r,o,s,c,l,n,m,y,g,f,i,O,ue,Me,is,ce,fe,E,window);
+process.stdout.write(JSON.stringify({{diff,coverage,compileCalls,buildCalls,logs}}));
+}}
+main().catch(error=>{{process.stderr.write(error.stack||String(error));process.exit(1)}});
+"""
+            result = json.loads(run_node(script))
+        self.assertEqual(result["diff"], ["Missing", "New", "Rejected"])
+        self.assertEqual(result["coverage"]["missingCount"], 1)
+        self.assertEqual(result["coverage"]["rejectedCount"], 1)
+        self.assertEqual(result["compileCalls"], 0)
+        self.assertEqual(result["buildCalls"], 0)
+        self.assertTrue(any("coverage incomplete" in message for message in result["logs"]))
 
     def test_task10_scanner_keeps_exact_old_occurrences_for_coverage(self):
         source = (FAST_SCAN / "src/com/slgtranslator/app/FastApkScanner.java").read_text("utf-8")
