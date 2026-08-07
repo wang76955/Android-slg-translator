@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FAST_SCAN = ROOT / "apk-work" / "native-fast-scan"
 SCANNER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "FastApkScanner.java"
 FONT_SUPPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyFontSupport.java"
+PICKLE_WRITER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycPickleWriter.java"
 COMPATIBILITY_REPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyCompatibilityReport.java"
 PREFLIGHT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyPreflight.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
@@ -4086,6 +4087,256 @@ public final class SaveDeleteHarness {
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+            )
+
+    def test_protocol2_writer_uses_only_python2_compatible_opcodes(self):
+        """Protocol-2 output is checked by an independent, non-executing reader."""
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+import java.io.ByteArrayOutputStream;
+import java.util.zip.DeflaterOutputStream;
+
+public final class Protocol2WriterHarness {
+    public static void main(String[] args) {
+        List<String[]> pairs = new ArrayList<>();
+        pairs.add(new String[]{"Hello", "你好"});
+        pairs.add(new String[]{"Fine.", "很好。"});
+        byte[] pickle = RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2,
+                "slgtranslated", "game/tl/slgtranslated/translations.rpy",
+                pairs, 17, "fixture-key");
+        try {
+            ByteArrayOutputStream raw = new ByteArrayOutputStream();
+            DeflaterOutputStream deflated = new DeflaterOutputStream(raw);
+            deflated.write(pickle); deflated.finish(); deflated.close();
+            RenpyPatchValidator.Result validation = RenpyPatchValidator.validateCompiledRpyc(
+                    raw.toByteArray(), 17, "fixture-key", "slgtranslated", pairs.size());
+            if (!validation.valid) throw new AssertionError(validation.code + ": " + validation.message);
+        } catch (Exception error) {
+            throw new AssertionError("protocol-2 fixture must pass the structural validator", error);
+        }
+        System.out.print(Base64.getEncoder().encodeToString(pickle));
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="protocol2-writer-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "Protocol2WriterHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(harness_path)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            result = subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.Protocol2WriterHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            pickle = __import__("base64").b64decode(result.stdout.strip())
+
+        self.assertEqual(pickle[:2], b"\x80\x02")
+        self.assertEqual(pickle[-1:], b".")
+        strings = []
+        globals_seen = []
+        opcodes = []
+        position = 0
+        while position < len(pickle):
+            opcode = pickle[position]
+            opcodes.append(opcode)
+            position += 1
+            if opcode == 0x80:  # PROTO
+                self.assertEqual(pickle[position], 2)
+                position += 1
+            elif opcode == 0x63:  # GLOBAL: module\\nname\\n
+                end = pickle.index(b"\n", position)
+                module = pickle[position:end]
+                end2 = pickle.index(b"\n", end + 1)
+                name = pickle[end + 1:end2]
+                self.assertNotEqual(module, b"builtins")
+                self.assertIn(module, (b"__builtin__", b"collections", b"renpy.ast"))
+                globals_seen.append((module.decode("ascii"), name.decode("ascii")))
+                position = end2 + 1
+            elif opcode == 0x58:  # BINUNICODE
+                length = struct.unpack_from("<I", pickle, position)[0]
+                position += 4
+                payload = pickle[position:position + length]
+                self.assertEqual(len(payload), length)
+                strings.append(payload.decode("utf-8"))
+                position += length
+            elif opcode == 0x71:  # BINPUT
+                position += 1
+            elif opcode == 0x72:  # LONG_BINPUT
+                position += 4
+            elif opcode == 0x4a:  # BININT
+                position += 4
+            elif opcode == 0x4b:  # BININT1
+                position += 1
+            elif opcode == 0x4d:  # BININT2
+                position += 2
+            elif opcode in (0x28, 0x29, 0x2e, 0x4e, 0x52, 0x5d, 0x62, 0x65,
+                            0x75, 0x7d, 0x81, 0x85, 0x86, 0x87):
+                pass
+            else:
+                self.fail("protocol-2 reader saw unsupported opcode 0x%02x" % opcode)
+        self.assertNotIn(0x8c, opcodes, "SHORT_BINUNICODE is Python 3 only")
+        self.assertNotIn(0x93, opcodes, "STACK_GLOBAL is Python 3 only")
+        self.assertIn(b"__builtin__", pickle)
+        self.assertNotIn(b"builtins", pickle)
+        self.assertIn(("__builtin__", "list"), globals_seen)
+        self.assertIn(("renpy.ast", "Init"), globals_seen)
+        self.assertIn(("renpy.ast", "TranslateString"), globals_seen)
+        self.assertIn(("renpy.ast", "Return"), globals_seen)
+        for expected in ("version", "key", "fixture-key", "language", "slgtranslated",
+                         "old", "new", "Hello", "你好", "Fine.", "很好。",
+                         "newloc", "priority"):
+            self.assertIn(expected, strings, "restricted reader must recover %s" % expected)
+
+    def test_modern_writer_is_byte_stable_with_existing_translation_pickle(self):
+        """Moving the modern writer must preserve the existing byte stream."""
+        compiler = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app"
+                    / "TranslationCompiler.java")
+        self.assertIn("RpycPickleWriter.Dialect.PY3_MODERN", compiler.read_text("utf-8"))
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Base64;
+
+public final class ModernWriterHarness {
+    public static void main(String[] args) {
+        List<String[]> pairs = new ArrayList<>();
+        pairs.add(new String[]{"Hello", "你好"});
+        byte[] delegated = RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated", "game/t.rpy",
+                pairs, 17, "fixture-key");
+        byte[] legacyCall = TranslationCompiler.buildPickle(
+                "slgtranslated", "game/t.rpy", pairs, 17, "fixture-key");
+        System.out.println(Base64.getEncoder().encodeToString(delegated));
+        System.out.println(Base64.getEncoder().encodeToString(legacyCall));
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="modern-writer-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "ModernWriterHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(harness_path)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            output = subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.ModernWriterHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ).stdout.splitlines()
+        modern = __import__("base64").b64decode(output[0])
+        legacy_call = __import__("base64").b64decode(output[1])
+        self.assertEqual(modern, legacy_call)
+        self.assertIn(b"builtins", modern)
+        self.assertNotIn(b"__builtin__", modern)
+        self.assertIn(b"\x93", modern, "modern output must retain STACK_GLOBAL")
+        self.assertIn(b"\x8c", modern, "modern output must retain SHORT_BINUNICODE")
+
+    def test_protocol2_generation_support_matrix_is_verified_or_extract_only(self):
+        """Only a verified protocol-2 shape may leave the legacy extract-only state."""
+        compatibility = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycCompatibility.java"
+        self.assertIn("canGenerate", compatibility.read_text("utf-8"))
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+import java.util.zip.DeflaterOutputStream;
+
+public final class CompatibilityMatrixHarness {
+    private static byte[] deflate(byte[] value) throws Exception {
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        DeflaterOutputStream out = new DeflaterOutputStream(raw);
+        out.write(value); out.finish(); out.close();
+        return raw.toByteArray();
+    }
+    public static void main(String[] args) throws Exception {
+        List<String[]> pairs = new ArrayList<>();
+        pairs.add(new String[]{"old", "new"});
+        byte[] verified = RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2, "slgtranslated", "game/t.rpy",
+                pairs, 17, "key");
+        RpycCompatibility.Report legacy = RpycCompatibility.inspect(deflate(verified));
+        if (!legacy.canGenerate() || !legacy.isProtocol2WriterVerified()
+                || legacy.generationSupport
+                != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED) {
+            throw new AssertionError("verified protocol2 must be writable: " + legacy.reason);
+        }
+        TranslationCompiler.TemplateMeta meta = new TranslationCompiler.TemplateMeta();
+        meta.version = 17;
+        meta.key = "key";
+        meta.compatibility = legacy;
+        byte[] compiled = TranslationCompiler.compileRpyc(
+                "slgtranslated", "game/t.rpy", pairs, meta);
+        RpycCompatibility.Report compiledReport = RpycCompatibility.inspect(compiled);
+        if (!compiledReport.isProtocol2WriterVerified()) {
+            throw new AssertionError("compiler must select protocol2 for verified Python2 targets");
+        }
+        byte[] unknown = new byte[]{(byte) 0x80, 2, (byte) 0x2e};
+        RpycCompatibility.Report unknownReport = RpycCompatibility.inspect(deflate(unknown));
+        if (unknownReport.canGenerate()
+                || unknownReport.generationSupport
+                != RpycCompatibility.GenerationSupport.UNKNOWN_EXTRACT_ONLY) {
+            throw new AssertionError("unknown pickle must remain extract-only");
+        }
+        byte[] unverifiedPy2 = concat(
+                new byte[]{(byte) 0x80, 2, (byte) 0x63},
+                "__builtin__\nunsupported\n.".getBytes("US-ASCII"));
+        RpycCompatibility.Report legacyOnly = RpycCompatibility.inspect(deflate(unverifiedPy2));
+        if (legacyOnly.canGenerate()
+                || legacyOnly.generationSupport
+                != RpycCompatibility.GenerationSupport.LEGACY_EXTRACT_ONLY) {
+            throw new AssertionError("unverified Python2 pickle must remain extract-only");
+        }
+        System.out.print(Base64.getEncoder().encodeToString(verified));
+    }
+
+    private static byte[] concat(byte[] left, byte[] right) {
+        byte[] result = new byte[left.length + right.length];
+        System.arraycopy(left, 0, result, 0, left.length);
+        System.arraycopy(right, 0, result, left.length, right.length);
+        return result;
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="compatibility-matrix-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "CompatibilityMatrixHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(harness_path)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.CompatibilityMatrixHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
 
 

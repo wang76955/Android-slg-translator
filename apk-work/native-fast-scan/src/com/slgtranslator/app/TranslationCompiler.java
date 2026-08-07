@@ -57,8 +57,7 @@ public final class TranslationCompiler {
             String activationMode = normalizeActivationMode(call.getString("activationMode"));
             TemplateMeta meta = readTemplateMeta(apk);
             if (meta.compatibility != null
-                    && meta.compatibility.generationSupport
-                    != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED) {
+                    && !meta.compatibility.canGenerate()) {
                 call.resolve(compileResult(activationMode, 0, compiledPathFor(activationMode),
                         translatorLanguageFor(activationMode), meta));
                 return;
@@ -178,8 +177,7 @@ public final class TranslationCompiler {
             result.put("templateVersion", meta.version);
             result.put("templateSource", meta.selectionReason);
             if (meta.compatibility != null
-                    && meta.compatibility.generationSupport
-                    != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED) {
+                    && !meta.compatibility.canGenerate()) {
                 result.put("supportLevel", "extract_only");
                 result.put("reasonCode", "legacy_pickle_writer_required");
                 result.put("compatibilityReason", meta.compatibility.reason);
@@ -502,7 +500,9 @@ public final class TranslationCompiler {
     // ------------------------------------------------------------------
 
     static byte[] compileRpyc(String language, String filename, List<String[]> pairs, TemplateMeta meta) {
-        byte[] pickle = buildPickle(language, filename, pairs, meta.version, meta.key);
+        RpycPickleWriter.Dialect dialect = dialectFor(meta);
+        byte[] pickle = RpycPickleWriter.buildTranslationPickle(
+                dialect, language, filename, pairs, meta.version, meta.key);
         byte[] slot = deflate(pickle);
         ByteArrayOutputStream out = new ByteArrayOutputStream(pickle.length + 96);
         out.write(RPC2_MAGIC, 0, RPC2_MAGIC.length);
@@ -524,160 +524,24 @@ public final class TranslationCompiler {
         return out.toByteArray();
     }
 
+    private static RpycPickleWriter.Dialect dialectFor(TemplateMeta meta) {
+        if (meta == null || meta.compatibility == null) {
+            return RpycPickleWriter.Dialect.PY3_MODERN;
+        }
+        if (!meta.compatibility.canGenerate()) {
+            throw new IllegalArgumentException("template generation support is not verified: "
+                    + meta.compatibility.reason);
+        }
+        if (meta.compatibility.isProtocol2WriterVerified()) {
+            return RpycPickleWriter.Dialect.PY2_PROTOCOL_2;
+        }
+        return RpycPickleWriter.Dialect.PY3_MODERN;
+    }
+
     static byte[] buildPickle(String language, String filename, List<String[]> pairs, int version, String key) {
-        ByteArrayOutputStream p = new ByteArrayOutputStream();
-        p.write(0x80); // PROTO
-        p.write(0x02);
-        // data dict
-        p.write(0x7d); // EMPTY_DICT
-        p.write(0x28); // MARK
-        writeShort(p, "version");
-        writeInt(p, version);
-        writeShort(p, "key");
-        writeShort(p, key);
-        writeShort(p, "deferred_parse_errors");
-        writeGlobal(p, "collections", "defaultdict");
-        writeGlobal(p, "builtins", "list");
-        p.write(0x85); // TUPLE1
-        p.write(0x52); // REDUCE
-        p.write(0x75); // SETITEMS
-        // stmts list
-        p.write(0x5d); // EMPTY_LIST
-        p.write(0x28); // MARK
-        // Init node
-        writeGlobal(p, "renpy.ast", "Init");
-        p.write(0x29); // EMPTY_TUPLE
-        p.write(0x81); // NEWOBJ
-        p.write(0x4e); // NONE
-        p.write(0x7d); // EMPTY_DICT
-        p.write(0x28); // MARK
-        writeShort(p, "linenumber");
-        writeInt(p, 1);
-        writeShort(p, "filename");
-        writeString(p, filename);
-        writeShort(p, "name");
-        writeString(p, filename);
-        writeInt(p, 1784316460);
-        writeInt(p, 1416);
-        p.write(0x87); // TUPLE3 (name)
-        writeShort(p, "next");
-        p.write(0x4e); // NONE
-        writeShort(p, "block");
-        p.write(0x5d); // EMPTY_LIST
-        p.write(0x28); // MARK
-        int line = 3;
-        int serial = 1417;
-        for (String[] pair : pairs) {
-            writeGlobal(p, "renpy.ast", "TranslateString");
-            p.write(0x29);
-            p.write(0x81);
-            p.write(0x4e);
-            p.write(0x7d);
-            p.write(0x28);
-            writeShort(p, "linenumber");
-            writeInt(p, line);
-            writeShort(p, "filename");
-            writeString(p, filename);
-            writeShort(p, "name");
-            writeString(p, filename);
-            writeInt(p, 1784316460);
-            writeInt(p, serial++);
-            p.write(0x87); // TUPLE3 (name)
-            writeShort(p, "next");
-            p.write(0x4e); // NONE
-            writeShort(p, "language");
-            writeNullableString(p, language);
-            writeShort(p, "old");
-            writeString(p, pair[0]);
-            writeShort(p, "new");
-            writeString(p, pair[1]);
-            writeShort(p, "newloc");
-            writeString(p, filename);
-            writeInt(p, line);
-            p.write(0x86); // TUPLE2
-            p.write(0x75); // SETITEMS
-            p.write(0x86); // TUPLE2 state
-            p.write(0x62); // BUILD
-            line += 2;
-        }
-        p.write(0x65); // APPENDS
-        writeShort(p, "priority");
-        p.write(0x4b); // BININT1
-        p.write(0);
-        p.write(0x75); // SETITEMS
-        p.write(0x86); // TUPLE2
-        p.write(0x62); // BUILD
-        // Return node
-        writeGlobal(p, "renpy.ast", "Return");
-        p.write(0x29);
-        p.write(0x81);
-        p.write(0x4e);
-        p.write(0x7d);
-        p.write(0x28);
-        writeShort(p, "linenumber");
-        writeInt(p, line);
-        writeShort(p, "filename");
-        writeString(p, filename);
-        writeShort(p, "expression");
-        p.write(0x4e); // NONE
-        writeShort(p, "name");
-        writeString(p, filename);
-        writeInt(p, 1784316460);
-        writeInt(p, serial);
-        p.write(0x87); // TUPLE3 (name)
-        writeShort(p, "next");
-        p.write(0x4e); // NONE
-        p.write(0x75); // SETITEMS
-        p.write(0x86); // TUPLE2
-        p.write(0x62); // BUILD
-        p.write(0x65); // APPENDS stmts
-        p.write(0x86); // TUPLE2 (data, stmts)
-        p.write(0x2e); // STOP
-        return p.toByteArray();
-    }
-
-    private static void writeGlobal(ByteArrayOutputStream out, String module, String name) {
-        writeShort(out, module);
-        writeShort(out, name);
-        out.write(0x93); // STACK_GLOBAL
-    }
-
-    private static void writeShort(ByteArrayOutputStream out, String value) {
-        writeString(out, value);
-    }
-
-    private static void writeString(ByteArrayOutputStream out, String value) {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length <= 255) {
-            out.write(0x8c); // SHORT_BINUNICODE
-            out.write(bytes.length);
-        } else {
-            out.write(0x58); // BINUNICODE
-            writeIntLe(out, bytes.length);
-        }
-        out.write(bytes, 0, bytes.length);
-    }
-
-    private static void writeNullableString(ByteArrayOutputStream out, String value) {
-        if (value == null) {
-            out.write(0x4e); // pickle NONE
-            return;
-        }
-        writeString(out, value);
-    }
-
-    private static void writeInt(ByteArrayOutputStream out, int value) {
-        if (value >= 0 && value <= 0xff) {
-            out.write(0x4b); // BININT1
-            out.write(value);
-        } else if (value >= -0x8000 && value <= 0x7fff) {
-            out.write(0x4d); // BININT2
-            out.write(value & 0xff);
-            out.write((value >>> 8) & 0xff);
-        } else {
-            out.write(0x4a); // BININT
-            writeIntLe(out, value);
-        }
+        return RpycPickleWriter.buildTranslationPickle(
+                RpycPickleWriter.Dialect.PY3_MODERN,
+                language, filename, pairs, version, key);
     }
 
     private static byte[] deflate(byte[] data) {
@@ -843,8 +707,7 @@ public final class TranslationCompiler {
                         ? readSlot(bytes, 2) : readSlot(bytes, 1);
                 Object[] found = pickle == null ? new Object[]{0, null} : scanVersionKey(pickle);
                 if ((Integer) found[0] != 0
-                        || compatibility.generationSupport
-                        != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED) {
+                        || !compatibility.canGenerate()) {
                     candidates.add(new TemplateCandidate(
                             name,
                             priority,

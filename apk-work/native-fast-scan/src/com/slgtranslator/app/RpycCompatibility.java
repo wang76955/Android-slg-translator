@@ -20,6 +20,7 @@ public final class RpycCompatibility {
     private static final byte[] RPC2_MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
     public enum GenerationSupport {
         MODERN_SUPPORTED,
+        LEGACY_PROTOCOL2_SUPPORTED,
         LEGACY_EXTRACT_ONLY,
         UNKNOWN_EXTRACT_ONLY
     }
@@ -43,6 +44,18 @@ public final class RpycCompatibility {
             this.usesPy2Builtins = usesPy2Builtins;
             this.generationSupport = generationSupport;
             this.reason = reason;
+        }
+
+        /** True only when the local writer has a verified dialect for this report. */
+        public boolean canGenerate() {
+            return generationSupport == GenerationSupport.MODERN_SUPPORTED
+                    || generationSupport == GenerationSupport.LEGACY_PROTOCOL2_SUPPORTED;
+        }
+
+        /** True only for the structurally verified Python 2 protocol-2 shape. */
+        public boolean isProtocol2WriterVerified() {
+            return "legacy_protocol2_writer_verified".equals(reason)
+                    && pickleProtocol == 2 && usesPy2Builtins && !usesBuiltins;
         }
     }
 
@@ -81,7 +94,14 @@ public final class RpycCompatibility {
         boolean usesPy2Builtins = containsGlobalName(pickle, "__builtin__");
         GenerationSupport support;
         String reason;
-        if (usesPy2Builtins) {
+        if (isVerifiedProtocol2(pickle, protocol, usesBuiltins, usesPy2Builtins)) {
+            // RenpyPreflight's existing public gate uses MODERN_SUPPORTED to
+            // mean that a verified local writer exists. The report's explicit
+            // dialect predicate keeps that gate compatible without allowing
+            // unknown Python 2 structures through.
+            support = GenerationSupport.MODERN_SUPPORTED;
+            reason = "legacy_protocol2_writer_verified";
+        } else if (usesPy2Builtins) {
             support = GenerationSupport.LEGACY_EXTRACT_ONLY;
             reason = "legacy_pickle_writer_required";
         } else if (usesBuiltins) {
@@ -93,6 +113,114 @@ public final class RpycCompatibility {
         }
         return new Report(container, preferredSlot, protocol, usesBuiltins,
                 usesPy2Builtins, support, reason);
+    }
+
+    /**
+     * Verifies exactly the opcode/global subset emitted by RpycPickleWriter's
+     * Python 2 dialect. This is a structural check only: GLOBAL targets are
+     * recorded as names and are never imported or executed.
+     */
+    private static boolean isVerifiedProtocol2(byte[] pickle, int protocol,
+                                               boolean usesBuiltins,
+                                               boolean usesPy2Builtins) {
+        if (protocol != 2 || usesBuiltins || !usesPy2Builtins) {
+            return false;
+        }
+        boolean collections = false;
+        boolean builtinList = false;
+        boolean init = false;
+        boolean translate = false;
+        boolean ret = false;
+        int pos = 0;
+        while (pos < pickle.length) {
+            int opcode = pickle[pos++] & 0xff;
+            switch (opcode) {
+                case 0x80: // PROTO
+                    if (pos >= pickle.length || (pickle[pos++] & 0xff) != 2) {
+                        return false;
+                    }
+                    break;
+                case 0x63: { // GLOBAL: module\nname\n
+                    int moduleEnd = lineEnd(pickle, pos);
+                    if (moduleEnd >= pickle.length) {
+                        return false;
+                    }
+                    int nameStart = moduleEnd + 1;
+                    int nameEnd = lineEnd(pickle, nameStart);
+                    if (nameEnd >= pickle.length) {
+                        return false;
+                    }
+                    boolean isCollections = equalsAscii(pickle, pos, moduleEnd,
+                            "collections".getBytes(StandardCharsets.US_ASCII));
+                    boolean isPy2Builtins = equalsAscii(pickle, pos, moduleEnd,
+                            "__builtin__".getBytes(StandardCharsets.US_ASCII));
+                    boolean isRenpyAst = equalsAscii(pickle, pos, moduleEnd,
+                            "renpy.ast".getBytes(StandardCharsets.US_ASCII));
+                    if (isCollections) {
+                        if (!equalsAscii(pickle, nameStart, nameEnd,
+                                "defaultdict".getBytes(StandardCharsets.US_ASCII))) {
+                            return false;
+                        }
+                        collections = true;
+                    } else if (isPy2Builtins) {
+                        if (!equalsAscii(pickle, nameStart, nameEnd,
+                                "list".getBytes(StandardCharsets.US_ASCII))) {
+                            return false;
+                        }
+                        builtinList = true;
+                    } else if (isRenpyAst) {
+                        if (equalsAscii(pickle, nameStart, nameEnd,
+                                "Init".getBytes(StandardCharsets.US_ASCII))) {
+                            init = true;
+                        } else if (equalsAscii(pickle, nameStart, nameEnd,
+                                "TranslateString".getBytes(StandardCharsets.US_ASCII))) {
+                            translate = true;
+                        } else if (equalsAscii(pickle, nameStart, nameEnd,
+                                "Return".getBytes(StandardCharsets.US_ASCII))) {
+                            ret = true;
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                    pos = nameEnd + 1;
+                    break;
+                }
+                case 0x58: // BINUNICODE
+                    if (pos + 4 > pickle.length) {
+                        return false;
+                    }
+                    int length = le32(pickle, pos);
+                    if (length < 0 || length > pickle.length - pos - 4) {
+                        return false;
+                    }
+                    pos += 4 + length;
+                    break;
+                case 0x4a: // BININT
+                    if (pos + 4 > pickle.length) return false;
+                    pos += 4;
+                    break;
+                case 0x4b: // BININT1
+                    if (pos >= pickle.length) return false;
+                    pos++;
+                    break;
+                case 0x4d: // BININT2
+                    if (pos + 2 > pickle.length) return false;
+                    pos += 2;
+                    break;
+                case 0x28: case 0x29: case 0x2e: case 0x4e:
+                case 0x52: case 0x5d: case 0x62: case 0x65:
+                case 0x75: case 0x7d: case 0x81: case 0x85:
+                case 0x86: case 0x87:
+                    break;
+                default:
+                    // In particular reject SHORT_BINUNICODE, STACK_GLOBAL,
+                    // protocol-3 globals, and every unknown extension opcode.
+                    return false;
+            }
+        }
+        return collections && builtinList && init && translate && ret;
     }
 
     private static Report invalid(String container, int preferredSlot) {
