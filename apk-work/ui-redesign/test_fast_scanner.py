@@ -57,6 +57,18 @@ def third_party_classpath() -> str:
     return _THIRD_PARTY_CLASSPATH
 
 RPC2_MAGIC = b"RENPY RPC2"
+# Frozen from HEAD^ (before Task 13) TranslationCompiler.buildPickle for:
+# language=slgtranslated, filename=game/t.rpy, version=17, key=fixture-key,
+# pairs=[("Hello", "你好")]. Do not derive this fixture from the new writer.
+MODERN_PICKLE_GOLDEN_B64 = (
+    "gAJ9KIwHdmVyc2lvbksRjANrZXmMC2ZpeHR1cmUta2V5jBVkZWZlcnJlZF9wYXJzZV9lcnJvcnOMC2NvbGxlY3Rpb25z"
+    "jAtkZWZhdWx0ZGljdJOMCGJ1aWx0aW5zjARsaXN0k4VSdV0ojAlyZW5weS5hc3SMBEluaXSTKYFOfSiMCmxpbmVudW1i"
+    "ZXJLAYwIZmlsZW5hbWWMCmdhbWUvdC5ycHmMBG5hbWWMCmdhbWUvdC5ycHlKLIJaak2IBYeMBG5leHROjAVibG9ja10o"
+    "jAlyZW5weS5hc3SMD1RyYW5zbGF0ZVN0cmluZ5MpgU59KIwKbGluZW51bWJlcksDjAhmaWxlbmFtZYwKZ2FtZS90LnJweYwE"
+    "bmFtZYwKZ2FtZS90LnJweUosglpqTYkFh4wEbmV4dE6MCGxhbmd1YWdljA1zbGd0cmFuc2xhdGVkjANvbGSMBUhlbGxvjANuZXeMBuS9"
+    "oOWlvYwGbmV3bG9jjApnYW1lL3QucnB5SwOGdYZiZYwIcHJpb3JpdHlLAHWGYowJcmVucHkuYXN0jAZSZXR1cm6TKYFOfSiMCmxpbmVudW1i"
+    "ZXJLBYwIZmlsZW5hbWWMCmdhbWUvdC5ycHmMCmV4cHJlc3Npb25OjARuYW1ljApnYW1lL3QucnB5SiyCWmpNigWHjARuZXh0TnWGYmWGLg=="
+)
 
 def pickle_short(value: str) -> bytes:
     payload = value.encode("utf-8")
@@ -1387,6 +1399,11 @@ public final class TranslationCompilerActivationHarness {
                 alwaysOn.runtimeFilename), "always-on runtime filename");
         require(hasNullTranslateStringLanguage(inflateSlot(alwaysOn.rpyc)),
                 "always-on TranslateString language must be pickle NONE");
+        RenpyPatchValidator.Result alwaysOnValidation = RenpyPatchValidator.validateCompiledRpyc(
+                alwaysOn.rpyc, 7, "unlocked", null, pairs.size());
+        require(alwaysOnValidation.valid,
+                "always-on NONE language must pass the structural validator: "
+                        + alwaysOnValidation.code);
     }
 
     private static byte[] inflateSlot(byte[] rpyc) throws Exception {
@@ -4202,7 +4219,7 @@ public final class Protocol2WriterHarness {
             self.assertIn(expected, strings, "restricted reader must recover %s" % expected)
 
     def test_modern_writer_is_byte_stable_with_existing_translation_pickle(self):
-        """Moving the modern writer must preserve the existing byte stream."""
+        """Modern output must match the pre-Task-13 byte-for-byte golden."""
         compiler = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app"
                     / "TranslationCompiler.java")
         self.assertIn("RpycPickleWriter.Dialect.PY3_MODERN", compiler.read_text("utf-8"))
@@ -4220,10 +4237,7 @@ public final class ModernWriterHarness {
         byte[] delegated = RpycPickleWriter.buildTranslationPickle(
                 RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated", "game/t.rpy",
                 pairs, 17, "fixture-key");
-        byte[] legacyCall = TranslationCompiler.buildPickle(
-                "slgtranslated", "game/t.rpy", pairs, 17, "fixture-key");
         System.out.println(Base64.getEncoder().encodeToString(delegated));
-        System.out.println(Base64.getEncoder().encodeToString(legacyCall));
     }
 }
 """
@@ -4237,16 +4251,16 @@ public final class ModernWriterHarness {
             subprocess.run(
                 [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
                  "-d", str(classes), "-classpath", third_party_classpath(),
-                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
-                 str(harness_path)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                 *map(str, stubs), str(PICKLE_WRITER), str(harness_path)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             output = subprocess.run(
                 [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.ModernWriterHarness"],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             ).stdout.splitlines()
         modern = __import__("base64").b64decode(output[0])
-        legacy_call = __import__("base64").b64decode(output[1])
-        self.assertEqual(modern, legacy_call)
+        golden = __import__("base64").b64decode(MODERN_PICKLE_GOLDEN_B64)
+        self.assertEqual(modern, golden)
         self.assertIn(b"builtins", modern)
         self.assertNotIn(b"__builtin__", modern)
         self.assertIn(b"\x93", modern, "modern output must retain STACK_GLOBAL")
@@ -4336,6 +4350,90 @@ public final class CompatibilityMatrixHarness {
             )
             subprocess.run(
                 [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.CompatibilityMatrixHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+    def test_protocol2_adversarial_object_graph_stays_extract_only(self):
+        """Names/opcodes alone must not promote a malformed protocol-2 graph."""
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.DeflaterOutputStream;
+
+public final class AdversarialProtocol2Harness {
+    private static byte[] bin(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(0x58); out.write(bytes.length); out.write(0); out.write(0); out.write(0);
+        out.write(bytes, 0, bytes.length);
+        return out.toByteArray();
+    }
+
+    private static byte[] global(String module, String name) {
+        byte[] value = (module + "\n" + name + "\n").getBytes(StandardCharsets.US_ASCII);
+        byte[] result = new byte[value.length + 1];
+        result[0] = 0x63;
+        System.arraycopy(value, 0, result, 1, value.length);
+        return result;
+    }
+
+    private static byte[] join(byte[]... parts) {
+        int length = 0;
+        for (byte[] part : parts) length += part.length;
+        byte[] result = new byte[length];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, result, offset, part.length);
+            offset += part.length;
+        }
+        return result;
+    }
+
+    private static byte[] deflate(byte[] value) throws Exception {
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        DeflaterOutputStream out = new DeflaterOutputStream(raw);
+        out.write(value); out.finish(); out.close();
+        return raw.toByteArray();
+    }
+
+    public static void main(String[] args) throws Exception {
+        // It contains every recognizable version/key/global name, but omits
+        // the required values and object graph ordering. It must not generate.
+        byte[] malformed = join(
+                new byte[]{(byte) 0x80, 2, (byte) 0x7d, (byte) 0x28},
+                bin("version"), bin("key"),
+                global("collections", "defaultdict"),
+                global("__builtin__", "list"),
+                global("renpy.ast", "Init"),
+                global("renpy.ast", "TranslateString"),
+                global("renpy.ast", "Return"),
+                new byte[]{(byte) 0x2e});
+        RpycCompatibility.Report report = RpycCompatibility.inspect(deflate(malformed));
+        if (report.canGenerate()
+                || report.generationSupport
+                != RpycCompatibility.GenerationSupport.LEGACY_EXTRACT_ONLY) {
+            throw new AssertionError("malformed protocol2 graph was promoted: " + report.reason);
+        }
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="adversarial-protocol2-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "AdversarialProtocol2Harness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(harness_path)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.AdversarialProtocol2Harness"],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
 

@@ -4,6 +4,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.InflaterInputStream;
 
@@ -20,7 +24,6 @@ public final class RpycCompatibility {
     private static final byte[] RPC2_MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
     public enum GenerationSupport {
         MODERN_SUPPORTED,
-        LEGACY_PROTOCOL2_SUPPORTED,
         LEGACY_EXTRACT_ONLY,
         UNKNOWN_EXTRACT_ONLY
     }
@@ -48,8 +51,7 @@ public final class RpycCompatibility {
 
         /** True only when the local writer has a verified dialect for this report. */
         public boolean canGenerate() {
-            return generationSupport == GenerationSupport.MODERN_SUPPORTED
-                    || generationSupport == GenerationSupport.LEGACY_PROTOCOL2_SUPPORTED;
+            return generationSupport == GenerationSupport.MODERN_SUPPORTED;
         }
 
         /** True only for the structurally verified Python 2 protocol-2 shape. */
@@ -116,9 +118,10 @@ public final class RpycCompatibility {
     }
 
     /**
-     * Verifies exactly the opcode/global subset emitted by RpycPickleWriter's
-     * Python 2 dialect. This is a structural check only: GLOBAL targets are
-     * recorded as names and are never imported or executed.
+     * Verifies the complete object graph emitted by the restricted Python 2
+     * writer. This reader is deliberately grammar-based: it consumes every
+     * opcode and field in order, never imports or executes a GLOBAL target,
+     * and only returns true at an exact STOP/EOF boundary.
      */
     private static boolean isVerifiedProtocol2(byte[] pickle, int protocol,
                                                boolean usesBuiltins,
@@ -126,101 +129,273 @@ public final class RpycCompatibility {
         if (protocol != 2 || usesBuiltins || !usesPy2Builtins) {
             return false;
         }
-        boolean collections = false;
-        boolean builtinList = false;
-        boolean init = false;
-        boolean translate = false;
-        boolean ret = false;
-        int pos = 0;
-        while (pos < pickle.length) {
-            int opcode = pickle[pos++] & 0xff;
-            switch (opcode) {
-                case 0x80: // PROTO
-                    if (pos >= pickle.length || (pickle[pos++] & 0xff) != 2) {
-                        return false;
-                    }
-                    break;
-                case 0x63: { // GLOBAL: module\nname\n
-                    int moduleEnd = lineEnd(pickle, pos);
-                    if (moduleEnd >= pickle.length) {
-                        return false;
-                    }
-                    int nameStart = moduleEnd + 1;
-                    int nameEnd = lineEnd(pickle, nameStart);
-                    if (nameEnd >= pickle.length) {
-                        return false;
-                    }
-                    boolean isCollections = equalsAscii(pickle, pos, moduleEnd,
-                            "collections".getBytes(StandardCharsets.US_ASCII));
-                    boolean isPy2Builtins = equalsAscii(pickle, pos, moduleEnd,
-                            "__builtin__".getBytes(StandardCharsets.US_ASCII));
-                    boolean isRenpyAst = equalsAscii(pickle, pos, moduleEnd,
-                            "renpy.ast".getBytes(StandardCharsets.US_ASCII));
-                    if (isCollections) {
-                        if (!equalsAscii(pickle, nameStart, nameEnd,
-                                "defaultdict".getBytes(StandardCharsets.US_ASCII))) {
-                            return false;
-                        }
-                        collections = true;
-                    } else if (isPy2Builtins) {
-                        if (!equalsAscii(pickle, nameStart, nameEnd,
-                                "list".getBytes(StandardCharsets.US_ASCII))) {
-                            return false;
-                        }
-                        builtinList = true;
-                    } else if (isRenpyAst) {
-                        if (equalsAscii(pickle, nameStart, nameEnd,
-                                "Init".getBytes(StandardCharsets.US_ASCII))) {
-                            init = true;
-                        } else if (equalsAscii(pickle, nameStart, nameEnd,
-                                "TranslateString".getBytes(StandardCharsets.US_ASCII))) {
-                            translate = true;
-                        } else if (equalsAscii(pickle, nameStart, nameEnd,
-                                "Return".getBytes(StandardCharsets.US_ASCII))) {
-                            ret = true;
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                    pos = nameEnd + 1;
-                    break;
-                }
-                case 0x58: // BINUNICODE
-                    if (pos + 4 > pickle.length) {
-                        return false;
-                    }
-                    int length = le32(pickle, pos);
-                    if (length < 0 || length > pickle.length - pos - 4) {
-                        return false;
-                    }
-                    pos += 4 + length;
-                    break;
-                case 0x4a: // BININT
-                    if (pos + 4 > pickle.length) return false;
-                    pos += 4;
-                    break;
-                case 0x4b: // BININT1
-                    if (pos >= pickle.length) return false;
-                    pos++;
-                    break;
-                case 0x4d: // BININT2
-                    if (pos + 2 > pickle.length) return false;
-                    pos += 2;
-                    break;
-                case 0x28: case 0x29: case 0x2e: case 0x4e:
-                case 0x52: case 0x5d: case 0x62: case 0x65:
-                case 0x75: case 0x7d: case 0x81: case 0x85:
-                case 0x86: case 0x87:
-                    break;
-                default:
-                    // In particular reject SHORT_BINUNICODE, STACK_GLOBAL,
-                    // protocol-3 globals, and every unknown extension opcode.
-                    return false;
+        return new Protocol2Reader(pickle).verify();
+    }
+
+    private static final class Protocol2Reader {
+        private static final int MAGIC = 1784316460;
+        private static final int MAX_STRING_BYTES = 16 * 1024 * 1024;
+        private final byte[] data;
+        private int position;
+        private String filename;
+        private int translationCount;
+
+        Protocol2Reader(byte[] data) {
+            this.data = data;
+        }
+
+        boolean verify() {
+            try {
+                expect(0x80); // PROTO
+                expectByte(2);
+                expect(0x7d); // top-level EMPTY_DICT
+                expect(0x28); // top-level MARK
+                expectField("version");
+                readInteger();
+                expectField("key");
+                readString();
+                expectField("deferred_parse_errors");
+                expectGlobal("collections", "defaultdict");
+                expectGlobal("__builtin__", "list");
+                expect(0x85); // TUPLE1
+                expect(0x52); // REDUCE
+                expect(0x75); // SETITEMS
+
+                expect(0x5d); // stmts EMPTY_LIST
+                expect(0x28); // stmts MARK
+                parseInit();
+                parseReturn();
+                expect(0x65); // APPENDS stmts
+                expect(0x86); // TUPLE2 (data, stmts)
+                expect(0x2e); // STOP
+                return position == data.length && translationCount >= 0;
+            } catch (Protocol2FormatException error) {
+                return false;
             }
         }
-        return collections && builtinList && init && translate && ret;
+
+        private void parseInit() throws Protocol2FormatException {
+            expectGlobal("renpy.ast", "Init");
+            expect(0x29); // EMPTY_TUPLE
+            expect(0x81); // NEWOBJ
+            expect(0x4e); // self argument
+            expect(0x7d); // state EMPTY_DICT
+            expect(0x28); // state MARK
+            expectField("linenumber");
+            if (readInteger() != 1) {
+                throw new Protocol2FormatException();
+            }
+            expectField("filename");
+            filename = readString();
+            expectField("name");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            if (readInteger() != MAGIC || readInteger() != 1416) {
+                throw new Protocol2FormatException();
+            }
+            expect(0x87); // TUPLE3 name
+            expectField("next");
+            expect(0x4e); // NONE
+            expectField("block");
+            expect(0x5d); // block EMPTY_LIST
+            expect(0x28); // block MARK
+            int expectedLine = 3;
+            int expectedSerial = 1417;
+            while (peek() == 0x63) { // only TranslateString may follow
+                parseTranslateString(expectedLine, expectedSerial);
+                expectedLine += 2;
+                expectedSerial++;
+                translationCount++;
+            }
+            expect(0x65); // APPENDS block
+            expectField("priority");
+            if (readInteger() != 0) {
+                throw new Protocol2FormatException();
+            }
+            expect(0x75); // SETITEMS state
+            expect(0x86); // TUPLE2 state
+            expect(0x62); // BUILD Init
+        }
+
+        private void parseTranslateString(int expectedLine, int expectedSerial)
+                throws Protocol2FormatException {
+            expectGlobal("renpy.ast", "TranslateString");
+            expect(0x29); // EMPTY_TUPLE
+            expect(0x81); // NEWOBJ
+            expect(0x4e); // self argument
+            expect(0x7d); // state EMPTY_DICT
+            expect(0x28); // state MARK
+            expectField("linenumber");
+            if (readInteger() != expectedLine) {
+                throw new Protocol2FormatException();
+            }
+            expectField("filename");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            expectField("name");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            if (readInteger() != MAGIC || readInteger() != expectedSerial) {
+                throw new Protocol2FormatException();
+            }
+            expect(0x87); // TUPLE3 name
+            expectField("next");
+            expect(0x4e); // NONE
+            expectField("language");
+            if (peek() == 0x4e) {
+                expect(0x4e);
+            } else {
+                readString();
+            }
+            expectField("old");
+            readString();
+            expectField("new");
+            readString();
+            expectField("newloc");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            if (readInteger() != expectedLine) {
+                throw new Protocol2FormatException();
+            }
+            expect(0x86); // TUPLE2 newloc/line
+            expect(0x75); // SETITEMS state
+            expect(0x86); // TUPLE2 state
+            expect(0x62); // BUILD TranslateString
+        }
+
+        private void parseReturn() throws Protocol2FormatException {
+            expectGlobal("renpy.ast", "Return");
+            expect(0x29); // EMPTY_TUPLE
+            expect(0x81); // NEWOBJ
+            expect(0x4e); // self argument
+            expect(0x7d); // state EMPTY_DICT
+            expect(0x28); // state MARK
+            expectField("linenumber");
+            if (readInteger() != 3 + translationCount * 2) {
+                throw new Protocol2FormatException();
+            }
+            expectField("filename");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            expectField("expression");
+            expect(0x4e); // NONE
+            expectField("name");
+            if (!filename.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+            if (readInteger() != MAGIC || readInteger() != 1417 + translationCount) {
+                throw new Protocol2FormatException();
+            }
+            expect(0x87); // TUPLE3 name
+            expectField("next");
+            expect(0x4e); // NONE
+            expect(0x75); // SETITEMS state
+            expect(0x86); // TUPLE2 state
+            expect(0x62); // BUILD Return
+        }
+
+        private void expectField(String field) throws Protocol2FormatException {
+            if (!field.equals(readString())) {
+                throw new Protocol2FormatException();
+            }
+        }
+
+        private void expectGlobal(String module, String name) throws Protocol2FormatException {
+            expect(0x63); // GLOBAL; only compare bytes, never execute it
+            expectAsciiLine(module);
+            expectAsciiLine(name);
+        }
+
+        private String readString() throws Protocol2FormatException {
+            expect(0x58); // protocol-2 BINUNICODE only
+            if (position + 4 > data.length) {
+                throw new Protocol2FormatException();
+            }
+            int length = le32(data, position);
+            position += 4;
+            if (length < 0 || length > MAX_STRING_BYTES || length > data.length - position) {
+                throw new Protocol2FormatException();
+            }
+            try {
+                CharBuffer decoded = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(data, position, length));
+                position += length;
+                return decoded.toString();
+            } catch (CharacterCodingException error) {
+                throw new Protocol2FormatException();
+            }
+        }
+
+        private int readInteger() throws Protocol2FormatException {
+            int opcode = next();
+            if (opcode == 0x4b) { // BININT1
+                return next();
+            }
+            if (opcode == 0x4d) { // BININT2
+                int low = next();
+                int high = next();
+                return (short) (low | (high << 8));
+            }
+            if (opcode == 0x4a) { // BININT
+                if (position + 4 > data.length) {
+                    throw new Protocol2FormatException();
+                }
+                int value = le32(data, position);
+                position += 4;
+                return value;
+            }
+            throw new Protocol2FormatException();
+        }
+
+        private void expectAsciiLine(String expected) throws Protocol2FormatException {
+            byte[] bytes = expected.getBytes(StandardCharsets.US_ASCII);
+            if (position + bytes.length + 1 > data.length) {
+                throw new Protocol2FormatException();
+            }
+            for (byte value : bytes) {
+                if (data[position++] != value) {
+                    throw new Protocol2FormatException();
+                }
+            }
+            if (data[position++] != '\n') {
+                throw new Protocol2FormatException();
+            }
+        }
+
+        private int peek() throws Protocol2FormatException {
+            if (position >= data.length) {
+                throw new Protocol2FormatException();
+            }
+            return data[position] & 0xff;
+        }
+
+        private int next() throws Protocol2FormatException {
+            int value = peek();
+            position++;
+            return value;
+        }
+
+        private void expect(int opcode) throws Protocol2FormatException {
+            if (next() != opcode) {
+                throw new Protocol2FormatException();
+            }
+        }
+
+        private void expectByte(int value) throws Protocol2FormatException {
+            if (next() != value) {
+                throw new Protocol2FormatException();
+            }
+        }
+    }
+
+    private static final class Protocol2FormatException extends Exception {
     }
 
     private static Report invalid(String container, int preferredSlot) {
