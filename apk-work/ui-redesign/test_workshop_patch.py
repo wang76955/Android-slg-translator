@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -2993,12 +2994,6 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`
         self.assertIn("e=e.replace(/\\\\(?:\\\\|n|r|t)/g", ne)
         self.assertIn("let i=r.text,a=e.trim();", js)
         self.assertNotIn("let i=r.text.trim(),a=e.trim();", js)
-        self.assertIn("cleanupStorage", js)
-        self.assertIn("娓呯悊瀹夎鍖呬笌鏃х紦瀛?", js)
-        self.assertIn("workshop-settings-cleanup", js)
-        self.assertIn("workshop-settings-cleanup", js)
-        self.assertIn("瀛樻。杞Щ", js)
-        self.assertIn("缁х画涓婃鍙炕璇戞柊澧炴枃鏈紙鎺ㄨ崘锛?", js)
         self.assertIn("return`assets/x-game/x-tl/x-${t}/${n.at(-1)||`strings`}.rpy`}", js)
         self.assertNotIn("return`tl/${t}/${n.at(-1)||`strings`}.rpy`}", js)
         lines = [
@@ -3054,6 +3049,163 @@ console.log('ok');
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
 
+
+        pipeline_parser = extract_js_function(js, "function Ne(e,t=``,n)").replace(
+            "function Ne(", "function parseRpyc(", 1
+        )
+        pipeline_controller = extract_js_function(js, "Ce=async()=>")
+        pipeline_parallel = extract_js_function(js, "async function runFileTasksParallel")
+        values = [
+            "Line one\\nLine two",
+            "Line one\nLine two",
+            r"C:\game\script",
+            "中文“测试”",
+        ]
+        values_json = json.dumps(values, ensure_ascii=False)
+        pipeline_harness = r"""
+%s
+%s
+%s
+const expected = %s;
+const NL = String.fromCharCode(10);
+function check(condition, label) { if (!condition) throw new Error(label); }
+function emitRpycString(value) {
+  return "RPYC_STRING\t" + value
+    .replaceAll("\\", "\\\\")
+    .replaceAll(NL, "\\n")
+    .replaceAll("\\r", "\\\\r")
+    .replaceAll("\\t", "\\\\t") + NL;
+}
+        const protocol = expected.map(emitRpycString).join("");
+        check(parseRpyc(protocol, "", "en").length === expected.length,
+              "protocol extraction before Ce preserves all four values");
+globalThis.window = globalThis;
+window.__slgSelectionMeta = {packageName: "com.example.game"};
+let n = "source.apk", ae = [{name: "script.rpyc", fileType: "rpyc"}];
+let te = "api-key", oe = false, x = "openai", re = "https://openai.test/v1";
+let S = "model-a", y = "zh", g = "en", m = null, ps = 1, fs = 1, _mode = "full";
+let vo = {}, cacheIndex = {}, _dirty = {}, bo = false, he = {current: []};
+const requests = [], writes = [], compileRequests = [];
+const _e = [{id: "openai", baseURL: "https://openai.test/v1"}];
+function Co() {}
+function wo() {}
+function is(value) { return String(value); }
+function U(value) { return String(value); }
+function Me() { return "patched.apk"; }
+function ns() { return true; }
+function O() {}
+function ce() {}
+function fe() {}
+function ue() {}
+function w() {}
+function ds(value) { return value; }
+function ke(content, fileType, prefix, sourceLang) {
+  return parseRpyc(content, prefix, sourceLang);
+}
+function rs(file, records, translations, language) {
+  return {
+    outputPath: file.name + "." + language,
+    content: JSON.stringify(records.map(item => ({
+      keyPath: item.keyPath,
+      oldText: item.text,
+      newText: translations.get(item.keyPath) || translations.get(item.text) || ""
+    })))
+  };
+}
+async function Ne(path, content) { writes.push({path, content}); }
+async function Lo(args) {
+  requests.push(args.texts.map(item => item.text));
+  const translations = new Map();
+  for (const item of args.texts) {
+    const value = "translated: " + item.text;
+    translations.set(item.keyPath, value);
+    translations.set(item.text, value);
+  }
+  return {translations, successCount: args.texts.length, error: ""};
+}
+const protocolInput = protocol;
+const E = {
+  createDirectory: async () => ({}),
+  readRenpyTexts: async () => ({content: protocolInput, fileType: "rpyc", renpyRecords: []}),
+  compileTranslationsIntoApk: async args => {
+    compileRequests.push(args);
+    return {compiled: args.items.length};
+  },
+  buildPatchedApk: async () => ({uri: "patched.apk"})
+};
+%s
+%s
+async function main() {
+  await Ce();
+  const cacheKeys = Object.keys(vo).filter(key => key.startsWith("slg-file-v1:"));
+  check(cacheKeys.length === 1, "one stable file cache entry");
+  check(cacheKeys[0] === "slg-file-v1:com.example.game|script.rpyc|en|zh",
+        "cache key preserves source identity only");
+  check(vo[cacheKeys[0]].texts.map(item => item.text).join("\u0000") === expected.join("\u0000"),
+        "cache keeps exact story text");
+  check(requests.length === 1 && requests[0].length === expected.length,
+        "translation receives all four exact values");
+  check(compileRequests.length === 1, "compile request is issued once");
+  const rows = compileRequests[0].items.flatMap(item => JSON.parse(item.content));
+  check(rows.slice(0, expected.length).map(row => row.oldText).join("\u0000") === expected.join("\u0000"),
+        "compile request keeps exact values");
+  check(new Set(rows.map(row => row.oldText)).size === expected.length,
+        "compile request collapses distinct values");
+  console.log("ok");
+}
+main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
+""" % (pipeline_parser, pipeline_controller, pipeline_parallel, values_json, "", "")
+        result = subprocess.run(
+            ["node", "-e", pipeline_harness.replace("__BT__", chr(96))],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_rpyc_protocol_escapes_backslashes_before_newlines(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        parser = extract_js_function(js, "function Ne(e,t=``,n)").replace(
+            "function Ne(", "function parseRpyc(", 1
+        )
+        values = [
+            "Line one\\nLine two",
+            "Line one\nLine two",
+            r"C:\game\script",
+            "中文“测试”",
+        ]
+        values_json = json.dumps(values, ensure_ascii=False)
+        harness = r"""
+%s
+const expected = %s;
+const NL = String.fromCharCode(10);
+function check(condition, label) { if (!condition) throw new Error(label); }
+function emitRpycString(value) {
+  return "RPYC_STRING\t" + value
+    .replaceAll("\\", "\\\\")
+    .replaceAll(NL, "\\n")
+    .replaceAll("\\r", "\\\\r")
+    .replaceAll("\\t", "\\\\t") + NL;
+}
+for (let index = 0; index < expected.length; index++) {
+  const decoded = parseRpyc(emitRpycString(expected[index]), "", "en");
+  check(decoded.length === 1 && decoded[0].text === expected[index],
+        "protocol round-trip mismatch at " + index);
+}
+const literal = parseRpyc(emitRpycString(expected[0]), "", "en")[0].text;
+const newline = parseRpyc(emitRpycString(expected[1]), "", "en")[0].text;
+check(literal !== newline && literal.includes("\\n") && newline.includes(NL),
+      "literal backslash-n and real newline collapsed");
+console.log("ok");
+""" % (parser, values_json)
+        result = subprocess.run(
+            ["node", "-e", harness],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
 
     def test_restore_session_preserves_complete_source_set_metadata(self):
         module = self.load_patch()

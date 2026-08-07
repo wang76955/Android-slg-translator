@@ -1407,13 +1407,14 @@ def patch_rpyc_string_pipeline(js: str) -> str:
     new_ne = (
         "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
         "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12);"
-        "if(!e.trim()||i.has(e))continue;"
+        "if(!e.trim())continue;"
         "e=e.replace("
         "/\\\\(?:\\\\|n|r|t)/g,"
         "m=>m===\"\\\\\\\\\"?\"\\\\\":"
         "m===\"\\\\n\"?\"\\n\":"
         "m===\"\\\\r\"?\"\\r\":"
         "\"\\t\");"
+        "if(i.has(e))continue;"
         "i.add(e),r.push({keyPath:`${t}rpyc_string_${a++}`,text:e})}return r}"
     )
     if js.count(old_ne) != 1:

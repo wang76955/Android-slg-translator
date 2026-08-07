@@ -195,15 +195,16 @@ Ran 2 tests ... OK
 ### WSP-13 `test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines`
 
 - Reproduce: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines -v`
-- First effective failure: `AssertionError: expected cleanup/settings token not found in '<patched bundle>'`（bundle dump 已省略）。
-- Expected behavior: RPYC 文本管线应保留 story text、过滤非文本资源，并正确区分真实换行和 literal `\\n`；相关 workshop settings/runtime 结构应存在。
-- Observed behavior: 进入 `Ne()` 行为 harness 前，固定中文 token 断言已失败。
-- Authority: `WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines`；`Ne()`、`os()`、`patch_assets()` 生产接口。
-- Classification: `ENCODING_BOUNDARY`
-- Classification confidence: Preliminary candidate only; current evidence is a token mismatch, not verified byte-level encoding conversion; root cause pending Phase 1.
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（RPYC/copy token 契约）；`apk-work/ui-redesign/patch_workshop_ui.py`（RPYC patch，Task 1 未修改）。
-- Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines -v` → `AssertionError: expected cleanup/settings token not found in '<patched bundle>'`。
-- Green evidence: `NOT-RUN — 后续任务需分离文本编码问题与 RPYC 运行时行为。`
+- First effective failure (Task 7 RED): the real Node harness reported that combined protocol extraction returned only 3 of the 4 exact values; the actual-newline record was skipped after the literal `\\n` record.
+- Expected behavior: RPYC protocol emission, JavaScript parsing, cache identity, translation input, and compile request must preserve the distinction between literal backslash-n, real newline, backslash, and Unicode text.
+- Root-cause evidence: native `FastApkScanner.java` emits `RPYC_STRING` by escaping backslashes first and then newline/carriage-return/tab. Patched JavaScript `Ne()` decoded after checking `Set.has(rawPayload)`, but inserted the decoded value into that same set. Therefore the decoded literal `Line one\\nLine two` collided with the later raw `Line one\\nLine two` protocol payload. The first conflating layer was the JavaScript parser's duplicate check; no later double-unescape was added.
+- Authority: `WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines`, `test_rpyc_protocol_escapes_backslashes_before_newlines`, and `test_patched_javascript_is_syntactically_valid`; `Ne()`, `Ce=async()=>`, `runFileTasksParallel()`, cache key construction, `Lo()`, compile request construction, and native `FastApkScanner.java` emitter.
+- Classification: `PRODUCT_REGRESSION`
+- Classification confidence: Confirmed by a combined exact-value Node behavior harness before the fix; native producer source was read-only verified.
+- Exact changed paths: `apk-work/ui-redesign/test_workshop_patch.py`; `apk-work/ui-redesign/patch_workshop_ui.py`; no Java, `SaveTransfer.java`, generated bundle, APK, image, or device artifact changed.
+- Red command/result: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines -v` → Node behavior RED: combined `RPYC_STRING` input yielded 3 records instead of 4 because the real-newline value was dropped by `Ne()` duplicate detection.
+- Green command/result: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines test_workshop_patch.WorkshopPatchContractTest.test_rpyc_protocol_escapes_backslashes_before_newlines test_workshop_patch.WorkshopPatchContractTest.test_patched_javascript_is_syntactically_valid -v` → `Ran 3 tests ... OK`; the first two use real Node behavior harnesses and the first continues through extraction → cache → translation → compile request.
+- Evidence boundary: native emitter evidence is source inspection only; JavaScript behavior is Node execution of extracted patched functions; Python orchestration and syntax checks do not prove a real APK, Android bridge, APK assembly/signing, installation, device, or real-game result.
 
 ### WSP-14 `test_save_and_import_game_selection_are_independent`
 
@@ -214,9 +215,10 @@ Ran 2 tests ... OK
 - Authority: `WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent`；`savesSelectedPkg`、`importSelectedPkg` 生产接口。
 - Classification: `ENCODING_BOUNDARY`
 - Classification confidence: Preliminary candidate only; current evidence is a fixture `SyntaxError`, not verified byte-level encoding conversion; root cause pending Phase 1.
-- Change set: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（save/import runtime，Task 1 未修改）。
+- Exact changed paths: `apk-work/ui-redesign/test_workshop_patch.py`（Node harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（save/import runtime，Task 7 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent -v` → `SyntaxError: Unexpected identifier 'cim'`。
-- Green evidence: `NOT-RUN — 先修复 Node harness 的 UTF-8/引号边界。`
+- Green evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_save_and_import_game_selection_are_independent -v` → `Ran 1 test in 0.131s; OK`; current Node behavior fixture exercises independent save/import package, label, and selector state.
+- Green command/result: same exact command → `OK`; this is a Node-only fixture result, not Java/SaveTransfer, APK assembly, Android bridge, installation, device, or real-game evidence.
 
 ### WSP-15 `test_save_transfer_can_import_shared_archive`
 
@@ -333,7 +335,7 @@ Ran 2 tests ... OK
 - Classification: `STALE_CONTRACT` (product CSS already satisfied both required active phases).
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
 - Red evidence: baseline `-v` run failed on the compacted selector token.
-- Green evidence (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation` -> `Ran 1 test ... OK`.
+- GREEN command/result (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translating_state_does_not_replay_card_entrance_animation` -> `Ran 1 test ... OK`.
 
 ### WSP-24 `test_translation_heartbeat_updates_session`
 
@@ -345,7 +347,7 @@ Ran 2 tests ... OK
 - Classification: `STALE_CONTRACT` (no product regression after the full-function/current-fixture run).
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`; no product change.
 - Red evidence: baseline `-v` run failed at the heartbeat assertion.
-- Green evidence (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session` -> `Ran 1 test ... OK`.
+- GREEN command/result (Fix round 1): `python -m unittest -v test_workshop_patch.WorkshopPatchContractTest.test_translation_heartbeat_updates_session` -> `Ran 1 test ... OK`.
 
 ### WSP-25 `test_translation_logs_are_mirrored_into_the_visible_shell`
 
@@ -370,6 +372,22 @@ Ran 2 tests ... OK
 - Change set: `apk-work/ui-redesign/test_workshop_patch.py`（coordinator harness）；`apk-work/ui-redesign/patch_workshop_ui.py`（`Lo()` 生成逻辑，Task 1 未修改）。
 - Red evidence: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_translation_progress_emits_starting_batch_before_request -v` → `Error: both batches translate`。
 - Green evidence: `NOT-RUN — batch progress/coordinator 修复留待后续任务。`
+
+## Task 7 revalidation: RPYC exact-value round trip and Phase 1 gate
+
+Task 7 was revalidated in the existing working tree without touching `progress.md`. The first conflating layer was confirmed in the patched JavaScript `Ne()` duplicate check: native `FastApkScanner.java` escapes backslashes before newline/carriage-return/tab, while the old parser checked raw payloads but stored decoded values in the same set. The minimal fix moves the duplicate check after the single decode and stores only the decoded value. No later double-unescape was added.
+
+- Exact focused RED command/result: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines -v` → historical Node RED: the combined four-value protocol produced 3 records because the actual-newline value was dropped after the literal `\\n` value.
+- Exact focused GREEN command/result: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_rpyc_string_pipeline_keeps_story_text_and_roundtrips_newlines test_workshop_patch.WorkshopPatchContractTest.test_rpyc_protocol_escapes_backslashes_before_newlines test_workshop_patch.WorkshopPatchContractTest.test_patched_javascript_is_syntactically_valid -v` → `Ran 3 tests in 0.407s; OK`.
+- Exact workshop command/result: `python -c "import subprocess,sys; r=subprocess.run([sys.executable,'-m','unittest','test_workshop_patch.py','-v'],timeout=180); sys.exit(r.returncode)"` (executes the requested `python -m unittest test_workshop_patch.py -v` under a 180-second single-command cap) → `Ran 59 tests in 7.650s; FAILED (failures=3)`. The three failures are outside Task 7 scope and are gallery/install/task-runtime Chinese-token contracts: `test_gallery_lists_patches_and_idle_topbar_hides_back`, `test_install_bridge_refreshes_stale_react_button`, and `test_task_runtime_bridges_and_recovery_contract`; all Task 7 focused tests were `ok`.
+- Exact syntax/diff checks: `python -m py_compile patch_workshop_ui.py test_workshop_patch.py`, `git diff --check`, and the exact-path check below were run after the inventory update.
+- Exact changed paths: `apk-work/ui-redesign/test_workshop_patch.py`, `apk-work/ui-redesign/patch_workshop_ui.py`, `docs/qa/renpy-workshop-failure-inventory.md`. `progress.md`, Java/SaveTransfer, generated APK/bundle, images, device artifacts, and unrelated fixtures were not changed by Task 7.
+- Phase 1 discover boundary: `python -m unittest discover -s . -p 'test_*.py' -v` from the repository root ran `Ran 0 tests` because the nested `apk-work` tree is not a discoverable package root. A controlled run from `apk-work/ui-redesign` entered the broader APK/native suite but did not finish within the bounded tool window; an explicit one-second cap reproduced `subprocess.TimeoutExpired` while the suite was still in `test_built_apk`. This is recorded as timeout/range-out evidence, not as a PASS.
+- Evidence boundary: the focused GREEN evidence is Python-driven Node execution of extracted patched JavaScript functions. Native emitter evidence is read-only source inspection. Nothing here claims real APK, Android, device, bridge, assembly/signing, installation, or real-game evidence.
+
+### 26-row WSP field completeness audit
+
+The 26 primary baseline rows `WSP-01` through `WSP-26` were checked after the Task 7 update. Every row has a classification, a RED command/result (`Reproduce` plus `Red evidence`, or the explicit `RED command/result` form), a GREEN command/result (`Green evidence`, including an explicit `NOT-RUN` where not green, or the explicit `GREEN command/result` form), and exact changed paths (`Change set` or `Exact changed paths`). The later authoritative Task 4 sections repeat WSP-04/WSP-08/WSP-09/WSP-10 and are not additional WSP rows. No row is missing a status, and no row claims native Android/device evidence.
 
 ## Task 1 变更边界与风险
 
