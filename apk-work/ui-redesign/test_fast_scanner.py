@@ -4704,6 +4704,129 @@ if(__slgDialogueIdMode||__slgDialogueIdStatus.reason!==`identifier_reused_for_mu
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_dialogue_id_safety_and_ast_matrix_fails_closed_before_translate_say(self):
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+public final class DialogueIdSafetyHarness {
+    private static RenpyDialogueTranslation valid(String id, String oldText) {
+        return new RenpyDialogueTranslation(id, "Alice", oldText, "new-" + oldText,
+                "game/dialogue.rpy", 1);
+    }
+
+    private static void rejectIdentifier(String id) {
+        try {
+            valid(id, "old");
+            throw new AssertionError("unsafe identifier was accepted: " + id);
+        } catch (IllegalArgumentException expected) {
+            // Fail closed before a writer can receive the identifier.
+        }
+    }
+
+    private static void rejectAdvanced(RpycPickleWriter.Dialect dialect, int version) {
+        List<RenpyDialogueTranslation> dialogue = new ArrayList<>();
+        dialogue.add(valid("dialogue-safe", "old"));
+        List<String[]> strings = new ArrayList<>();
+        strings.add(new String[]{"Menu", "菜单"});
+        try {
+            byte[] output = RpycPickleWriter.buildDialogueTranslationPickle(
+                    dialect, "slgtranslated", "game/dialogue.rpy", dialogue,
+                    strings, version, "dialogue-key");
+            String raw = new String(output, StandardCharsets.UTF_8);
+            throw new AssertionError("unverified target emitted TranslateSay: "
+                    + dialect + "/" + version + " raw=" + raw);
+        } catch (IllegalArgumentException expected) {
+            // Protocol 2 and non-17 modern ASTs remain extract-only.
+        }
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args) {
+        rejectIdentifier(null);
+        rejectIdentifier("");
+        rejectIdentifier(" dialogue-safe");
+        rejectIdentifier("dialogue-safe ");
+        rejectIdentifier("dialogue();");
+        rejectIdentifier(new String(new char[257]).replace('\0', 'x'));
+
+        require(RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY3_MODERN, 17),
+                "only modern AST 17 is fixture verified");
+        require(!RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY2_PROTOCOL_2, 17),
+                "protocol 2 must remain extract-only");
+        require(!RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY3_MODERN, 16),
+                "modern AST 16 must remain extract-only");
+        require(!RpycPickleWriter.isDialogueIdWriterVerified(
+                RpycPickleWriter.Dialect.PY3_MODERN, 18),
+                "modern AST 18 must remain extract-only");
+
+        List<RenpyDialogueTranslation> mixedDialogue = new ArrayList<>();
+        mixedDialogue.add(valid("dialogue-a", "Fine."));
+        List<String[]> mixedStrings = new ArrayList<>();
+        mixedStrings.add(new String[]{"First choice", "第一个选项"});
+        mixedStrings.add(new String[]{"Alice", "爱丽丝"});
+        mixedStrings.add(new String[]{"Settings", "设置"});
+        String mixedRaw = new String(RpycPickleWriter.buildDialogueTranslationPickle(
+                RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated",
+                "game/dialogue.rpy", mixedDialogue, mixedStrings, 17, "dialogue-key"),
+                StandardCharsets.UTF_8);
+        require(mixedRaw.contains("TranslateSay") && mixedRaw.contains("dialogue-a"),
+                "verified dialogue must remain context-specific");
+        require(mixedRaw.contains("TranslateString")
+                && mixedRaw.contains("First choice") && mixedRaw.contains("第一个选项")
+                && mixedRaw.contains("Alice") && mixedRaw.contains("爱丽丝")
+                && mixedRaw.contains("Settings") && mixedRaw.contains("设置"),
+                "menu, character and marked UI strings must stay in the global map");
+
+        rejectAdvanced(RpycPickleWriter.Dialect.PY2_PROTOCOL_2, 17);
+        rejectAdvanced(RpycPickleWriter.Dialect.PY3_MODERN, 16);
+        rejectAdvanced(RpycPickleWriter.Dialect.PY3_MODERN, 18);
+
+        List<RenpyDialogueTranslation> duplicate = new ArrayList<>();
+        duplicate.add(valid("same-id", "old-a"));
+        duplicate.add(valid("same-id", "old-b"));
+        try {
+            RpycPickleWriter.buildDialogueTranslationPickle(
+                    RpycPickleWriter.Dialect.PY3_MODERN, "slgtranslated",
+                    "game/dialogue.rpy", duplicate, new ArrayList<String[]>(),
+                    17, "dialogue-key");
+            throw new AssertionError("duplicate ID mapped to different old text emitted TranslateSay");
+        } catch (IllegalArgumentException expected) {
+            // A collision must fall back to the global string-map path.
+        }
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="dialogue-id-safety-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "DialogueIdSafetyHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes), "-classpath", third_party_classpath(),
+                    *map(str, stubs), str(DIALOGUE_TRANSLATION), str(PICKLE_WRITER),
+                    str(harness_path),
+                ],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.DialogueIdSafetyHarness"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
     def test_rpyc_extractor_matches_official_marked_string_forms(self):
         extractor = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycTextExtractor.java"
         source = extractor.read_text("utf-8")

@@ -47,15 +47,14 @@ public final class RenpyDialogueTranslation {
     }
 
     private static String requireIdentifier(String value) {
-        String normalized = value == null ? "" : value.trim();
-        if (normalized.isEmpty()) {
+        if (value == null || value.isEmpty()) {
             throw new IllegalArgumentException("dialogue identifier is required");
         }
-        if (normalized.length() > 256
-                || !normalized.matches("[A-Za-z0-9._:-]+")) {
+        if (value.length() > 256
+                || !value.matches("[A-Za-z0-9._:-]+")) {
             throw new IllegalArgumentException("dialogue identifier is not a safe literal");
         }
-        return normalized;
+        return value;
     }
 
     private static String requireText(String value, String field) {

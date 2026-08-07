@@ -2956,6 +2956,53 @@ check(ready.children.some(el=>el.tag===`button`&&el.text===`\u2039 \u8fd4\u56de`
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_dialogue_id_capability_matrix_defaults_off_and_keeps_mixed_paths(self):
+        module = self.load_patch()
+        runtime = module.dialogue_id_runtime
+        node_script = runtime + r'''
+globalThis.window=globalThis;
+function check(condition,label){if(!condition)throw new Error(label)}
+const flags=[`extractorVerified`,`writerVerified`,`astVersionVerified`,`rollbackValidated`];
+for(const missing of flags){
+  window.__slgDialogueIdCapability={extractorVerified:true,writerVerified:true,astVersionVerified:true,rollbackValidated:true};
+  window.__slgDialogueIdCapability[missing]=false;
+  window.__slgRegisterDialogueRecords([{kind:`DIALOGUE`,identifier:`dialogue-a`,text:`Fine.`,coverageCertain:true}]);
+  const status=window.__slgPrepareDialogueIdMode(true,[{identifier:`dialogue-a`,oldText:`Fine.`,newText:`很好。`}]);
+  check(!status.enabled&&!status.available&&!window.__slgDialogueIdMode,`missing ${missing} must keep advanced mode off: ${JSON.stringify(status)}`);
+}
+window.__slgDialogueIdCapability={extractorVerified:`true`,writerVerified:true,astVersionVerified:true,rollbackValidated:true};
+window.__slgDialogueIdRecords=[];
+let nonBoolean=window.__slgPrepareDialogueIdMode(true,[{identifier:`dialogue-a`,oldText:`Fine.`,newText:`很好。`}]);
+check(!nonBoolean.enabled&&!nonBoolean.available&&!window.__slgDialogueIdMode,`non-boolean capability must fail closed: ${JSON.stringify(nonBoolean)}`);
+
+window.__slgDialogueIdCapability={extractorVerified:true,writerVerified:true,astVersionVerified:true,rollbackValidated:true};
+window.__slgDialogueIdRecords=[];
+window.__slgRegisterDialogueRecords([
+  {kind:`DIALOGUE`,identifier:``,text:`empty`,coverageCertain:true},
+  {kind:`DIALOGUE`,identifier:` dialogue-a`,text:`leading whitespace`,coverageCertain:true},
+  {kind:`DIALOGUE`,identifier:`dialogue();`,text:`code-like`,coverageCertain:true},
+  {kind:`DIALOGUE`,identifier:`x`.repeat(257),text:`oversized`,coverageCertain:true}
+]);
+const unsafe=window.__slgPrepareDialogueIdMode(true,[]);
+check(!unsafe.enabled&&!unsafe.available&&unsafe.reason===`no_reliable_dialogue_identifier`,
+  `unsafe identifiers must use global string map: ${JSON.stringify(unsafe)}`);
+check(window.__slgDialogueIdRecords.length===0,`unsafe records must not become dialogue translations`);
+
+window.__slgDialogueIdRecords=[];
+window.__slgRegisterDialogueRecords([
+  {kind:`DIALOGUE`,identifier:`dialogue-a`,text:`Fine.`,coverageCertain:true},
+  {kind:`DIALOGUE`,identifier:`dialogue-a`,text:`Other.`,coverageCertain:true}
+]);
+const collision=window.__slgPrepareDialogueIdMode(true,[]);
+check(!collision.enabled&&!window.__slgDialogueIdMode&&collision.reason===`identifier_reused_for_multiple_old`,
+  `duplicate ID with different old text must fail closed: ${JSON.stringify(collision)}`);
+'''
+        result = subprocess.run(
+            ["node", "-e", node_script],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
     def test_candidate_filter_drops_tl_duplicates_and_crashes_never(self):
         module = self.load_patch()

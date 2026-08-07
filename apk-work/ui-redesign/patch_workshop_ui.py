@@ -1850,7 +1850,7 @@ function assess(requested){
 const records=root.__slgDialogueIdRecords||[],cap=root.__slgDialogueIdCapability||defaultCapability;
 const ids=new Map,valid=records.filter(reliable);
 for(const record of valid){const prior=ids.get(record.identifier);if(prior&&prior!==record.text){root.__slgDialogueIdMode=false;root.__slgDialogueIdStatus={enabled:false,available:false,reason:`identifier_reused_for_multiple_old`,contextCount:0};render();return root.__slgDialogueIdStatus}ids.set(record.identifier,record.text)}
-const ready=!!cap.extractorVerified&&!!cap.writerVerified&&!!cap.astVersionVerified&&!!cap.rollbackValidated&&valid.length>0;
+const ready=cap.extractorVerified===true&&cap.writerVerified===true&&cap.astVersionVerified===true&&cap.rollbackValidated===true&&valid.length>0;
 let reason=ready?`ready`:(!cap.extractorVerified?`extractor_identifier_unverified`:!cap.writerVerified?`writer_ast_unverified`:!cap.astVersionVerified?`target_ast_version_unverified`:!cap.rollbackValidated?`rollback_not_validated`:`no_reliable_dialogue_identifier`);
 const enabled=!!requested&&ready;
 root.__slgDialogueIdMode=enabled;
