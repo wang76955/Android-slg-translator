@@ -451,7 +451,14 @@ def patch_scan_flow(js: str) -> str:
         "s.baseUri=s.baseUri||s.uri;s.splitUris=splitUris;s.splitNames=splitNames;"
         "s.splitCount=Number(s.splitCount??splitUris.length??0);s.packageName=s.packageName||\"\";"
         "s.versionCode=s.versionCode??\"\";s.source=s.source===\"installed\"||(!s.source&&s.packageName)?\"installed\":\"file\";"
-        "return s},scanSelectedApk=async(e,selectionEpoch)=>{"
+        "return s},mergeSelectionMetadata=(current,update)=>{const previous=current||{},next=update||{},s=Object.assign({},previous,next);"
+        "const nextSplitUris=Array.isArray(next.splitUris),nextSplitNames=Array.isArray(next.splitNames);"
+        "s.uri=next.uri||previous.uri||\"\";s.baseUri=next.baseUri||previous.baseUri||s.uri;"
+        "s.splitUris=nextSplitUris?next.splitUris:(Array.isArray(previous.splitUris)?previous.splitUris:[]);"
+        "s.splitNames=nextSplitNames?next.splitNames:(Array.isArray(previous.splitNames)?previous.splitNames:[]);"
+        "s.splitCount=next.splitCount??(nextSplitUris?next.splitUris.length:(previous.splitCount??s.splitUris.length));"
+        "s.packageName=next.packageName??previous.packageName??\"\";s.versionCode=next.versionCode??previous.versionCode??\"\";"
+        "s.source=next.source??previous.source??(next.packageName?\"installed\":\"file\");return s},scanSelectedApk=async(e,selectionEpoch)=>{"
     )
     if patched.count(normalize_marker) != 1:
         raise ValueError("APK scan normalizer signature is not unique")
@@ -642,7 +649,7 @@ function setReactInputValue(input,value)""",
     mount_new = (
         "function restoreSession(){if(restoringSession||window.__slgSelectionMeta)return;let raw=null;try{raw=localStorage.getItem(SESSION_KEY)}catch{}"
         "if(!raw)return;let s=null;try{s=JSON.parse(raw)}catch{}if(!s||!s.uri||!s.translating)return;restoringSession=true;"
-        "Promise.resolve(window.__slgLoadSelectedApk?.({uri:s.uri,name:s.name||s.label||\"\",packageName:s.packageName||\"\",source:s.source||\"installed\",splitApk:false,splitCount:0}))"
+        "Promise.resolve(window.__slgLoadSelectedApk?.({uri:s.uri,baseUri:s.baseUri||s.uri,splitUris:Array.isArray(s.splitUris)?s.splitUris:[],splitNames:Array.isArray(s.splitNames)?s.splitNames:[],splitCount:Number(s.splitCount??(Array.isArray(s.splitUris)?s.splitUris.length:0)),name:s.name||s.label||\"\",label:s.label||s.name||\"\",packageName:s.packageName??\"\",versionCode:s.versionCode??\"\",source:s.source||\"installed\",splitApk:false}))"
         ".catch(()=>{}).finally(()=>{restoringSession=false;if(s.translating)sessionRestoredAt=s.savedAt||Date.now();refresh()})}\n"
         "function recoveryBanner(savedAt){const wrap=textNode(\"section\",\"workshop-task-card\");"
         "wrap.append(textNode(\"h2\",\"workshop-settings-title\",\"" "\u4e0a\u6b21\u7ffb\u8bd1\u4e2d\u65ad" "\"),"
@@ -1035,7 +1042,7 @@ async function Lo(e){'''
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
         "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri);"
-        "if(_r?.uri){window.__slgSelectionMeta=Object.assign({},window.__slgSelectionMeta,_r,{baseUri:_r.baseUri||_r.uri,splitUris:_r.splitUris||[],splitNames:_r.splitNames||[],splitCount:_r.splitCount||0}),window.__slgSelectionMeta.uri=_r.uri}}"
+        "if(_r?.uri){window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r),window.__slgSelectionMeta.uri=_r.uri}}"
         "catch(_e){O(`\u91cd\u65b0\u83b7\u53d6\u6e38\u620f\u5b89\u88c5\u5305\u5931\u8d25: ${_e&&_e.message||_e}`,\u0060error\u0060)}"
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgMenuInjectedForRefresh){try{"
         "const _m=await E.injectTranslatorMenu({apkUri:window.__slgSelectionMeta?.uri||n,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});"

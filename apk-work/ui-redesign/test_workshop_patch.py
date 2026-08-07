@@ -117,11 +117,25 @@ def extract_js_expression(source: str, signature: str) -> str:
     regex_class = False
     paren_depth = brace_depth = bracket_depth = 0
     control_parens = []
+    control_braces = []
     closed_control_paren = False
+    closed_control_body = False
     index = start
     while index < len(source):
         char = source[index]
         mode, template_boundary = contexts[-1]
+        if mode == "line_comment":
+            if char in "\r\n":
+                contexts.pop()
+            index += 1
+            continue
+        if mode == "block_comment":
+            if char == "*" and index + 1 < len(source) and source[index + 1] == "/":
+                contexts.pop()
+                index += 2
+                continue
+            index += 1
+            continue
         if mode == "regex":
             if escaped:
                 escaped = False
@@ -169,12 +183,31 @@ def extract_js_expression(source: str, signature: str) -> str:
             ):
                 word_end -= 1
             previous_word = source[word_end + 1 : previous + 1]
+            if index + 1 < len(source) and source[index + 1] == "/":
+                contexts.append(("line_comment", None))
+                index += 2
+                continue
+            if index + 1 < len(source) and source[index + 1] == "*":
+                contexts.append(("block_comment", None))
+                index += 2
+                continue
             if (
                 previous_char in "([{:;,=!?&|+*%^~<>"
                 or not previous_char
                 or previous_word
-                in {"return", "throw", "case", "delete", "void", "typeof", "yield", "await"}
+                in {
+                    "return",
+                    "throw",
+                    "case",
+                    "delete",
+                    "void",
+                    "typeof",
+                    "yield",
+                    "await",
+                    "else",
+                }
                 or (previous_char == ")" and closed_control_paren)
+                or (previous_char == "}" and closed_control_body)
             ):
                 contexts.append(("regex", None))
                 regex_class = False
@@ -197,12 +230,28 @@ def extract_js_expression(source: str, signature: str) -> str:
             paren_depth -= 1
             closed_control_paren = bool(control_parens.pop()) if control_parens else False
         elif char == "{":
+            previous = index - 1
+            while previous >= start and source[previous].isspace():
+                previous -= 1
+            word_end = previous
+            while word_end >= start and (
+                source[word_end].isalnum() or source[word_end] in "_$"
+            ):
+                word_end -= 1
+            control_braces.append(
+                closed_control_paren
+                or source[word_end + 1 : previous + 1]
+                in {"else", "try", "finally", "do"}
+            )
             brace_depth += 1
+            closed_control_paren = False
+            closed_control_body = False
         elif char == "}":
             if template_boundary is not None and brace_depth == template_boundary:
                 contexts.pop()
             else:
                 brace_depth -= 1
+                closed_control_body = bool(control_braces.pop()) if control_braces else False
         elif char == "[":
             bracket_depth += 1
         elif char == "]":
@@ -242,6 +291,22 @@ class WorkshopPatchContractTest(unittest.TestCase):
     def test_extract_js_expression_fails_closed_without_top_level_terminator(self):
         with self.assertRaisesRegex(AssertionError, "terminator not found"):
             extract_js_expression("loader=()=>{return /[{}]/i}", "loader=")
+
+    def test_extract_js_expression_ignores_line_and_block_comments(self):
+        source = (
+            "loader=()=>{const line=1 // comma, and a brace }\n"
+            "const block=2 /* comma, and a brace } */;return {line,block}},next=()=>{}"
+        )
+        expression = extract_js_expression(source, "loader=")
+        self.assertEqual(expression, source.split(",next=")[0])
+
+    def test_extract_js_expression_handles_regex_after_else_and_control_body(self):
+        source = (
+            r"loader=()=>{if (ready) {} else /[{},]/giu.test(value);"
+            r"if (again) {hit()} /}/.test(value);return {ready,again}},next=()=>{}"
+        )
+        expression = extract_js_expression(source, "loader=")
+        self.assertEqual(expression, source.split(",next=")[0])
 
     def test_canonical_extracted_assets_are_cryptographically_pinned(self):
         module = self.load_patch()
@@ -444,6 +509,11 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
         for token in (
             "loadSelectedApk=window.__slgLoadSelectedApk=e=>",
             "normalizeSelection=e=>",
+            "mergeSelectionMetadata=(current,update)=>",
+            "next.splitCount??",
+            "next.packageName??previous.packageName",
+            "next.versionCode??previous.versionCode",
+            "window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r)",
             "s.baseUri=s.baseUri||s.uri",
             "s.splitUris=splitUris",
             "s.splitNames=splitNames",
@@ -2470,6 +2540,78 @@ console.log('ok');
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
 
+
+    def test_restore_session_preserves_complete_source_set_metadata(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        restore_runtime = extract_js_function(js, "function restoreSession()")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+globalThis.localStorage=localStorage;
+window.__slgSelectionMeta=null;
+let restoringSession=false,sessionRestoredAt=0,loaded=null;
+window.__slgLoadSelectedApk=async selection=>{loaded=selection};
+function refresh(){}
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function main(){
+  localStorage.data[SESSION_KEY]=JSON.stringify({
+    uri:"file://base.apk",baseUri:"file://base.apk",
+    splitUris:["file://config.apk","file://lang.apk"],
+    splitNames:["config.apk","lang.apk"],splitCount:2,
+    name:"Game.apk",label:"Game",packageName:"game.pkg",
+    versionCode:17,source:"installed",savedAt:123,translating:true
+  });
+  restoreSession();await tick();
+  check(loaded&&loaded.uri==="file://base.apk"&&loaded.baseUri==="file://base.apk","restore preserves uri and baseUri");
+  check(loaded.splitUris.join(",")==="file://config.apk,file://lang.apk"&&loaded.splitNames.join(",")==="config.apk,lang.apk"&&loaded.splitCount===2,"restore preserves split metadata");
+  check(loaded.packageName==="game.pkg"&&loaded.versionCode===17&&loaded.source==="installed","restore preserves package version and source");
+  check(loaded.name==="Game.apk"&&loaded.label==="Game"&&loaded.splitApk===false,"restore preserves display metadata and scan mode");
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", restore_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_installed_source_refresh_preserves_existing_split_metadata(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        merge_runtime = extract_js_expression(js, "mergeSelectionMetadata=") + ";"
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+'''
+        contract = behavior_contract + "\nlet mergeSelectionMetadata;\n" + merge_runtime + r'''
+const previous={uri:"file://old.apk",baseUri:"file://base.apk",
+  splitUris:["file://config.apk","file://lang.apk"],
+  splitNames:["config.apk","lang.apk"],splitCount:2,
+  packageName:"old.pkg",versionCode:17,source:"installed",name:"Old.apk"};
+const refreshed=mergeSelectionMetadata(previous,{uri:"file://refreshed.apk",packageName:"new.pkg"});
+check(refreshed.uri==="file://refreshed.apk","refresh updates the current uri");
+check(refreshed.baseUri===previous.baseUri,"incomplete refresh keeps baseUri");
+check(refreshed.splitUris.join(",")===previous.splitUris.join(",")&&refreshed.splitNames.join(",")===previous.splitNames.join(",")&&refreshed.splitCount===2,"incomplete refresh keeps split metadata");
+check(refreshed.packageName==="new.pkg"&&refreshed.versionCode===17&&refreshed.source==="installed","incomplete refresh keeps omitted package fields safely");
+'''
+        result = subprocess.run(
+            ["node", "--input-type=module"],
+            input=contract,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_dismiss_recovery_banner_re_renders_immediately(self):
         """Dismissing the interrupted-session banner must re-render right away."""
