@@ -510,7 +510,9 @@ check(os('assets/x-renpy/x-common/x-00gui.rpyc','slgtranslated').startsWith('ass
             "loadSelectedApk=window.__slgLoadSelectedApk=e=>",
             "normalizeSelection=e=>",
             "mergeSelectionMetadata=(current,update)=>",
-            "next.splitCount??",
+            "nextSplitCountPresent=next.splitCount!==undefined",
+            "splitTupleComplete=nextSplitUris&&nextSplitNames",
+            "s.splitCount=splitTupleComplete?nextSplitCount:previousSplitCount",
             "next.packageName??previous.packageName",
             "next.versionCode??previous.versionCode",
             "window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r)",
@@ -2597,11 +2599,20 @@ const previous={uri:"file://old.apk",baseUri:"file://base.apk",
   splitUris:["file://config.apk","file://lang.apk"],
   splitNames:["config.apk","lang.apk"],splitCount:2,
   packageName:"old.pkg",versionCode:17,source:"installed",name:"Old.apk"};
-const refreshed=mergeSelectionMetadata(previous,{uri:"file://refreshed.apk",packageName:"new.pkg"});
-check(refreshed.uri==="file://refreshed.apk","refresh updates the current uri");
-check(refreshed.baseUri===previous.baseUri,"incomplete refresh keeps baseUri");
-check(refreshed.splitUris.join(",")===previous.splitUris.join(",")&&refreshed.splitNames.join(",")===previous.splitNames.join(",")&&refreshed.splitCount===2,"incomplete refresh keeps split metadata");
-check(refreshed.packageName==="new.pkg"&&refreshed.versionCode===17&&refreshed.source==="installed","incomplete refresh keeps omitted package fields safely");
+const full=mergeSelectionMetadata(previous,{uri:"file://full.apk",baseUri:"file://full-base.apk",splitUris:["file://full-split.apk"],splitNames:["full-split.apk"],splitCount:1,packageName:"new.pkg",versionCode:18,source:"installed"});
+check(full.uri==="file://full.apk"&&full.baseUri==="file://full-base.apk","complete refresh updates uri and baseUri");
+check(full.splitUris.join(",")==="file://full-split.apk"&&full.splitNames.join(",")==="full-split.apk"&&full.splitCount===1,"complete refresh replaces the split tuple atomically");
+check(full.packageName==="new.pkg"&&full.versionCode===18&&full.source==="installed","complete refresh preserves the complete SourceSet shape");
+function assertPreviousTuple(update,label){
+  const refreshed=mergeSelectionMetadata(previous,Object.assign({uri:"file://refreshed.apk"},update));
+  check(refreshed.uri==="file://refreshed.apk"&&refreshed.baseUri===previous.baseUri,label+" keeps uri/baseUri behavior");
+  check(JSON.stringify(refreshed.splitUris)===JSON.stringify(previous.splitUris)&&JSON.stringify(refreshed.splitNames)===JSON.stringify(previous.splitNames)&&refreshed.splitCount===previous.splitCount,label+" preserves the prior split tuple");
+  check(refreshed.packageName===previous.packageName&&refreshed.versionCode===previous.versionCode&&refreshed.source===previous.source,label+" preserves the other SourceSet fields");
+}
+assertPreviousTuple({splitUris:[]},"only splitUris");
+assertPreviousTuple({splitNames:["replacement.apk"]},"only splitNames");
+assertPreviousTuple({splitCount:0},"only splitCount");
+assertPreviousTuple({splitUris:["file://one.apk"],splitNames:["one.apk","extra.apk"],splitCount:1},"inconsistent split tuple");
 '''
         result = subprocess.run(
             ["node", "--input-type=module"],
