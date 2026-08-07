@@ -2981,10 +2981,32 @@ public final class RenpyPreflightHarness {
         require(legacy.activationStrategy == RenpyCompatibilityReport.ActivationStrategy.NONE,
                 "extract-only must not activate a writer strategy");
         require(legacy.issues.size() > 0, "legacy report must carry a stable issue");
+        RenpyCompatibilityReport unsupported = RenpyPreflight.inspect(null, null);
+        require(unsupported.supportLevel == RenpyCompatibilityReport.SupportLevel.UNSUPPORTED,
+                "missing source set must be unsupported");
+        require(unsupported.activationStrategy == RenpyCompatibilityReport.ActivationStrategy.NONE,
+                "unsupported source set must not select an activation strategy");
+        require(unsupported.issues.size() == 1
+                        && "renpy_preflight_missing_source".equals(unsupported.issues.get(0).code),
+                "missing source set must expose one stable issue code");
+        require(unsupported.isBlocked(), "unsupported report must be blocked");
+        int extractionCalls = 0, modelCalls = 0, buildCalls = 0;
+        if (!unsupported.isBlocked()) {
+            extractionCalls++;
+            modelCalls++;
+            buildCalls++;
+        }
+        require(extractionCalls == 0 && modelCalls == 0 && buildCalls == 0,
+                "unsupported snapshot must not permit extract/model/build actions");
         String sanitized = safe.toSanitizedJson();
         require(sanitized.contains("templatePath"), "sanitized report must contain diagnostics");
         require(!sanitized.contains("apiKey") && !sanitized.contains("apkBytes")
                 && !sanitized.contains("fullScript"), "sanitized report must not contain secrets or APK contents");
+        String unsupportedJson = unsupported.toSanitizedJson();
+        require(unsupportedJson.contains("renpy_preflight_missing_source")
+                        && unsupportedJson.contains("UNSUPPORTED")
+                        && unsupportedJson.contains("NONE"),
+                "unsupported JSON must preserve only the stable gate diagnostics");
     }
 }
 """
@@ -3038,6 +3060,48 @@ public final class RenpyPreflightHarness {
         blocked_branch = block.index("if(window.__slgRenpyCompatibilityBlocked)")
         self.assertLess(block.index("EXTRACT_ONLY"), blocked_branch)
         self.assertLess(source.index("__slgRenpyCompatibilityPreflightDone"), source.index("async function Vo"))
+
+    def test_renpy_unsupported_snapshot_blocks_generated_extract_model_and_build(self):
+        """Execute the generated Ce gate with an unsupported report and count downstream calls."""
+        import patch_workshop_ui as patcher
+        from test_workshop_patch import extract_js_expression
+
+        base_assets = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets"
+        js, _ = patcher.patch_assets(
+            (base_assets / "index-CJtfdHOF.js").read_text("utf-8"),
+            (base_assets / "index-C044IUg3.css").read_text("utf-8"),
+        )
+        ce_expression = extract_js_expression(js, "Ce=async()=>")
+        self.assertTrue(ce_expression.startswith("Ce=async()=>"))
+        node_script = f"""
+globalThis.window=globalThis;
+        let extractionCalls=0,modelCalls=0,buildCalls=0,ceCalls=0,ceLast=null;
+let n=`fixture.apk`,ae=[{{fileType:`rpyc`,name:`script.rpyc`}}],te=`api-key`,oe=false;
+function O(){{}};
+        function ce(value){{ceCalls++;ceLast=value;}}
+globalThis.__slgResetTranslationCollisionReport=()=>{{}};
+globalThis.__slgResetTranslationCoverage=()=>{{}};
+window.__slgSelectionMeta={{source:`file`}};
+window.__slgRenpyMenuType=`renpy`;
+window.__slgFontPreflightDone=true;
+window.__slgRenpyCompatibilityPreflightDone=false;
+window.__slgRenpyCompatibilityGate=`blocked`;
+window.__slgRenpyCompatibilityReport={{supportLevel:`UNSUPPORTED`,activationStrategy:`NONE`,issues:[{{code:`renpy_preflight_missing_source`}}]}};
+globalThis.__slgRenderRenpyCompatibilityReport=()=>{{}};
+const E={{readRenpyTexts:async()=>{{extractionCalls++}},buildPatchedApk:async()=>{{buildCalls++}}}};
+const Ce={ce_expression[3:]};
+(async()=>{{
+  await Ce();
+          if(extractionCalls!==0||modelCalls!==0||buildCalls!==0||ceCalls!==1||ceLast!==false){{
+    throw new Error(JSON.stringify({{extractionCalls,modelCalls,buildCalls,ceCalls,ceLast}}));
+  }}
+}})().catch(error=>{{console.error(error);process.exit(1)}});
+"""
+        result = subprocess.run(
+            ["node", "-e", node_script],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_renpy_compatibility_accumulate_uses_all_read_records(self):
         """Two extraction batches must aggregate to 3 unique, 4 occurrences, 1 collision."""
