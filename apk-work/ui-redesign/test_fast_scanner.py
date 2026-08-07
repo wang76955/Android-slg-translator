@@ -2,6 +2,7 @@ import re
 import os
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 import struct
@@ -1903,8 +1904,16 @@ public final class TranslationCompilerActivationHarness {
             )
 
     def test_workshop_patch_propagates_activation_mode_and_guidance(self):
-        patcher = ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py"
-        source = patcher.read_text("utf-8")
+        ui_redesign = ROOT / "apk-work" / "ui-redesign"
+        sys.path.insert(0, str(ui_redesign))
+        from patch_workshop_ui import patch_assets
+        from test_workshop_patch import extract_js_function
+
+        base_assets = ROOT / "apk-work" / "extracted" / "assets" / "public" / "assets"
+        js, _ = patch_assets(
+            (base_assets / "index-CJtfdHOF.js").read_text("utf-8"),
+            (base_assets / "index-C044IUg3.css").read_text("utf-8"),
+        )
         for token in (
             "window.__slgActivationMode",
             "activationMode:window.__slgActivationMode||'always_on'",
@@ -1914,10 +1923,33 @@ public final class TranslationCompilerActivationHarness {
             "window.__slgCompileFailed",
             "fontWarning",
             "always_on",
-            r"\u8bf7\u5728\u6e38\u620f\u8bbe\u7f6e\u4e2d\u9009\u62e9\u7ffb\u8bd1\u6587\u672c",
-            r"\u6b64\u6e38\u620f\u4e0d\u652f\u6301\u53ef\u9760\u7684\u8bed\u8a00\u83dc\u5355\u6ce8\u5165\uff0c\u4e2d\u6587\u7ffb\u8bd1\u5c06\u5728\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528\uff0c\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587",
         ):
-            self.assertIn(token, source)
+            self.assertIn(token, js)
+
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+let installButton=null;
+function textNode(tag,cls,text){return{tag,cls,text:text||``,children:[],append(...children){this.children.push(...children)}}}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function savePatchedApk(){} function triggerReactButton(){} function clickReact(){}
+function collect(node,out=[]){if(!node)return out;if(node.tag===`button`)out.push(node);for(const child of node.children||[])collect(child,out);return out}
+function visibleText(node,out=[]){if(!node)return out;if(node.text)out.push(String(node.text));for(const child of node.children||[])visibleText(child,out);return out}
+const selectable=renderStateBody(`completed`,{fileName:`fixture.apk`,patchedApkPath:`/tmp/fixture-patched-signed.apk`,activationMode:`selectable`,renpyLang:``,renpyMenuType:`renpy`});
+const selectableText=visibleText(selectable).join(`\n`);
+check(selectableText.includes(`\u8bf7\u8fdb\u5165\u6e38\u620f\u8bbe\u7f6e`)&&selectableText.includes(`\u7ffb\u8bd1\u6587\u672c`)&&selectableText.includes(`\u5207\u56de\u539f\u6587`),`selectable guidance is rendered`);
+const alwaysOn=renderStateBody(`completed`,{fileName:`fixture.apk`,patchedApkPath:`/tmp/fixture-patched-signed.apk`,activationMode:`always_on`,renpyLang:``,renpyMenuType:`none`});
+const alwaysOnText=visibleText(alwaysOn).join(`\n`);
+check(alwaysOnText.includes(`\u542f\u52a8\u65f6\u9ed8\u8ba4\u542f\u7528`)&&alwaysOnText.includes(`\u6e38\u620f\u5185\u4e0d\u80fd\u5207\u56de\u539f\u6587`),`always-on guidance is rendered`);
+'''
+        result = subprocess.run(
+            ["node", "-e", render_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_template_meta_prefers_game_script_over_common_and_tl(self):
         harness = r"""

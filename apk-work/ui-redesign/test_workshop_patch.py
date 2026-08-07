@@ -1437,7 +1437,13 @@ check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh
         self.assertIn('dispatchEvent(new MouseEvent("click"', js)
         self.assertIn('bubbles:true,cancelable:true,view:window', js)
         self.assertIn('function triggerReactButton(button)', js)
-        self.assertIn('actionButton("\u4fdd\u5b58\u8865\u4e01 APK"', js)
+        # The completed shell exposes the current save action only when the
+        # native build returned a concrete artifact path.  Keep this tied to
+        # the extracted runtime branch instead of the old localized label.
+        self.assertRegex(
+            render_runtime,
+            r'if\(payload\.patchedApkPath\)actions\.append\(actionButton\("[^" ]+ APK",\(\)=>savePatchedApk\(payload\.patchedApkPath\)\)\)',
+        )
         self.assertIn('shell.setAttribute("data-workshop-state",state)', js)
         self.assertRegex(
             js,
@@ -2185,11 +2191,11 @@ let lastSnapshot=`completed`;
 let refreshes=0;
 function refresh(){refreshes+=1}
 const startButton={textContent:`start`,disabled:false,dispatchEvent(){dispatched.push(`start`)}};
-const staleInstall={textContent:`安装补丁版`,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
-const freshInstall={textContent:`安装补丁版`,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
+const staleInstall={textContent:`\u5b89\u88c5\u8865\u4e01\u7248`,disabled:false,isConnected:false,dispatchEvent(){dispatched.push(`stale`)}};
+const freshInstall={textContent:`\u5b89\u88c5\u8865\u4e01\u7248`,disabled:false,isConnected:true,dispatchEvent(){dispatched.push(`fresh`)}};
 let installButton=staleInstall;
 let currentInstall=freshInstall;
-function findButton(label){return label===`安装补丁版`?currentInstall:null}
+function findButton(label){return label===`\u5b89\u88c5\u8865\u4e01\u7248`?currentInstall:null}
 function readTaskSnapshot(){return{state:`completed`}}
 function setWorkshopState(){throw new Error(`unexpected state change`)}
 function textNode(tag,cls,text){return{tag,cls,text,children:[],append(...children){this.children.push(...children)}}}
@@ -2201,11 +2207,15 @@ check(manualIdle===false,`manual idle reset`);
 check(dispatched.length===1&&dispatched[0]===`fresh`,`fresh install target`);
 
 installButton=freshInstall;
-const rendered=renderStateBody(`completed`,{fileName:`fixture.apk`,translated:`1`,raw:`done`,installAvailable:true});
+const withoutArtifact=renderStateBody(`completed`,{fileName:`fixture.apk`,translated:`1`,raw:`done`,installAvailable:true});
+const withoutArtifactButtons=[];
+function collectButtons(node,out){if(!node)return;if(node.tag===`button`)out.push(node);for(const child of node.children||[])collectButtons(child,out)}
+collectButtons(withoutArtifact,withoutArtifactButtons);
+check(!withoutArtifactButtons.some(button=>button.label===`\u76f4\u63a5\u5b89\u88c5`),`install action requires a concrete artifact path`);
+const rendered=renderStateBody(`completed`,{fileName:`fixture.apk`,patchedApkPath:`/tmp/fixture-patched-signed.apk`,translated:`1`,raw:`done`,installAvailable:true});
 const buttons=[];
-function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
-visit(rendered);
-const visibleInstall=buttons.find(button=>button.label===`\u76f4\u63a5\u5b89\u88c5`);
+collectButtons(rendered,buttons);
+const visibleInstall=buttons.find(button=>button.label===`\u7acb\u5373\u5b89\u88c5`);
 check(visibleInstall,`install action rendered`);
 dispatched=[];
 currentInstall=null;
@@ -2895,6 +2905,12 @@ check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.incl
         js, css = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
+        gallery_runtime = extract_js_function(js, "function renderGallery()")
+        self.assertRegex(
+            gallery_runtime,
+            r'const save=actionButton\("\\u[0-9a-f]{4}\\u[0-9a-f]{4}\\u[0-9a-f]{4}\\u[0-9a-f]{4}[^" ]*",\(\)=>savePatchedApk\(patch\.path\)\)',
+        )
+        self.assertIn('save.className="workshop-patch-save"', gallery_runtime)
         for token in (
             "function openGallery()",
             "function closeGallery(",
@@ -2911,7 +2927,6 @@ check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.incl
             "if(galleryOpen)loadPatches()",
             "\\u4fdd\\u5b58\\u5230\\u4e0b\\u8f7d",
             "\\u6211\\u7684\\u8865\\u4e01",
-            'actionButton("\u4fdd\u5b58\u8865\u4e01 APK"',
         ):
             self.assertIn(token, js)
         compact_css = "".join(css.split())
