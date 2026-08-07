@@ -127,9 +127,10 @@ public final class FastApkScanner {
         }
         try {
             RenpyResourceLimits.checkPath(entryName.replace("!/", "/"));
-            File apk = fileFrom(apkUri);
-            if (apk == null || !apk.isFile()) {
-                call.reject("APK \u4e0d\u5b58\u5728: " + apkUri);
+            InstalledApkSet apkSet = installedApkSet(Uri.parse(apkUri), call);
+            File apk = findApkForEntry(apkSet, entryName, call.getString("sourceApk"));
+            if (apk == null) {
+                call.reject("Entry not found in APK set: " + entryName);
                 return;
             }
             String content = "";
@@ -147,7 +148,7 @@ public final class FastApkScanner {
                 }
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
-                    fontReport = fontPreflight(context, apk);
+                    fontReport = mergeFontReportsForApkSet(context, apkSet);
                     StringBuilder out = new StringBuilder();
                     boolean translationBucket = lower.contains("/x-tl/")
                             || lower.contains("/tl/");
@@ -196,6 +197,9 @@ public final class FastApkScanner {
             JSObject result = new JSObject();
             result.put("content", content);
             result.put("fileType", fileType);
+            result.put("sourceApk", apk.getName());
+            result.put("apkRole", apk.equals(apkSet.baseApk) ? "base" : "split");
+            result.put("splitCount", apkSet.splitApks.size());
             result.put("renpyRecords", renpyRecords);
             JSObject classificationJson = new JSObject();
             for (Map.Entry<String, String> entry : coverageClassifications.entrySet()) {
@@ -288,6 +292,25 @@ public final class FastApkScanner {
         return new File(normalized);
     }
 
+    private static File findApkForEntry(InstalledApkSet apkSet, String entryName,
+                                        String preferredSourceApk) throws IOException {
+        for (File apk : apkSet.allApks()) {
+            if (preferredSourceApk != null && !preferredSourceApk.isEmpty()
+                    && !preferredSourceApk.equals(apk.getName())) {
+                continue;
+            }
+            try (ZipFile zip = new ZipFile(apk)) {
+                if (readEntryData(zip, entryName, Long.MAX_VALUE) != null) {
+                    return apk;
+                }
+            }
+        }
+        if (preferredSourceApk != null && !preferredSourceApk.isEmpty()) {
+            throw new IOException("split metadata sourceApk is not part of the selected set");
+        }
+        return null;
+    }
+
     private static byte[] readEntryBytes(ZipFile zip, ZipEntry entry) throws IOException {
         if (entry.getCompressedSize() >= 0) {
             RenpyResourceLimits.checkCompressed(entry.getCompressedSize());
@@ -323,7 +346,7 @@ public final class FastApkScanner {
     ) {
         new Thread(() -> {
             try {
-                JSObject response = scan(context, Uri.parse(uriText), plugin);
+                JSObject response = scan(context, Uri.parse(uriText), plugin, call);
                 call.resolve(response);
             } catch (Throwable error) {
                 String message = error.getMessage();
@@ -336,16 +359,35 @@ public final class FastApkScanner {
     }
 
     private static JSObject scan(Context context, Uri uri, Object plugin) throws Exception {
+        return scan(context, uri, plugin, null);
+    }
+
+    private static JSObject scan(Context context, Uri uri, Object plugin, PluginCall call) throws Exception {
         long startedAt = SystemClock.elapsedRealtime();
         long deadline = startedAt + SCAN_TIMEOUT_MS;
         Metadata metadata = readMetadata(context.getContentResolver(), uri);
-        String cacheKey = sha256(uri + "|" + metadata.displayName + "|" + metadata.size + "|" + metadata.lastModified);
+        InstalledApkSet apkSet = null;
+        File localBase = fileFrom(uri == null ? null : uri.toString());
+        if ((localBase != null && localBase.isFile()) || hasSplitUris(call)) {
+            apkSet = installedApkSet(uri, call);
+        }
+        String cacheKey = sha256(apkSet == null
+                ? uri + "|" + metadata.displayName + "|" + metadata.size + "|" + metadata.lastModified
+                : apkSetCacheKey(apkSet, metadata));
         ScanResult cached;
         synchronized (CACHE) {
             cached = CACHE.get(cacheKey);
         }
         if (cached != null) {
             return toResponse(cached, SystemClock.elapsedRealtime() - startedAt, true);
+        }
+
+        if (apkSet != null && !apkSet.splitApks.isEmpty()) {
+            ScanResult result = scanApkSet(apkSet, plugin, deadline, context);
+            synchronized (CACHE) {
+                CACHE.put(cacheKey, result);
+            }
+            return toResponse(result, SystemClock.elapsedRealtime() - startedAt, false);
         }
 
         ContentResolver resolver = context.getContentResolver();
@@ -378,6 +420,329 @@ public final class FastApkScanner {
                 temp.deleteOnExit();
             }
         }
+    }
+
+    private static InstalledApkSet installedApkSet(Uri uri, PluginCall call) {
+        File base = fileFrom(uri == null ? null : uri.toString());
+        if (base == null || !base.isFile()) {
+            throw new IllegalArgumentException("base APK is missing or unreadable");
+        }
+        List<String> splitUris = new ArrayList<>();
+        String packageName = "unknown";
+        long versionCode = -1L;
+        List<String> splitNames = new ArrayList<>();
+        if (call != null) {
+            String requestedPackage = call.getString("packageName");
+            if (requestedPackage != null && !requestedPackage.trim().isEmpty()) {
+                packageName = requestedPackage.trim();
+            }
+            String requestedVersion = call.getString("versionCode");
+            if (requestedVersion != null && !requestedVersion.trim().isEmpty()) {
+                try {
+                    versionCode = Long.parseLong(requestedVersion.trim());
+                } catch (NumberFormatException error) {
+                    throw new IllegalArgumentException("split metadata versionCode is invalid");
+                }
+            }
+            JSArray values = call.getArray("splitUris");
+            JSArray names = call.getArray("splitNames");
+            if (values != null) {
+                for (int index = 0; index < values.length(); index++) {
+                    String value = arrayString(values, index);
+                    if (value == null || value.trim().isEmpty()) {
+                        throw new IllegalArgumentException("split metadata contains an empty URI");
+                    }
+                    splitUris.add(value);
+                    String splitName = arrayString(names, index);
+                    splitNames.add(splitName);
+                }
+            }
+        }
+        return InstalledApkSet.fromUris(base.getAbsolutePath(), splitUris, packageName,
+                versionCode, splitNames);
+    }
+
+    private static String arrayString(JSArray array, int index) {
+        if (array == null) return "";
+        Object value = array.opt(index);
+        if (value == null) return "";
+        String text = String.valueOf(value);
+        return "null".equals(text) ? "" : text;
+    }
+
+    private static boolean hasSplitUris(PluginCall call) {
+        if (call == null) return false;
+        JSArray values = call.getArray("splitUris");
+        return values != null && values.length() > 0;
+    }
+
+    private static String apkSetCacheKey(InstalledApkSet apkSet, Metadata baseMetadata) {
+        StringBuilder key = new StringBuilder(apkSet.packageName)
+                .append('|').append(apkSet.versionCode)
+                .append('|').append(apkSet.baseApk.getAbsolutePath())
+                .append('|').append(baseMetadata.displayName).append('|')
+                .append(baseMetadata.size).append('|').append(baseMetadata.lastModified);
+        for (File split : apkSet.splitApks) {
+            key.append('|').append(split.getAbsolutePath()).append('|')
+                    .append(split.length()).append('|').append(split.lastModified());
+        }
+        return key.toString();
+    }
+
+    /** Scan each ZIP independently, then merge only its central-directory metadata. */
+    static ScanResult scanApkSet(InstalledApkSet apkSet, Object plugin,
+                                 long deadline, Context context) throws Exception {
+        List<ApkEntry> merged = new ArrayList<>();
+        Map<String, ApkEntry> byName = new LinkedHashMap<>();
+        ScanResult baseResult = null;
+        List<String> languages = new ArrayList<>();
+        String menuType = "none";
+        int rpaCount = 0;
+        RpycCompatibility.Report bestCompatibility = null;
+        RenpyCompatibilityReport bestReport = null;
+        String bestTemplatePath = null;
+        String bestTemplateSource = null;
+        List<RenpyFontSupport.FontReport> fontReports = new ArrayList<>();
+        List<String> fontReportSources = new ArrayList<>();
+        validateApkSetMetadata(context, apkSet);
+        for (int index = 0; index < apkSet.allApks().size(); index++) {
+            ensureBeforeDeadline(deadline);
+            File apk = apkSet.allApks().get(index);
+            ScanResult current = enumerateCentralDirectory(apk, plugin, deadline, context);
+            if (index == 0) {
+                baseResult = current;
+            }
+            if (!"unknown".equals(apkSet.packageName)
+                    && current.packageName != null && !current.packageName.isEmpty()
+                    && !apkSet.packageName.equals(current.packageName)) {
+                throw new IOException("split metadata packageName mismatch in " + apk.getName());
+            }
+            for (String language : current.renpyLanguages) {
+                if (!languages.contains(language)) languages.add(language);
+            }
+            if ("none".equals(menuType) && !"none".equals(current.renpyMenuType)) {
+                menuType = current.renpyMenuType;
+            }
+            rpaCount += current.rpaCount;
+            if (current.compatibilityReport != null && current.compatibilityReport.font != null) {
+                fontReports.add(current.compatibilityReport.font);
+                fontReportSources.add(apk.getName());
+            }
+            if (current.compatibility != null && current.compatibilityReport != null) {
+                String templatePath = current.compatibilityReport.templatePath;
+                String sourceKey = apk.getName() + "!/" + templatePath;
+                if (bestCompatibility == null
+                        || isBetterTemplate(templatePath, sourceKey, bestTemplatePath, bestTemplateSource)) {
+                    bestCompatibility = current.compatibility;
+                    bestReport = current.compatibilityReport;
+                    bestTemplatePath = templatePath;
+                    bestTemplateSource = sourceKey;
+                }
+            }
+            for (ApkEntry entry : current.entries) {
+                ApkEntry sourced = entry.withSource(apk.getName(), index == 0 ? "base" : "split");
+                if (!byName.containsKey(sourced.name)) {
+                    byName.put(sourced.name, sourced);
+                    merged.add(sourced);
+                } else {
+                    byName.get(sourced.name).duplicateSourceApks.add(sourced.sourceApk);
+                }
+            }
+        }
+        if (baseResult == null) {
+            throw new IOException("split metadata has no base APK");
+        }
+        RenpyFontSupport.FontReport mergedFont = mergeFontReports(fontReports, fontReportSources);
+        RenpyCompatibilityReport report = bestReport;
+        if (report != null) {
+            report = new RenpyCompatibilityReport(
+                    report.supportLevel, report.activationStrategy, report.templatePath,
+                    bestCompatibility, rpaCount, apkSet.splitApks.size(), languages,
+                    menuType, mergedFont, report.uniqueTextCount,
+                    report.occurrenceCount, report.collisionCount, report.issues);
+        }
+        return new ScanResult(merged, baseResult.packageName, languages, menuType,
+                bestCompatibility, report, rpaCount, apkSet.splitApks.size());
+    }
+
+    private static boolean isBetterTemplate(String candidatePath, String candidateSource,
+                                            String currentPath, String currentSource) {
+        int candidatePriority = TranslationCompiler.templatePriority(candidatePath);
+        int currentPriority = currentPath == null
+                ? Integer.MAX_VALUE : TranslationCompiler.templatePriority(currentPath);
+        if (candidatePriority != currentPriority) {
+            return candidatePriority < currentPriority;
+        }
+        if (currentSource == null) return true;
+        return candidateSource.compareToIgnoreCase(currentSource) < 0;
+    }
+
+    private static RenpyFontSupport.FontReport mergeFontReports(
+            List<RenpyFontSupport.FontReport> fontReports,
+            List<String> fontReportSources) {
+        if (fontReports == null || fontReports.isEmpty()) return null;
+        List<String> candidates = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<Integer> missingAcrossSet = null;
+        int expectedRequiredCount = fontReports.get(0).requiredCount;
+        boolean requiredSetMismatch = false;
+        RenpyFontSupport.FontReport best = null;
+        String bestSource = "";
+        for (int index = 0; index < fontReports.size(); index++) {
+            RenpyFontSupport.FontReport report = fontReports.get(index);
+            String source = index < fontReportSources.size() ? fontReportSources.get(index) : "split-" + index;
+            for (String candidate : report.candidateFonts) {
+                String qualified = source + "!/" + candidate;
+                if (!candidates.contains(qualified)) candidates.add(qualified);
+            }
+            for (String warning : report.warnings) {
+                if (!warnings.contains(warning)) warnings.add(warning);
+            }
+            Set<Integer> missingInReport = new LinkedHashSet<>(report.missingCodePoints);
+            if (missingAcrossSet == null) {
+                missingAcrossSet = missingInReport;
+            } else if (report.requiredCount == expectedRequiredCount) {
+                // Each APK contributes fonts visible to the same loader namespace.
+                // A code point is still missing only when every APK's best candidate
+                // reports it as missing.
+                missingAcrossSet.retainAll(missingInReport);
+            } else {
+                warnings.add("font_preflight_required_set_mismatch");
+                requiredSetMismatch = true;
+            }
+            if (best == null || report.coveredCount > best.coveredCount
+                    || (report.coveredCount == best.coveredCount
+                    && source.compareToIgnoreCase(bestSource) < 0)) {
+                best = report;
+                bestSource = source;
+            }
+        }
+        if (best == null) return null;
+        String bestPath = best.bestFontPath == null || best.bestFontPath.isEmpty()
+                ? "" : bestSource + "!/" + best.bestFontPath;
+        List<Integer> missing = new ArrayList<>(missingAcrossSet == null
+                ? best.missingCodePoints : missingAcrossSet);
+        int requiredCount = requiredSetMismatch
+                ? Math.max(expectedRequiredCount, best.requiredCount) : expectedRequiredCount;
+        int coveredCount = Math.max(0, requiredCount - missing.size());
+        if (requiredSetMismatch) {
+            coveredCount = Math.min(coveredCount, best.coveredCount);
+        }
+        return new RenpyFontSupport.FontReport(
+                candidates, bestPath, requiredCount, coveredCount,
+                missing,
+                hasChineseStyleBucket(fontReports),
+                hasEastAsianLineBreakEvidence(fontReports),
+                warnings);
+    }
+
+    private static RenpyFontSupport.FontReport mergeFontReportsForApkSet(
+            Context context, InstalledApkSet apkSet) {
+        List<RenpyFontSupport.FontReport> reports = new ArrayList<>();
+        List<String> sources = new ArrayList<>();
+        for (File source : apkSet.allApks()) {
+            reports.add(fontPreflight(context, source));
+            sources.add(source.getName());
+        }
+        return mergeFontReports(reports, sources);
+    }
+
+    private static boolean hasChineseStyleBucket(
+            List<RenpyFontSupport.FontReport> reports) {
+        for (RenpyFontSupport.FontReport report : reports) {
+            if (report.hasChineseStyleBucket) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasEastAsianLineBreakEvidence(
+            List<RenpyFontSupport.FontReport> reports) {
+        for (RenpyFontSupport.FontReport report : reports) {
+            if (report.hasEastAsianLineBreakEvidence) return true;
+        }
+        return false;
+    }
+
+    private static void validateApkSetMetadata(Context context, InstalledApkSet apkSet)
+            throws IOException {
+        if (apkSet == null || apkSet.baseApk == null || apkSet.splitApks == null) {
+            throw new IOException("split metadata has no complete APK set");
+        }
+        if (context == null || context.getPackageManager() == null) {
+            if (!apkSet.splitApks.isEmpty()) {
+                throw new IOException("split metadata parser is unavailable; refusing base-only scan");
+            }
+            return;
+        }
+        try {
+            Method parser = context.getPackageManager().getClass().getMethod(
+                    "getPackageArchiveInfo", String.class, int.class);
+            List<File> all = apkSet.allApks();
+            Object baseInfo = parser.invoke(context.getPackageManager(), apkSet.baseApk.getAbsolutePath(), 0);
+            if (baseInfo == null) throw new IOException("split metadata base manifest is unreadable");
+            String basePackage = stringField(baseInfo, "packageName");
+            long baseVersion = versionField(baseInfo);
+            if (!"unknown".equals(apkSet.packageName) && !apkSet.packageName.equals(basePackage)) {
+                throw new IOException("split metadata packageName mismatch in base APK");
+            }
+            for (int index = 1; index < all.size(); index++) {
+                File split = all.get(index);
+                Object splitInfo = parser.invoke(context.getPackageManager(), split.getAbsolutePath(), 0);
+                if (splitInfo == null) {
+                    throw new IOException("split metadata manifest is unreadable: " + split.getName());
+                }
+                if (!basePackage.equals(stringField(splitInfo, "packageName"))) {
+                    throw new IOException("split metadata packageName mismatch in " + split.getName());
+                }
+                if (baseVersion >= 0 && versionField(splitInfo) != baseVersion) {
+                    throw new IOException("split metadata versionCode mismatch in " + split.getName());
+                }
+                String actualSplitName = splitNameField(splitInfo);
+                String expectedSplitName = apkSet.splitNameAt(index - 1).replaceAll("\\.apk$", "");
+                if (actualSplitName == null || actualSplitName.isEmpty()) {
+                    throw new IOException("split metadata splitName unavailable in " + split.getName());
+                }
+                if (!expectedSplitName.equals(actualSplitName)) {
+                    throw new IOException("split metadata splitName mismatch in " + split.getName());
+                }
+            }
+            if (apkSet.versionCode >= 0 && baseVersion >= 0 && apkSet.versionCode != baseVersion) {
+                throw new IOException("split metadata versionCode mismatch in base APK");
+            }
+        } catch (IOException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IOException("split metadata validation failed closed: "
+                    + (error.getMessage() == null ? error.toString() : error.getMessage()));
+        }
+    }
+
+    private static String stringField(Object object, String fieldName) throws Exception {
+        Object value = object.getClass().getField(fieldName).get(object);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static long versionField(Object object) throws Exception {
+        try {
+            Method method = object.getClass().getMethod("getLongVersionCode");
+            Object value = method.invoke(object);
+            return value instanceof Number ? ((Number) value).longValue() : -1L;
+        } catch (NoSuchMethodException ignored) {
+            Object value = object.getClass().getField("versionCode").get(object);
+            return value instanceof Number ? ((Number) value).longValue() : -1L;
+        }
+    }
+
+    private static String splitNameField(Object object) throws Exception {
+        try {
+            Object value = object.getClass().getField("splitNames").get(object);
+            if (value instanceof String[] && ((String[]) value).length == 1) {
+                return ((String[]) value)[0];
+            }
+        } catch (NoSuchFieldException ignored) {
+            // Older PackageInfo implementations have no splitNames field.
+        }
+        return null;
     }
 
     private static ScanResult scanSeekableDescriptor(
@@ -472,6 +837,12 @@ public final class FastApkScanner {
                     addRpaEntries(zip, entry, name, extension, entries, deadline);
                     continue;
                 }
+                if ("ttf".equals(extension) || "otf".equals(extension)
+                        || "ttc".equals(extension) || "otc".equals(extension)) {
+                    RenpyResourceLimits.checkPath(name);
+                    entries.add(new ApkEntry(name, entry.getSize(), entry.getCompressedSize(), "font"));
+                    continue;
+                }
                 if (!TEXT_EXTENSIONS.contains(extension)) {
                     continue;
                 }
@@ -534,7 +905,7 @@ public final class FastApkScanner {
                             0,
                             0));
             return new ScanResult(entries, packageName, new ArrayList<>(languages), menuType,
-                    compatibility, compatibilityReport);
+                    compatibility, compatibilityReport, rpaCount, 0);
         }
     }
 
@@ -706,12 +1077,20 @@ public final class FastApkScanner {
             value.put("size", entry.size);
             value.put("compressedSize", entry.compressedSize);
             value.put("fileType", entry.fileType);
+            value.put("sourceApk", entry.sourceApk);
+            value.put("apkRole", entry.apkRole);
+            JSArray duplicateSources = new JSArray();
+            for (String sourceApk : entry.duplicateSourceApks) {
+                duplicateSources.put(sourceApk);
+            }
+            value.put("duplicateSourceApks", duplicateSources);
             entries.put(value);
         }
         JSObject response = new JSObject();
         response.put("entries", entries);
         response.put("totalFiles", entries.length());
         response.put("packageName", result.packageName);
+        response.put("splitCount", result.splitCount);
         JSArray languages = new JSArray();
         for (String language : result.renpyLanguages) {
             languages.put(language);
@@ -887,12 +1266,27 @@ public final class FastApkScanner {
         final long size;
         final long compressedSize;
         final String fileType;
+        final String sourceApk;
+        final String apkRole;
+        final List<String> duplicateSourceApks;
 
         ApkEntry(String name, long size, long compressedSize, String fileType) {
+            this(name, size, compressedSize, fileType, "base.apk", "base");
+        }
+
+        ApkEntry(String name, long size, long compressedSize, String fileType,
+                 String sourceApk, String apkRole) {
             this.name = name;
             this.size = size;
             this.compressedSize = compressedSize;
             this.fileType = fileType;
+            this.sourceApk = sourceApk;
+            this.apkRole = apkRole;
+            this.duplicateSourceApks = new ArrayList<>();
+        }
+
+        ApkEntry withSource(String sourceApk, String apkRole) {
+            return new ApkEntry(name, size, compressedSize, fileType, sourceApk, apkRole);
         }
     }
 
@@ -903,16 +1297,20 @@ public final class FastApkScanner {
         final String renpyMenuType;
         final RpycCompatibility.Report compatibility;
         final RenpyCompatibilityReport compatibilityReport;
+        final int rpaCount;
+        final int splitCount;
 
         ScanResult(List<ApkEntry> entries, String packageName, List<String> renpyLanguages,
                    String renpyMenuType, RpycCompatibility.Report compatibility,
-                   RenpyCompatibilityReport compatibilityReport) {
+                   RenpyCompatibilityReport compatibilityReport, int rpaCount, int splitCount) {
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
             this.packageName = packageName == null ? "" : packageName;
             this.renpyLanguages = Collections.unmodifiableList(new ArrayList<>(renpyLanguages));
             this.renpyMenuType = renpyMenuType == null ? "none" : renpyMenuType;
             this.compatibility = compatibility;
             this.compatibilityReport = compatibilityReport;
+            this.rpaCount = rpaCount;
+            this.splitCount = splitCount;
         }
     }
 }

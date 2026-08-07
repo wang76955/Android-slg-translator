@@ -443,6 +443,28 @@ def patch_scan_flow(js: str) -> str:
     if js.count(old_flow) != 1:
         raise ValueError("APK scan flow signature is not unique")
     patched = js.replace(old_flow, SCAN_FLOW, 1)
+    # Normalize the installed-app payload once so every native call receives
+    # the constrained APK-set shape.  The base URI remains for old bridges.
+    patched = patched.replace(
+        "window.__slgSelectionMeta=e,r(e.uri)",
+        "window.__slgSelectionMeta=Object.assign({},e,{baseUri:e.baseUri||e.uri,splitUris:Array.isArray(e.splitUris)?e.splitUris:[],splitNames:Array.isArray(e.splitNames)?e.splitNames:[],splitCount:Number(e.splitCount||e.splitUris?.length||0)}),e=window.__slgSelectionMeta,e.splitCount&&O(`已复制基础 APK 与 ${e.splitCount} 个 split，准备合并扫描`,`info`),r(e.uri)",
+        1,
+    )
+    patched = patched.replace(
+        "let t=await E.listApkEntries({uri:e.uri});",
+        "let t=await E.listApkEntries({uri:e.uri,baseUri:e.baseUri||e.uri,splitUris:e.splitUris||[],splitNames:e.splitNames||[],packageName:e.packageName||'',versionCode:e.versionCode});",
+        1,
+    )
+    patched = patched.replace(
+        "e.splitApk&&O(`该应用使用拆分安装包（${e.splitCount||0}个拆分包），当前先扫描基础 APK，部分资源可能无法读取。`,`info`);",
+        "e.splitCount&&O(`已准备基础 APK + ${e.splitCount} 个 split，将逐个复制并合并扫描。`,`info`);",
+        1,
+    )
+    patched = patched.replace(
+        "JSON.stringify({uri:e.uri,name:e.name||e.label,packageName:e.packageName||'',source:e.source||'',savedAt:Date.now(),translating:false})",
+        "JSON.stringify({uri:e.uri,baseUri:e.baseUri||e.uri,splitUris:e.splitUris||[],splitNames:e.splitNames||[],splitCount:e.splitCount||0,name:e.name||e.label,packageName:e.packageName||'',versionCode:e.versionCode,source:e.source||'',savedAt:Date.now(),translating:false})",
+        1,
+    )
     patched = patched.replace(
         "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgSelectionError=null,",
         "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgRenpyCompatibilityPreflightDone=false,window.__slgRenpyCompatibilityReport=null,window.__slgRenpyCompatibilityRecords=[],window.__slgRenpyCompatibilityBlocked=false,window.__slgSelectionError=null,",
@@ -972,7 +994,7 @@ async function Lo(e){'''
         "Ce=async()=>{globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
-        "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri)}"
+        "_r?.uri&&(window.__slgSelectionMeta=Object.assign({},window.__slgSelectionMeta,_r,{baseUri:_r.baseUri||_r.uri,splitUris:_r.splitUris||[],splitNames:_r.splitNames||[],splitCount:_r.splitCount||0}),window.__slgSelectionMeta.uri=_r.uri)}"
         "catch(_e){O(`\u91cd\u65b0\u83b7\u53d6\u6e38\u620f\u5b89\u88c5\u5305\u5931\u8d25: ${_e&&_e.message||_e}`,\u0060error\u0060)}"
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgMenuInjectedForRefresh){try{"
         "const _m=await E.injectTranslatorMenu({apkUri:window.__slgSelectionMeta?.uri||n,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});"
@@ -983,7 +1005,7 @@ async function Lo(e){'''
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgFontPreflightDone){"
         "let _fontTarget=ae.find(_x=>_x.fileType===`rpyc`||_x.fileType===`rpymc`||/\\.rp(?:y|ym)c$/i.test(String(_x.name||``)));"
         "if(!_fontTarget){window.__slgFontPreflightBlocked=true;window.__slgFontPreflightReport=null;O(`Ren'Py 字体预检失败：没有可检查的 Ren'Py 编译脚本（.rpyc/.rpymc），已阻断模型调用。`,`error`);ce(!1);return}"
-        "try{let _fr=await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:_fontTarget.name});"
+        "try{let _fr=await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:_fontTarget.sourceApk||'',entryName:_fontTarget.name});"
         "window.__slgFontPreflightReport=_fr?.fontReport||null;window.__slgFontPreflightBlocked=!_fr?.fontReport||_fr?.fontGate===`blocked`||(_fr?.fontReport?.missingCodePoints||[]).length>0;"
         "if(window.__slgFontPreflightBlocked){O(`Ren'Py 字体预检失败：固定中文/标点基线存在缺字，已阻断模型调用。缺字码点：${(_fr?.fontReport?.missingCodePoints||[]).join(`,`)}`,`error`);ce(!1);return}"
         "O(`Ren'Py 字体预检通过：固定中文/标点基线 ${_fr?.fontReport?.coveredCount||0}/${_fr?.fontReport?.requiredCount||0}`,`info`)}"
@@ -1004,12 +1026,12 @@ async function Lo(e){'''
     # Read and build from the refreshed meta uri when present.
     old_read = "E.readFileContent({uri:n,entryName:o.name})"
     new_read = (
-        "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name}).then(_r=>{"
+        "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}).then(_r=>{"
         "globalThis.__slgCoverageRecords=(globalThis.__slgCoverageRecords||[]).concat((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgCoverageClassifications=Object.assign({},globalThis.__slgCoverageClassifications||{},(_r&&_r.coverageClassifications)||{});"
         "globalThis.__slgAccumulateRenpyCompatibility?.((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgRefreshTranslationCoverage?.();return _r}):"
-        "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name})"
+        "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name})"
     )
     if js.count(old_read) != 1:
         raise ValueError("Read file uri signature not found")
@@ -1021,6 +1043,8 @@ async function Lo(e){'''
     )
     new_build = (
         "E.buildPatchedApk({uri:(window.__slgSelectionMeta?.uri||n),"
+        "splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],"
+        "apkSet:window.__slgSelectionMeta?.apkSet||null,"
         "files:(()=>{const _f=a.filter(_x=>{let _p=String(_x.path);return !_p.includes(`/tl/`)&&!_p.includes(`x-slgtranslated`)});return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
         "outputDirUri:m,outputName:Me(i),"
         "targetRenpyLanguage:window.__slgCompiledCount>0?'':is(y),sourceRenpyLanguage:window.__slgCompiledCount>0?'':is(g)}"
@@ -1028,6 +1052,22 @@ async function Lo(e){'''
     if js.count(old_build) != 1:
         raise ValueError("Build uri signature not found")
     js = js.replace(old_build, new_build, 1)
+
+    # Install the generated base together with every original split in one
+    # PackageInstaller session.  The patched output becomes the new base; the
+    # split names and source files remain explicit so the native bridge can
+    # validate the complete set before committing it.
+    old_install = "let t=await E.installApk({uri:e,packageName:f||void 0,cleanupAfterInstall:!0})"
+    new_install = (
+        "let t=await E.installApk({uri:e,baseUri:e,"
+        "splitUris:window.__slgSelectionMeta?.splitUris||[],"
+        "splitNames:window.__slgSelectionMeta?.splitNames||[],"
+        "packageName:f||void 0,versionCode:window.__slgSelectionMeta?.versionCode,"
+        "cleanupAfterInstall:!0})"
+    )
+    if js.count(old_install) != 1:
+        raise ValueError("APK-set install signature not found")
+    js = js.replace(old_install, new_install, 1)
 
     # Friendly error when the source APK was cleared by the system.
     old_fail = "catch(e){r=!0,O(`\u5199\u5165\u8865\u4e01 APK \u5931\u8d25: ${e.message}`,\u0060error\u0060)}"
@@ -1069,7 +1109,7 @@ async function Lo(e){'''
     build_gate = 'return N},2);if(!N&&(a.length>0||oe)){O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
     build_gate_compiled = (
         'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk('
-        "{apkUri:(window.__slgSelectionMeta?.uri||n),activationMode:window.__slgActivationMode||'always_on',items:a.map(_x=>({path:_x.path,content:_x.content}))}).then("
+        "{apkUri:(window.__slgSelectionMeta?.uri||n),baseUri:(window.__slgSelectionMeta?.baseUri||window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],activationMode:window.__slgActivationMode||'always_on',items:a.map(_x=>({path:_x.path,content:_x.content}))}).then("
         '_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;(_r&&_r.compiled>0)?O(`  \u5df2\u7f16\u8bd1\u5e76\u5408\u5e76\u53bb\u91cd ${_r.compiled} \u6761\u8bd1\u6587\uff0c\u6e38\u620f\u5c06\u76f4\u63a5\u52a0\u8f7d\u7f16\u8bd1\u7248\u672c`,`success`):O(`  \u6ca1\u6709\u53ef\u7f16\u8bd1\u7684 Ren\'Py \u7ffb\u8bd1\u8d44\u6e90`,`info`)}).catch('
         '_e=>{O(`  \u7f16\u8bd1\u7ffb\u8bd1\u8d44\u6e90\u5931\u8d25: ${_e&&_e.message||_e}`,`error`)});'
         'O(`\u6b63\u5728\u751f\u6210 Ren\'Py \u8865\u4e01 APK...`,`info`);try{let e=await E.buildPatchedApk'
@@ -1137,7 +1177,7 @@ async function Lo(e){'''
         "if(_mode===`resume`&&_fr&&Array.isArray(_fr.translations)&&_fr.translations.length&&Array.isArray(_fr.texts)){"
         "let _map=new Map(),_tmap=new Map(_fr.translations);"
         "for(let r of _fr.texts){let v=_tmap.get(r.keyPath)||_tmap.get(r.text);if(v&&v.trim())_map.set(r.text,v)}"
-        "let{content:_c,fileType:_ft}=o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name}):await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),entryName:o.name});"
+        "let{content:_c,fileType:_ft}=o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}):await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name});"
         "let l=ke(_c,_ft,``,g),_need=l.filter(t=>!t||!_map.has(t.text));"
         "if(_need.length){let _r=await Lo({texts:_need,sourceLang:g,targetLang:y,baseURL:e,apiKey:te,model:S,batchSize:ps,onProgress:()=>{}});if(_r&&_r.successCount>0){for(let t of _need){let v=_r.translations.get(t.keyPath)||_r.translations.get(t.text);if(v&&v.trim())_map.set(t.text,v)}O(`  \u8865\u5145\u7ffb\u8bd1 ${_r.successCount} \u6761\u65b0\u6587\u672c`,`success`)}}"
         "let _outs=[rs(o,l,_map,`None`),rs(o,l,_map,g)],_uniq=new Map;oe||_outs.unshift(rs(o,l,_map,y));"
@@ -1681,7 +1721,13 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_translation_quality(patched)
     patched = patch_cache_memory(patched)
     patched += compatibility_report_runtime
-    return patched + copy_contract + enhance_runtime(patch_saves_runtime(WORKSHOP_RUNTIME)), css + "\n" + WORKSHOP_CSS
+    runtime = patch_saves_runtime(WORKSHOP_RUNTIME)
+    runtime = runtime.replace(
+        "当前只检查了基础 APK",
+        "已合并读取基础 APK 与全部 split 资源",
+        1,
+    )
+    return patched + copy_contract + enhance_runtime(runtime), css + "\n" + WORKSHOP_CSS
 
 
 def main() -> None:

@@ -18,6 +18,7 @@ PICKLE_WRITER = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RpycPickl
 COMPATIBILITY_REPORT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyCompatibilityReport.java"
 PREFLIGHT = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "RenpyPreflight.java"
 INSTALLED_APPS = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledAppSource.java"
+INSTALLED_APK_SET = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java"
 BUILDER = FAST_SCAN / "build_fast_scanner.py"
 WORKSHOP_BUILDER = ROOT / "apk-work" / "ui-redesign" / "build_workshop_apk.py"
 GENERATED = FAST_SCAN / "generated"
@@ -554,6 +555,13 @@ def java_block_after(source, marker):
     raise AssertionError(f"unterminated Java block after {marker!r}")
 
 
+def write_split_apk(path: Path, entries):
+    """Create a small independent APK-shaped ZIP for split-set contracts."""
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+
+
 class FastApkScannerContractTest(unittest.TestCase):
     def assert_installed_app_copy_contract(self, source):
         self.assertRegex(source, r"COPY_BUFFER_SIZE\s*=\s*1024\s*\*\s*1024\s*;")
@@ -576,9 +584,10 @@ class FastApkScannerContractTest(unittest.TestCase):
         )
         self.assertRegex(
             source,
-            r"finally\s*\{\s*if\s*\(partial\s*!=\s*null\s*&&\s*partial\.exists\(\)\)\s*"
-            r"\{\s*partial\.delete\(\);\s*\}\s*\}",
+            r"(?s)finally\s*\{.*?if\s*\(partial\s*!=\s*null\s*&&\s*partial\.exists\(\)\)\s*"
+            r"\{\s*partial\.delete\(\);\s*\}",
         )
+        self.assertIn("for (File pending : partials)", source)
         self.assertRegex(source, r"output\.flush\(\);\s*output\.getFD\(\)\.sync\(\);")
 
         rename = "if (!partial.renameTo(output))"
@@ -674,7 +683,11 @@ class FastApkScannerContractTest(unittest.TestCase):
         success_fields = re.findall(r'\.put\("([^"]+)"\s*,', success)
         self.assertEqual(
             success_fields,
-            ["uri", "name", "packageName", "source", "splitApk", "splitCount"],
+            [
+                "uri", "baseUri", "splitUris", "splitNames", "apkSet",
+                "name", "packageName", "versionCode", "source", "splitApk",
+                "splitCount",
+            ],
         )
         self.assertNotRegex(success, r'"(?:path|sourceDir|sourcePath)"')
 
@@ -992,6 +1005,152 @@ public final class WorkshopBackHandlerHarness {
         ):
             self.assertIn(token, source)
 
+    def test_split_apk_set_scans_assets_and_installs_in_one_session(self):
+        """Base and each split stay independent while the bridge carries one set."""
+        apk_set = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java"
+        installer = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "PackageInstallerSupport.java"
+        workshop = ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py"
+
+        with tempfile.TemporaryDirectory(prefix="split-apk-contract-") as temporary:
+            directory = Path(temporary)
+            base = directory / "base.apk"
+            split_a = directory / "split_a.apk"
+            split_b = directory / "split_b.apk"
+            write_split_apk(base, {
+                "AndroidManifest.xml": b"package=com.example.renpy versionCode=17",
+                "assets/game/main.rpyc": b"base-script",
+            })
+            write_split_apk(split_a, {"assets/game/chapter.rpyc": b"chapter-script"})
+            write_split_apk(split_b, {"assets/fonts/game.ttf": b"font-bytes"})
+
+            # The fixture itself proves the test is exercising three ZIP central
+            # directories rather than a byte-concatenated pseudo-APK.
+            with zipfile.ZipFile(base) as archive:
+                self.assertIn("AndroidManifest.xml", archive.namelist())
+            with zipfile.ZipFile(split_a) as archive:
+                self.assertEqual(archive.read("assets/game/chapter.rpyc"), b"chapter-script")
+            with zipfile.ZipFile(split_b) as archive:
+                self.assertEqual(archive.read("assets/fonts/game.ttf"), b"font-bytes")
+
+        self.assertTrue(apk_set.exists(), "InstalledApkSet.java must be created")
+        model = apk_set.read_text("utf-8")
+        for token in (
+            "public final File baseApk",
+            "public final List<File> splitApks",
+            "public final String packageName",
+            "public final long versionCode",
+            "Collections.unmodifiableList",
+        ):
+            self.assertIn(token, model)
+
+        scanner = SCANNER.read_text("utf-8")
+        for token in (
+            "scanApkSet",
+            "splitUris",
+            'put("sourceApk"',
+            'put("apkRole"',
+            "new ZipFile",
+            "RenpyResourceLimits.checkPath",
+        ):
+            self.assertIn(token, scanner)
+        self.assertNotIn("concatenate", scanner.lower())
+        self.assertNotIn("appendApkBytes", scanner)
+
+        installer_source = installer.read_text("utf-8")
+        for token in (
+            "installApkSet(Context context, InstalledApkSet apkSet, PluginCall call)",
+            'writeApk(session, apkSet.baseApk, "base.apk")',
+            'session.openWrite(entryName',
+            "splitEntryName",
+            "validateApkSet",
+            "abandonSession(sessionId)",
+        ):
+            self.assertIn(token, installer_source)
+
+        ui = workshop.read_text("utf-8")
+        for token in (
+            "splitUris",
+            "baseUri",
+            "splitCount",
+            "sourceApk",
+            "session",
+        ):
+            self.assertIn(token, ui)
+        self.assertIn("当前只检查了基础 APK", ui)
+        self.assertIn("已合并读取基础 APK 与全部 split 资源", ui)
+
+    def test_split_apk_set_is_immutable_and_rejects_duplicate_or_missing_parts(self):
+        model = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java").read_text("utf-8")
+        for token in (
+            "Collections.unmodifiableList",
+            "IllegalArgumentException",
+            "baseApk.equals(splitApk)",
+            "copiedSplits.contains",
+            "splitName metadata is invalid",
+        ):
+            self.assertIn(token, model)
+        self.assertRegex(model, r"new ArrayList(?:<[^>]*>)?\s*\(")
+        self.assertNotIn("File[] allApks", model)
+        self.assertNotIn("merge", model.lower())
+
+    def test_split_scanning_and_reading_fail_closed_instead_of_base_only_fallback(self):
+        scanner = SCANNER.read_text("utf-8")
+        installer = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "PackageInstallerSupport.java").read_text("utf-8")
+        for source in (scanner, installer):
+            self.assertRegex(source, r"(?i)(fail.?closed|reject|throw new (?:IOException|IllegalArgumentException))")
+        self.assertIn("split metadata", scanner.lower())
+        self.assertIn("signature", installer.lower())
+        self.assertIn("versionCode", installer)
+        self.assertIn("splitName", installer)
+
+    def test_split_scan_uses_split_template_and_merges_all_font_preflights(self):
+        scanner = SCANNER.read_text("utf-8")
+        for token in (
+            "List<RenpyFontSupport.FontReport> fontReports",
+            "mergeFontReports",
+            "mergeFontReportsForApkSet",
+            "missingAcrossSet",
+            "bestCompatibility",
+            "current.compatibility",
+            "current.compatibilityReport.templatePath",
+            "split metadata packageName mismatch",
+            "split metadata versionCode mismatch",
+            "split metadata splitName mismatch",
+            "getPackageArchiveInfo",
+        ):
+            self.assertIn(token, scanner)
+        self.assertIn("fontReports.add", scanner)
+        self.assertIn("fontReports", scanner[scanner.index("scanApkSet"):])
+
+    def test_split_ui_preserves_collection_metadata_through_scan_read_compile_and_install(self):
+        ui = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        for token in (
+            "window.__slgSelectionMeta?.splitUris",
+            "readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris",
+            "buildPatchedApk({uri:(window.__slgSelectionMeta?.uri||n),",
+            "splitUris:window.__slgSelectionMeta?.splitUris||[]",
+            "compileTranslationsIntoApk(",
+            "baseUri:(window.__slgSelectionMeta?.baseUri||window.__slgSelectionMeta?.uri||n)",
+            "installApk({uri:e,baseUri:e,",
+            "splitNames:window.__slgSelectionMeta?.splitNames||[]",
+            "splitCount",
+        ):
+            self.assertIn(token, ui)
+
+    def test_installed_split_names_come_from_manifest_metadata_not_file_names(self):
+        source = INSTALLED_APPS.read_text("utf-8")
+        model = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "InstalledApkSet.java").read_text("utf-8")
+        for token in (
+            "splitNames",
+            "getPackageArchiveInfo",
+            "splitNamesFromPackageInfo",
+            "splitName metadata is unavailable",
+            "splitName mismatch",
+        ):
+            self.assertIn(token, source + model)
+        self.assertNotIn("String splitName = safeSplitName(splitSource, index);", source)
+        self.assertNotIn("value = splitApk.getName();", model)
+
     def test_build_pipeline_patches_only_the_entrypoint_and_adds_helper_dex(self):
         self.assertTrue(BUILDER.exists(), "build_fast_scanner.py must exist")
         source = BUILDER.read_text("utf-8")
@@ -1179,6 +1338,7 @@ public final class CacheOwnershipHarness {
                     third_party_classpath(),
                     *map(str, stubs),
                     str(INSTALLED_APPS),
+                    str(INSTALLED_APK_SET),
                     str(harness_path),
                 ],
                 check=True,
@@ -2241,7 +2401,7 @@ public final class RenpyStyleFontHarness {
             self.assertIn(token, scan_state)
         self.assertLess(
             scan_state.index("window.__slgFontPreflightDone=false"),
-            scan_state.index("window.__slgSelectionMeta=e"),
+            scan_state.index("window.__slgSelectionMeta=Object.assign"),
         )
 
     def test_font_preflight_selects_rpymc_and_blocks_without_a_compiled_target(self):
