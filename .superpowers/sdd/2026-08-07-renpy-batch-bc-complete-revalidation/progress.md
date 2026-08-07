@@ -14,7 +14,7 @@
 | 0 | DONE | Task 0 implementation subagent | self-audit complete | Baseline captured; evidence ledger initialized; TDD RED/GREEN recorded; full regression and path audit complete. |
 | 1 | DONE | Task 1 implementation subagent | independent scoped review passed | `bffc701` implementation; `0da088b` classification-evidence remediation; 26 records and stable extractor verified by focused tests. |
 | 2 | DONE | Task 2 implementation subagent | independent scoped review passed | `1684a05` initial state-cluster alignment; `7880e62` runtime/language hardening; `f22bad5` report-artifact cleanup. Five-state group, runtime bridge, recovery/session, language guidance and extractor boundary checks passed. |
-| 3 | NOT-RUN | — | — | — |
+| 3 | DONE | Task 3 implementation subagent | independent scoped review passed after three fix rounds | `a5bfcae` initial; `a4f4654`, `b7775b0`, and `0b5744c` fix rounds; SourceSet, retry/watchdog, epoch, deadline, modal/back, extractor, restore, and split-tuple behavior verified. Node-only evidence; native/device and real split-APK gates remain open. |
 | 4 | NOT-RUN | — | — | — |
 | 5 | NOT-RUN | — | — | — |
 | 6 | NOT-RUN | — | — | — |
@@ -43,6 +43,7 @@
 | 0 | Approved after two scoped fix rounds | `d38b551..d3c56b8`, `d3c56b8..3631ce6`, `3631ce6..ecc5e6f`; final focused assertion, hash, protected-stage and diff checks passed. |
 | 1 | Approved after one scoped fix round | `ecc5e6f..bffc701`; `bffc701..0da088b`; focused extractor/syntax tests and 26-row inventory checks passed; no Critical/Important findings remain. |
 | 2 | Approved after one scoped fix round plus final artifact cleanup review | `7517acb..1684a05`; `1684a05..7880e62`; `1684a05..f22bad5`; five-state group, runtime Node fixture, three language branches, session deletion and regex tests passed; no Critical/Important findings remain. |
+| 3 | Approved after three scoped fix rounds | `3df1369..a5bfcae` initial review; `a5bfcae..a4f4654` fixed SourceSet/retry/deadline/epoch/extractor/inventory issues; `a4f4654..b7775b0` fixed persisted SourceSet and lexical comment/regex issues; `b7775b0..0b5744c` fixed atomic split metadata merge. Final 17-test focused run, `py_compile`, diff checks, and protected-stage audit passed; no Critical/Important findings remain. |
 
 ## Task 0 execution ledger
 
