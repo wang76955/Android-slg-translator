@@ -79,6 +79,37 @@ public final class FastApkScanner {
                 classificationReasons);
     }
 
+    /** Fixed Chinese/punctuation baseline used before any model call. */
+    static RenpyFontSupport.FontReport fontPreflight(Context context, File apk) {
+        return RenpyFontSupport.inspect(
+                context, apk, RenpyFontSupport.defaultRequiredCodePoints());
+    }
+
+    private static JSObject fontReportJson(RenpyFontSupport.FontReport report) {
+        JSObject result = new JSObject();
+        JSArray candidates = new JSArray();
+        for (String candidate : report.candidateFonts) {
+            candidates.put(candidate);
+        }
+        JSArray missing = new JSArray();
+        for (Integer codePoint : report.missingCodePoints) {
+            missing.put(codePoint);
+        }
+        JSArray warnings = new JSArray();
+        for (String warning : report.warnings) {
+            warnings.put(warning);
+        }
+        result.put("candidateFonts", candidates);
+        result.put("bestFontPath", report.bestFontPath);
+        result.put("requiredCount", report.requiredCount);
+        result.put("coveredCount", report.coveredCount);
+        result.put("missingCodePoints", missing);
+        result.put("hasChineseStyleBucket", report.hasChineseStyleBucket);
+        result.put("hasEastAsianLineBreakEvidence", report.hasEastAsianLineBreakEvidence);
+        result.put("warnings", warnings);
+        return result;
+    }
+
     /**
      * Reads one APK entry and, for Ren'Py compiled scripts, returns the
      * structurally extracted user-visible texts as RPYC_STRING lines so the
@@ -103,6 +134,7 @@ public final class FastApkScanner {
             }
             String content = "";
             String fileType = "unknown";
+            RenpyFontSupport.FontReport fontReport = null;
             JSArray renpyRecords = new JSArray();
             List<RenpyTextRecord> exactOldOccurrences = new ArrayList<>();
             Map<String, String> coverageClassifications = new LinkedHashMap<>();
@@ -114,6 +146,7 @@ public final class FastApkScanner {
                 }
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
+                    fontReport = fontPreflight(context, apk);
                     StringBuilder out = new StringBuilder();
                     boolean translationBucket = lower.contains("/x-tl/")
                             || lower.contains("/tl/");
@@ -166,6 +199,10 @@ public final class FastApkScanner {
             result.put("coverageOccurrenceCount", initialCoverage.occurrenceCount);
             result.put("coverageUniqueSourceCount", initialCoverage.uniqueSourceCount);
             result.put("coverageGate", initialCoverage.shouldBlockCompleteBuild() ? "blocked" : "clear");
+            if (fontReport != null) {
+                result.put("fontReport", fontReportJson(fontReport));
+                result.put("fontGate", fontReport.isComplete() ? "clear" : "blocked");
+            }
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();

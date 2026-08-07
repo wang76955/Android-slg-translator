@@ -26,6 +26,7 @@ public final class RenpyFontSupport {
     public static final int MAX_FONT_ENTRIES = 64;
     public static final long MAX_FONT_BYTES = 32L * 1024 * 1024;
     public static final long MAX_TOTAL_FONT_BYTES = 128L * 1024 * 1024;
+    public static final int MAX_REQUIRED_CODE_POINTS = 512;
     private static final int MAX_EVIDENCE_BYTES = 1024 * 1024;
     private static final int COPY_BUFFER_SIZE = 8192;
 
@@ -70,8 +71,13 @@ public final class RenpyFontSupport {
 
     public static FontReport inspect(Context context, File apk, Set<Integer> requiredCodePoints) {
         TreeSet<Integer> required = new TreeSet<>();
+        boolean requiredLimitHit = false;
         if (requiredCodePoints != null) {
             for (Integer codePoint : requiredCodePoints) {
+                if (required.size() >= MAX_REQUIRED_CODE_POINTS) {
+                    requiredLimitHit = true;
+                    break;
+                }
                 if (codePoint != null && codePoint >= 0 && codePoint <= 0x10ffff
                         && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
                     required.add(codePoint);
@@ -80,6 +86,9 @@ public final class RenpyFontSupport {
         }
         List<String> candidates = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        if (requiredLimitHit) {
+            warnings.add("font_preflight_required_code_point_limit");
+        }
         String bestPath = null;
         int bestCovered = -1;
         boolean styleBucket = false;
@@ -379,7 +388,8 @@ public final class RenpyFontSupport {
         }
 
         public boolean isComplete() {
-            return missingCodePoints.isEmpty() && requiredCount == coveredCount;
+            return missingCodePoints.isEmpty() && requiredCount == coveredCount
+                    && !warnings.contains("font_preflight_required_code_point_limit");
         }
     }
 }

@@ -2039,6 +2039,170 @@ public class Paint {
                 stderr=subprocess.PIPE,
             )
 
+    def test_renpy_style_font_rewrite_rebuilds_rpc2_and_supports_schinese(self):
+        """A real RPC2/pickle fixture must rewrite only a font value, not bytes."""
+        compiler = FAST_SCAN / "src" / "com" / "slgtranslator" / "app" / "TranslationCompiler.java"
+        source = compiler.read_text("utf-8")
+        self.assertIn("cloneChineseStyleRpyc(File apk, String bestFontPath)", source)
+        self.assertIn("x-schinese", source)
+        harness = r"""
+package com.slgtranslator.app;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import java.util.zip.InflaterInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.zip.DeflaterOutputStream;
+
+public final class RenpyStyleFontHarness {
+    private static final byte[] MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
+
+    public static void main(String[] args) throws Exception {
+        byte[] pickle = concat(concat(concat(concat(concat(
+                new byte[]{(byte) 0x80, 2}, shortString("text_font")), shortString("old.ttf")),
+                shortString("style_name")), shortString("dialogue")),
+                concat(shortString("schinese"), new byte[]{(byte) 0x2e}));
+        byte[] fixture = rpc2(pickle);
+        byte[] rewritten = TranslationCompiler.rewriteChineseStyleFont(
+                fixture, "fonts/best.ttf");
+        require(rewritten != null, "safe font rewrite must change the fixture");
+        require(rewritten.length != fixture.length, "RPC2 payload must be rebuilt");
+        require(rewritten[0] == 'R' && rewritten[9] == '2', "RPC2 magic survives");
+        byte[] inflated = inflate(slot(rewritten, 1));
+        String text = new String(inflated, StandardCharsets.UTF_8);
+        require(text.contains("fonts/best.ttf"), "best font Ren'Py path is applied");
+        require(!text.contains("old.ttf"), "old font reference is removed");
+        require(inflated[inflated.length - 1] == (byte) 0x2e, "pickle STOP survives");
+
+        File apk = new File(args[0]);
+        try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(apk))) {
+            put(out, "assets/x-game/x-tl/x-schinese/x-style.rpyc", fixture);
+        }
+        byte[] cloned = TranslationCompiler.cloneChineseStyleRpyc(apk, "fonts/best.ttf");
+        require(cloned != null, "schinese style bucket must be cloneable");
+        require(new String(inflate(slot(cloned, 1)), StandardCharsets.UTF_8)
+                        .contains("fonts/best.ttf"),
+                "schinese clone must apply the best font");
+
+        byte[] unsafe = concat(MAGIC, new byte[]{1, 2, 3});
+        require(TranslationCompiler.rewriteChineseStyleFont(unsafe, "fonts/best.ttf") == null,
+                "unknown pickle must be rejected, not binary-replaced");
+    }
+
+    private static byte[] shortString(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        return concat(new byte[]{(byte) 0x8c, (byte) bytes.length}, bytes);
+    }
+
+    private static byte[] rpc2(byte[] pickle) throws Exception {
+        byte[] compressed = deflate(pickle);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(MAGIC);
+        int start = MAGIC.length + 3 * 12;
+        for (int id = 1; id <= 2; id++) {
+            putInt(out, id); putInt(out, start); putInt(out, compressed.length);
+            start += compressed.length;
+        }
+        putInt(out, 0); putInt(out, 0); putInt(out, 0);
+        out.write(compressed); out.write(compressed); out.write(new byte[16]);
+        return out.toByteArray();
+    }
+
+    private static byte[] slot(byte[] rpyc, int wanted) {
+        int pos = MAGIC.length;
+        while (pos + 12 <= rpyc.length) {
+            int id = le(rpyc, pos), offset = le(rpyc, pos + 4), length = le(rpyc, pos + 8);
+            if (id == 0) return null;
+            if (id == wanted) {
+                require(offset >= 0 && length >= 0 && offset + length <= rpyc.length,
+                        "slot bounds");
+                return slice(rpyc, offset, length);
+            }
+            pos += 12;
+        }
+        return null;
+    }
+
+    private static byte[] inflate(byte[] data) throws Exception {
+        try (InflaterInputStream in = new InflaterInputStream(new ByteArrayInputStream(data));
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[256]; int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] deflate(byte[] data) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (DeflaterOutputStream stream = new DeflaterOutputStream(out)) {
+            stream.write(data);
+        }
+        return out.toByteArray();
+    }
+
+    private static void put(ZipOutputStream out, String name, byte[] data) throws Exception {
+        out.putNextEntry(new ZipEntry(name)); out.write(data); out.closeEntry();
+    }
+    private static void putInt(ByteArrayOutputStream out, int value) {
+        out.write(value); out.write(value >>> 8); out.write(value >>> 16); out.write(value >>> 24);
+    }
+    private static int le(byte[] data, int pos) {
+        return (data[pos] & 255) | ((data[pos + 1] & 255) << 8)
+                | ((data[pos + 2] & 255) << 16) | ((data[pos + 3] & 255) << 24);
+    }
+    private static byte[] slice(byte[] data, int start, int length) {
+        byte[] out = new byte[length]; System.arraycopy(data, start, out, 0, length); return out;
+    }
+    private static byte[] concat(byte[] a, byte[] b) {
+        byte[] out = new byte[a.length + b.length]; System.arraycopy(a, 0, out, 0, a.length);
+        System.arraycopy(b, 0, out, a.length, b.length); return out;
+    }
+    private static byte[] concat(byte[] a, byte[] b, byte[] c) { return concat(concat(a, b), c); }
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="renpy-style-font-test-") as temporary:
+            temporary_path = Path(temporary)
+            harness_path = temporary_path / "RenpyStyleFontHarness.java"
+            classes = temporary_path / "classes"
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(), *map(str, stubs),
+                 *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))), str(harness_path)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.RenpyStyleFontHarness",
+                 str(temporary_path / "fixture.apk")],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+    def test_renpy_font_preflight_is_before_first_model_call_and_read_bridge_returns_gate(self):
+        scanner = SCANNER.read_text("utf-8")
+        self.assertIn("fontPreflight(Context context, File apk)", scanner)
+        self.assertIn('result.put("fontReport"', scanner)
+        self.assertIn('result.put("fontGate"', scanner)
+        source = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        self.assertIn("__slgFontPreflightReport", source)
+        self.assertIn("__slgFontPreflightBlocked", source)
+        generated_marker = "__slgFontPreflightBlocked"
+        self.assertLess(source.index(generated_marker), source.index("async function Vo"))
+        self.assertIn("defaultRequiredCodePoints", scanner)
+        compiler = (FAST_SCAN / "src" / "com" / "slgtranslator" / "app"
+                    / "TranslationCompiler.java").read_text("utf-8")
+        self.assertIn("baselineReport.isComplete()", compiler)
+        self.assertIn("renpy_font_missing_glyphs: baseline", compiler)
+        self.assertIn("codePointsOfTranslations(merged.values())", compiler)
+
     def test_rpa_archive_lists_and_reads_rpyc_entries(self):
         rpa3 = build_rpa3_fixture()
         rpa2 = build_rpa2_fixture()

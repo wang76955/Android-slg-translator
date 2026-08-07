@@ -110,8 +110,15 @@ public final class TranslationCompiler {
             }
             Set<Integer> requiredCodePoints = new LinkedHashSet<>(
                     RenpyFontSupport.defaultRequiredCodePoints());
-            // Run the fixed baseline preflight before adding translation-specific glyphs.
-            RenpyFontSupport.inspect(context, apk, requiredCodePoints);
+            // The fixed baseline is a hard gate before any translation artifact is written.
+            RenpyFontSupport.FontReport baselineReport = RenpyFontSupport.inspect(
+                    context, apk, requiredCodePoints);
+            if (!baselineReport.isComplete()) {
+                call.reject("renpy_font_missing_glyphs: baseline missingCodePoints="
+                        + baselineReport.missingCodePoints + ", bestFont="
+                        + String.valueOf(baselineReport.bestFontPath));
+                return;
+            }
             requiredCodePoints.addAll(RenpyFontSupport.codePointsOfTranslations(merged.values()));
             RenpyFontSupport.FontReport fontReport = RenpyFontSupport.inspect(
                     context, apk, requiredCodePoints);
@@ -127,12 +134,15 @@ public final class TranslationCompiler {
             pending.add(new String[]{artifact.compiledPath, artifact.runtimeFilename});
             pendingBytes.add(artifact.rpyc);
             if ("selectable".equals(artifact.activationMode)) {
-                byte[] styleRpyc = cloneChineseStyleRpyc(apk);
-                if (styleRpyc != null) {
-                    pending.add(new String[]{"assets/x-game/x-tl/x-slgtranslated/x-style.rpyc",
-                            "game/tl/slgtranslated/style.rpy"});
-                    pendingBytes.add(styleRpyc);
+                byte[] styleRpyc = cloneChineseStyleRpyc(apk, fontReport.bestFontPath);
+                if (styleRpyc == null) {
+                    call.reject("renpy_font_style_rewrite_unsafe: no verified chinese/schinese style "
+                            + "could be safely cloned with the APK-local best font");
+                    return;
                 }
+                pending.add(new String[]{"assets/x-game/x-tl/x-slgtranslated/x-style.rpyc",
+                        "game/tl/slgtranslated/style.rpy"});
+                pendingBytes.add(styleRpyc);
             }
             rewriteApkWithEntries(apk, pending, pendingBytes);
             call.resolve(compileResult(artifact.activationMode, merged.size(),
@@ -1023,7 +1033,11 @@ public final class TranslationCompiler {
      * fonts to a CJK-capable font) and clones it for the translator
      * language. Returns the rewritten rpyc bytes, or null when unavailable.
      */
-    private static byte[] cloneChineseStyleRpyc(File apk) throws IOException {
+    static byte[] cloneChineseStyleRpyc(File apk, String bestFontPath) throws IOException {
+        String runtimeFontPath = renpyFontPath(bestFontPath);
+        if (runtimeFontPath == null || runtimeFontPath.isEmpty()) {
+            return null;
+        }
         try (ZipFile zip = new ZipFile(apk)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -1033,7 +1047,7 @@ public final class TranslationCompiler {
                     continue;
                 }
                 String lower = name.toLowerCase();
-                if (!lower.contains("/x-tl/x-chinese/") && !lower.contains("/tl/chinese/")) {
+                if (!isChineseStylePath(lower)) {
                     continue;
                 }
                 if (entry.getSize() <= 0 || entry.getSize() > 8_000_000L) {
@@ -1046,7 +1060,12 @@ public final class TranslationCompiler {
                 if (!containsStyleBytes(bytes)) {
                     continue;
                 }
-                byte[] rewritten = rewriteRpycLanguage(bytes, "chinese", "slgtranslated");
+                byte[] withFont = rewriteChineseStyleFont(bytes, runtimeFontPath);
+                if (withFont == null) {
+                    continue;
+                }
+                String oldLanguage = lower.contains("schinese") ? "schinese" : "chinese";
+                byte[] rewritten = rewriteRpycLanguage(withFont, oldLanguage, "slgtranslated");
                 if (rewritten != null) {
                     return rewritten;
                 }
@@ -1063,7 +1082,130 @@ public final class TranslationCompiler {
         if (pickle == null) {
             return false;
         }
-        return containsAscii(pickle, "text_font") || containsAscii(pickle, "style_name");
+        return containsAscii(pickle, "text_font") || containsAscii(pickle, "font");
+    }
+
+    private static boolean isChineseStylePath(String path) {
+        return path.contains("/x-tl/x-chinese/") || path.contains("/tl/chinese/")
+                || path.contains("/x-tl/x-schinese/") || path.contains("/tl/schinese/");
+    }
+
+    /** Converts a validated APK asset entry into the path Ren'Py resolves in the game root. */
+    static String renpyFontPath(String apkPath) {
+        if (apkPath == null || apkPath.isEmpty()) {
+            return null;
+        }
+        String normalized = apkPath.replace('\\', '/');
+        int assets = normalized.indexOf("assets/");
+        if (assets >= 0) {
+            normalized = normalized.substring(assets + "assets/".length());
+        }
+        int game = normalized.indexOf("x-game/");
+        if (game >= 0) {
+            normalized = normalized.substring(game + "x-game/".length());
+        }
+        if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (!normalized.endsWith(".ttf") && !normalized.endsWith(".otf")
+                && !normalized.endsWith(".ttc")) {
+            return null;
+        }
+        try {
+            RenpyResourceLimits.checkPath(normalized);
+        } catch (RuntimeException invalidPath) {
+            return null;
+        }
+        return normalized;
+    }
+
+    /**
+     * Rewrites only a pickle string value reached through a font-style key.
+     * Unknown pickle opcodes or malformed streams fail closed; no binary
+     * substring replacement is used.
+     */
+    static byte[] rewriteChineseStyleFont(byte[] rpyc, String bestFontPath) {
+        if (!startsWith(rpyc, RPC2_MAGIC) || bestFontPath == null || bestFontPath.isEmpty()) {
+            return null;
+        }
+        List<int[]> slots = parseRpc2Slots(rpyc);
+        if (slots == null || slots.isEmpty()) {
+            return null;
+        }
+        List<byte[]> rebuilt = new ArrayList<>();
+        boolean changed = false;
+        for (int[] slot : slots) {
+            byte[] compressed = slice(rpyc, slot[1], slot[1] + slot[2]);
+            byte[] inflated = inflate(compressed);
+            if (inflated == null) {
+                return null;
+            }
+            List<int[]> ops = LanguageMenuSupport.walk(inflated);
+            if (ops == null) {
+                return null;
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream(inflated.length + 64);
+            boolean fontKeyPending = false;
+            boolean slotChanged = false;
+            for (int index = 0; index < ops.size(); index++) {
+                int[] op = ops.get(index);
+                String payload = LanguageMenuSupport.stringPayload(inflated, ops, index);
+                if (payload != null) {
+                    if ("text_font".equals(payload) || "font".equals(payload)
+                            || "font_name".equals(payload)) {
+                        fontKeyPending = true;
+                    } else if (fontKeyPending && isFontReference(payload)) {
+                        writePickleString(out, bestFontPath);
+                        slotChanged = true;
+                        fontKeyPending = false;
+                        continue;
+                    } else {
+                        fontKeyPending = false;
+                    }
+                }
+                // FRAME lengths become stale when the font path length changes.
+                // Omitting optional FRAME opcodes leaves a valid protocol stream.
+                if (op[0] == 0x95) {
+                    continue;
+                }
+                out.write(inflated, op[1], op[2] - op[1]);
+            }
+            rebuilt.add(slotChanged ? deflate(out.toByteArray()) : compressed);
+            changed |= slotChanged;
+        }
+        if (!changed) {
+            return null;
+        }
+        int dataEnd = 0;
+        for (int[] slot : slots) {
+            dataEnd = Math.max(dataEnd, slot[1] + slot[2]);
+        }
+        byte[] trailer = dataEnd < rpyc.length ? slice(rpyc, dataEnd, rpyc.length) : new byte[0];
+        return rebuildRpc2WithTrailer(slots, rebuilt, trailer);
+    }
+
+    private static boolean isFontReference(String value) {
+        return value.endsWith(".ttf") || value.endsWith(".otf") || value.endsWith(".ttc");
+    }
+
+    private static List<int[]> parseRpc2Slots(byte[] rpyc) {
+        List<int[]> slots = new ArrayList<>();
+        int tablePos = RPC2_MAGIC.length;
+        while (tablePos + 12 <= rpyc.length) {
+            int id = le32(rpyc, tablePos);
+            int offset = le32(rpyc, tablePos + 4);
+            int length = le32(rpyc, tablePos + 8);
+            if (id == 0) {
+                return slots;
+            }
+            if (offset < 0 || length < 0 || offset > rpyc.length
+                    || length > rpyc.length - offset) {
+                return null;
+            }
+            slots.add(new int[]{id, offset, length});
+            tablePos += 12;
+        }
+        return null;
     }
 
     /**
