@@ -444,6 +444,11 @@ def patch_scan_flow(js: str) -> str:
         raise ValueError("APK scan flow signature is not unique")
     patched = js.replace(old_flow, SCAN_FLOW, 1)
     patched = patched.replace(
+        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgSelectionError=null,",
+        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgSelectionError=null,",
+        1,
+    )
+    patched = patched.replace(
         "window.__slgTranslatorLang='',window.__slgRenpyLang=",
         "window.__slgTranslatorLang='',window.__slgMenuInjectedForRefresh=false,window.__slgRenpyLang=",
         1,
@@ -971,12 +976,13 @@ async function Lo(e){'''
         "if(_m&&_m.ready)window.__slgMenuInjectedForRefresh=true}catch{window.__slgTranslatorLang='';window.__slgActivationMode=`always_on`}}"
         "}"
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgFontPreflightDone){"
-        "let _fontTarget=ae.find(_x=>_x.fileType===`rpyc`||/\\.rpyc$/i.test(String(_x.name||``)));"
-        "if(_fontTarget){try{let _fr=await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:_fontTarget.name});"
+        "let _fontTarget=ae.find(_x=>_x.fileType===`rpyc`||_x.fileType===`rpymc`||/\\.rp(?:y|ym)c$/i.test(String(_x.name||``)));"
+        "if(!_fontTarget){window.__slgFontPreflightBlocked=true;window.__slgFontPreflightReport=null;O(`Ren'Py 字体预检失败：没有可检查的 Ren'Py 编译脚本（.rpyc/.rpymc），已阻断模型调用。`,`error`);ce(!1);return}"
+        "try{let _fr=await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),entryName:_fontTarget.name});"
         "window.__slgFontPreflightReport=_fr?.fontReport||null;window.__slgFontPreflightBlocked=!_fr?.fontReport||_fr?.fontGate===`blocked`||(_fr?.fontReport?.missingCodePoints||[]).length>0;"
         "if(window.__slgFontPreflightBlocked){O(`Ren'Py 字体预检失败：固定中文/标点基线存在缺字，已阻断模型调用。缺字码点：${(_fr?.fontReport?.missingCodePoints||[]).join(`,`)}`,`error`);ce(!1);return}"
         "O(`Ren'Py 字体预检通过：固定中文/标点基线 ${_fr?.fontReport?.coveredCount||0}/${_fr?.fontReport?.requiredCount||0}`,`info`)}"
-        "catch(_fontError){window.__slgFontPreflightBlocked=true;O(`Ren'Py 字体预检失败：无法读取字体报告，已阻断模型调用。${_fontError&&_fontError.message||_fontError}`,`error`);ce(!1);return}}"
+        "catch(_fontError){window.__slgFontPreflightBlocked=true;O(`Ren'Py 字体预检失败：无法读取字体报告，已阻断模型调用。${_fontError&&_fontError.message||_fontError}`,`error`);ce(!1);return}"
         "window.__slgFontPreflightDone=true}"
     )
     if js.count(old_start) != 1:

@@ -2203,6 +2203,42 @@ public final class RenpyStyleFontHarness {
         self.assertIn("renpy_font_missing_glyphs: baseline", compiler)
         self.assertIn("codePointsOfTranslations(merged.values())", compiler)
 
+    def test_font_preflight_state_resets_when_scan_selection_starts(self):
+        """A second APK must not inherit the first APK's successful preflight."""
+        import patch_workshop_ui as patcher
+
+        patched = patcher.patch_scan_flow(
+            ",xe=async()=>{legacyScanFlow},Se=async()=>{legacyNextFlow}"
+        )
+        scan_start = patched.index("scanSelectedApk=async(")
+        scan_state = patched[scan_start:scan_start + 900]
+        for token in (
+            "window.__slgFontPreflightDone=false",
+            "window.__slgFontPreflightBlocked=false",
+            "window.__slgFontPreflightReport=null",
+        ):
+            self.assertIn(token, scan_state)
+        self.assertLess(
+            scan_state.index("window.__slgFontPreflightDone=false"),
+            scan_state.index("window.__slgSelectionMeta=e"),
+        )
+
+    def test_font_preflight_selects_rpymc_and_blocks_without_a_compiled_target(self):
+        """The preflight target matrix must include RPYMC and fail closed when empty."""
+        source = (ROOT / "apk-work" / "ui-redesign" / "patch_workshop_ui.py").read_text("utf-8")
+        start = source.index("let _fontTarget=ae.find")
+        end = source.index("window.__slgFontPreflightDone=true", start)
+        block = source[start:end]
+        self.assertIn("fileType===`rpyc`", block)
+        self.assertIn("fileType===`rpymc`", block)
+        self.assertIn(r"/\\.rp(?:y|ym)c$/i", block)
+        no_target = block.index("if(!_fontTarget)")
+        self.assertIn("__slgFontPreflightBlocked=true", block[no_target:])
+        self.assertIn("ce(!1);return", block[no_target:])
+        self.assertIn("没有可检查的 Ren'Py 编译脚本", block[no_target:])
+        self.assertNotIn("__slgFontPreflightDone=true", block[no_target:])
+        self.assertLess(no_target, block.index("readRenpyTexts"))
+
     def test_rpa_archive_lists_and_reads_rpyc_entries(self):
         rpa3 = build_rpa3_fixture()
         rpa2 = build_rpa2_fixture()
