@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -463,6 +464,145 @@ public final class Task9LintGateHarness {
                 [str(JAVA), "-cp", str(classes), "com.slgtranslator.app.Task9LintGateHarness"],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
+
+    def test_task9_full_rejection_matrix_covers_model_and_compile_gates(self):
+        harness = r'''
+package com.slgtranslator.app;
+
+import com.getcapacitor.JSObject;
+import java.lang.reflect.Method;
+import java.util.*;
+import org.json.JSONArray;
+
+public final class Task9FullMatrixHarness {
+  private static final Method ACCEPT;
+  static {
+    try {
+      ACCEPT = LocalLlmEngine.class.getDeclaredMethod(
+          "acceptTranslation", LocalTranslationSupport.TextItem.class, String.class,
+          JSObject.class, List.class, JSONArray.class, int[].class);
+      ACCEPT.setAccessible(true);
+    } catch (Exception error) {
+      throw new RuntimeException(error);
+    }
+  }
+
+  private static final class Case {
+    final String name;
+    final String oldText;
+    final String newText;
+    final String code;
+    Case(String name, String oldText, String newText, String code) {
+      this.name = name;
+      this.oldText = oldText;
+      this.newText = newText;
+      this.code = code;
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    TranslationCompiler.TemplateMeta meta = new TranslationCompiler.TemplateMeta();
+    assertValid("tag-valid", "{b}Hello{/b}", "{b}你好{/b}", meta);
+    assertValid("expression-valid", "Value [score]", "数值 [score]", meta);
+    assertValid("named-valid", "Hello %(name)s", "你好 %(name)s", meta);
+    assertValid("printf-valid", "Score %s / %d / %1$s", "分数 %s / %d / %1$s", meta);
+
+    List<Case> invalid = Arrays.asList(
+        new Case("tag-missing", "{b}Hello{/b}", "Bonjour", "tag_unbalanced"),
+        new Case("tag-extra", "{b}Hello{/b}", "{b}Bonjour{/b}{i}x{/i}", "tag_unbalanced"),
+        new Case("tag-duplicate", "{b}Hello{/b}", "{b}{b}Bonjour{/b}{/b}", "tag_unbalanced"),
+        new Case("tag-reordered", "{b}{i}Hello{/i}{/b}", "{i}{b}Bonjour{/b}{/i}", "tag_unbalanced"),
+        new Case("tag-crossed", "{b}{i}Hello{/i}{/b}", "{b}{i}Bonjour{/b}{/i}", "tag_misnested"),
+        new Case("expression-missing", "A [one] [two]", "甲 [one]", "interpolation_changed"),
+        new Case("expression-extra", "A [one] [two]", "甲 [one] [two] [three]", "interpolation_changed"),
+        new Case("expression-duplicate", "A [one] [two]", "甲 [one] [one]", "interpolation_changed"),
+        new Case("expression-reordered", "A [one] [two]", "甲 [two] [one]", "interpolation_changed"),
+        new Case("named-missing", "A %(name)s %(count)d", "甲 %(name)s", "printf_changed"),
+        new Case("named-extra", "A %(name)s", "甲 %(name)s %(other)s", "printf_changed"),
+        new Case("named-duplicate", "A %(name)s %(count)d", "甲 %(name)s %(name)s", "printf_changed"),
+        new Case("named-reordered", "A %(name)s %(count)d", "甲 %(count)d %(name)s", "printf_changed"),
+        new Case("printf-missing", "A %s %d %1$s", "甲 %s %d", "printf_changed"),
+        new Case("printf-extra", "A %s %d %1$s", "甲 %s %d %1$s %i", "printf_changed"),
+        new Case("printf-duplicate", "A %s %d %1$s", "甲 %s %d %s", "printf_changed"),
+        new Case("printf-reordered", "A %s %d %1$s", "甲 %1$s %d %s", "printf_changed"),
+        new Case("residual-sentinel", "Hello", "你好 __SLGPH0__", "unrestored_sentinel"));
+    for (Case item : invalid) {
+      assertInvalid(item, meta);
+    }
+  }
+
+  private static void assertValid(String name, String oldText, String newText,
+                                  TranslationCompiler.TemplateMeta meta) throws Exception {
+    RenpyTextValidator.ValidationResult result =
+        RenpyTextValidator.validate(oldText, newText);
+    if (!result.valid) {
+      throw new AssertionError(name + " validator rejected " + result.codes);
+    }
+    List<String> warnings = new ArrayList<String>();
+    boolean accepted = (Boolean) ACCEPT.invoke(null,
+        new LocalTranslationSupport.TextItem(name, oldText), newText, new JSObject(),
+        warnings, new JSONArray(), new int[] {0});
+    if (!accepted || !warnings.isEmpty()) {
+      throw new AssertionError(name + " model acceptance failed: " + warnings);
+    }
+    List<String[]> pairs = new ArrayList<String[]>();
+    pairs.add(new String[] {oldText, newText});
+    TranslationCompiler.TranslationArtifact artifact =
+        TranslationCompiler.compileTranslationArtifact("selectable", pairs, meta);
+    if (artifact == null || artifact.rpyc == null || artifact.rpyc.length == 0) {
+      throw new AssertionError(name + " did not produce RPYC");
+    }
+  }
+
+  private static void assertInvalid(Case item,
+                                    TranslationCompiler.TemplateMeta meta) throws Exception {
+    RenpyTextValidator.ValidationResult result =
+        RenpyTextValidator.validate(item.oldText, item.newText);
+    if (result.valid || !result.codes.contains(item.code)) {
+      throw new AssertionError(item.name + " validator result=" + result.codes);
+    }
+    List<String> warnings = new ArrayList<String>();
+    boolean accepted = (Boolean) ACCEPT.invoke(null,
+        new LocalTranslationSupport.TextItem(item.name, item.oldText), item.newText,
+        new JSObject(), warnings, new JSONArray(), new int[] {0});
+    if (accepted || warnings.isEmpty() || !warnings.toString().contains(item.code)) {
+      throw new AssertionError(item.name + " model gate accepted or hid " + item.code
+          + ": " + warnings);
+    }
+    List<String[]> pairs = new ArrayList<String[]>();
+    pairs.add(new String[] {item.oldText, item.newText});
+    try {
+      TranslationCompiler.compileTranslationArtifact("selectable", pairs, meta);
+      throw new AssertionError(item.name + " reached RPYC writer");
+    } catch (Exception expected) {
+      String message = String.valueOf(expected.getMessage());
+      if (!message.contains(item.code) || !message.contains("old=")
+          || !message.contains("new=") || !message.contains("source=")) {
+        throw expected;
+      }
+    }
+  }
+}
+'''
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="task9-full-matrix-") as directory:
+            directory_path = Path(directory)
+            source = directory_path / "Task9FullMatrixHarness.java"
+            classes = directory_path / "classes"
+            source.write_text(harness, encoding="utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(source)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            result = subprocess.run(
+                [str(JAVA), "-cp", str(classes) + os.pathsep + third_party_classpath(),
+                 "com.slgtranslator.app.Task9FullMatrixHarness"],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
 
 
 if __name__ == "__main__":
