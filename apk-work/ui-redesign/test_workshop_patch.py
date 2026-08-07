@@ -1870,8 +1870,8 @@ check(bo===!1,`preserved v2 is not marked dirty`);
             'if(isNetworkFailure(e))throw e',
             'b=y.length',
             'P=providerLabel(i)',
-            '鏃犳硶杩炴帴 ${P}',
-            '鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢',
+            '\u65e0\u6cd5\u8fde\u63a5 ${P}',
+            '\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546\u3002',
         ):
             self.assertIn(token, js)
         self.assertNotIn('maxRetries:2', js)
@@ -1904,7 +1904,7 @@ async function main(){
   check(!isNetworkFailure(new Error(`network glossary entry is invalid`)),`arbitrary network classification`);
   check(providerLabel(`https://api.deepseek.com/v1`)===`DeepSeek`,`DeepSeek label`);
   check(providerLabel(`https://api.openai.com/v1`)===`OpenAI`,`OpenAI label`);
-  check(providerLabel(`https://example.invalid/v1`)===`鑷畾涔夋帴鍙,`custom label`);
+  check(providerLabel(`https://example.invalid/v1`)===`\u81ea\u5b9a\u4e49\u63a5\u53e3`,`custom label`);
 
   for(const message of [
     `API returned empty content`,
@@ -1923,12 +1923,12 @@ async function main(){
     check(calls.join(`,`)===`4,2,1,1,2,1,1`,`${message} recursive split shape`);
   }
 
-  let networkCalls=0;
-  globalThis.Vo=async()=>{networkCalls+=1;throw sdkError};
+  let requestCalls=0;
+  globalThis.Vo=async()=>{requestCalls+=1;throw sdkError};
   let rejected=false;
   try{await Bo({},`model`,[{},{},{},{}],`en`,`zh`,void 0,!0)}catch(error){rejected=error===sdkError}
   check(rejected,`network error escapes recursive split`);
-  check(networkCalls===1,`network request is not recursively retried`);
+  check(requestCalls===1,`network request is not recursively retried`);
 
   globalThis.Co=async()=>{};
   globalThis.No=texts=>texts;
@@ -1969,7 +1969,7 @@ async function main(){
   const result=await task;
   check(started.join(`,`)===`network,inflight`,`no later batch starts after in-flight settles`);
   check(result.successCount===2,`cache and in-flight partial results survive`);
-  check(result.error===`鏃犳硶杩炴帴 DeepSeek銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙,`actionable fatal error survives partial results`);
+  check(result.error===`\u65e0\u6cd5\u8fde\u63a5 DeepSeek\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546\u3002`,`actionable fatal error survives partial results`);
 }
 main().catch(error=>{console.error(error);process.exitCode=1});
 '''
@@ -1990,7 +1990,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         )
         self.assertIn('async function runFileTasksParallel(e,t,concurrency=3)', js)
         self.assertIn('N=await runFileTasksParallel(ae,async(o,c)=>{', js)
-        self.assertIn('...r?{error:N||`閮ㄥ垎鏂囦欢澶勭悊澶辫触锛岃鏌ョ湅鏃ュ織`}:{}', js)
+        self.assertIn('...r?{error:N||`\u90e8\u5206\u6587\u4ef6\u5904\u7406\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u65e5\u5fd7`}:{}', js)
 
         start = js.index('async function runFileTasksParallel(e,t,concurrency=3)')
         end = js.index('async function Lo(e){', start)
@@ -1998,7 +1998,7 @@ main().catch(error=>{console.error(error);process.exitCode=1});
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 async function main(){
-  const fatal=`鏃犳硶杩炴帴 OpenAI銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙;
+  const fatal=`\u65e0\u6cd5\u8fde\u63a5 OpenAI\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546\u3002`;
   const started=[];
   const result=await runFileTasksParallel([`file-1`,`file-2`,`file-3`],async file=>{
     started.push(file);
@@ -2042,20 +2042,22 @@ main().catch(error=>{console.error(error);process.exitCode=1});
 
         behavior_contract = rf'''
 function check(condition,label){{if(!condition)throw new Error(label)}}
+globalThis.window=globalThis;
 const fatal=`fatal provider network`;
-let writes=0,builds=0;
+let requestCalls=0,writeCalls=0,buildCalls=0,completedFiles=0;
 function isProviderNetworkFailure(error){{return error===fatal}}
+async function requestFatal(){{requestCalls+=1;throw fatal}}
 function O(){{}}
 function ue(){{}}
 function ns(){{return true}}
 function rs(_file,_items,_translations,language){{return{{outputPath:`tl/${{language}}.rpy`,content:`translated`}}}}
-async function Ne(){{writes+=1}}
+async function Ne(){{writeCalls+=1}}
 async function wo(){{}}
 function qe(){{return `translated`}}
-const E={{buildPatchedApk:async()=>{{builds+=1}}}};
+const E={{buildPatchedApk:async()=>{{buildCalls+=1}}}};
 
 async function simulatePartialFile(){{
-  let N=``,r=false,p=2,m=fatal,a=[],o={{name:`script.rpy`}},l=[{{}},{{}}],f=new Map(),g=`zh`,y=`en`,oe=false,i=``,s=`rpy`,t=0,c=0,ae=[o],_fk=`cache-key`,vo={{}},bo=false;
+  let N=``,r=false,p=2,m=await requestFatal().catch(error=>error),a=[],o={{name:`script.rpy`}},l=[{{}},{{}}],f=new Map(),g=`zh`,y=`en`,oe=false,i=``,s=`rpy`,t=0,c=0,ae=[o],_fk=`cache-key`,vo={{}},bo=false,_maxDone=0;
   {file_result}
   return N;
 }}
@@ -2068,9 +2070,11 @@ async function simulatePackaging(){{
 async function main(){{
   const result=await simulatePartialFile();
   check(result===fatal,`fatal network result survives partial success`);
-  check(writes===0,`fatal network does not write partial translations`);
+  check(requestCalls===1,`fatal provider rejection happens once`);
+  check(writeCalls===0,`fatal network does not write partial translations`);
   await simulatePackaging();
-  check(builds===0,`fatal network does not package cached or partial files`);
+  check(buildCalls===0,`fatal network does not package cached or partial files`);
+  check(completedFiles===0,`fatal network does not complete a file`);
 }}
 main().catch(error=>{{console.error(error);process.exitCode=1}});
 '''
@@ -2091,8 +2095,8 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         )
         self.assertIn('reason:"network"', js)
         self.assertIn('if(payload.reason==="network")', js)
-        self.assertIn('actionButton("鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢",openSettings)', js)
-        self.assertIn('actionButton("閲嶈瘯缈昏瘧",()=>retryTask(', js)
+        self.assertIn('actionButton("\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546",openSettings)', js)
+        self.assertIn('actionButton("\u91cd\u8bd5\u7ffb\u8bd1",()=>retryTask(', js)
 
         snapshot_start = js.index('function readTaskSnapshot(){')
         snapshot_end = js.index('function detailToggle(', snapshot_start)
@@ -2103,8 +2107,8 @@ main().catch(error=>{{console.error(error);process.exitCode=1}});
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
 globalThis.window=globalThis;
-const fatal=`鏃犳硶杩炴帴 DeepSeek銆傝妫€鏌ョ綉缁滐紝鎴栧墠寰€鈥滄垜鐨勨€濆垏鎹緵搴斿晢銆俙;
-function sourceText(){return `姝ｅ湪澶勭悊鑴氭湰 1 / 2\n缈昏瘧涓璡n缈昏瘧澶辫触: ${fatal}`}
+const fatal=`\u65e0\u6cd5\u8fde\u63a5 DeepSeek\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546\u3002`;
+function sourceText(){return `\u6b63\u5728\u5904\u7406\u811a\u672c 1 / 2\n\u7ffb\u8bd1\u5931\u8d25: ${fatal}`}
 function readProgressLog(){return{raw:`stale translating log`,latest:`stale translating log`}}
 const document={querySelectorAll(){return[]}};
 globalThis.findButton=()=>null;
@@ -2124,8 +2128,8 @@ const body=renderStateBody(`failed`,{reason:`network`,raw:fatal,fileName:`game.a
 const buttons=[];
 function visit(node){if(!node)return;if(node.tag===`button`)buttons.push(node);for(const child of node.children||[])visit(child)}
 visit(body);
-const settings=buttons.find(button=>button.label===`鍓嶅線鈥滄垜鐨勨€濆垏鎹緵搴斿晢`);
-const retry=buttons.find(button=>button.label===`閲嶈瘯缈昏瘧`);
+const settings=buttons.find(button=>button.label===`\u524d\u5f80\u201c\u6211\u7684\u201d\u5207\u6362\u4f9b\u5e94\u5546`);
+const retry=buttons.find(button=>button.label===`\u91cd\u8bd5\u7ffb\u8bd1`);
 check(settings&&retry,`network failure renders recovery actions`);
 settings.handler();retry.handler();
 check(opened===1&&retried===1,`recovery actions are wired`);

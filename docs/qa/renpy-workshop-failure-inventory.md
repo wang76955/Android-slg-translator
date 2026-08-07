@@ -378,3 +378,66 @@ Ran 2 tests ... OK
 - `extract_js_function()` 的职责仅是稳定提取完整函数块，不能替代产品修复，也不能让既有失败测试自动变绿。
 - 清单中的 `PRODUCT_REGRESSION` 仍需真实产品修复和独立绿灯证据；`STALE_CONTRACT` 需由后续任务决定契约是否过时；`BRITTLE_EXTRACTION` 需改用稳定函数边界；`ENCODING_BOUNDARY` 需先统一 UTF-8/Node 夹具边界；`FIXTURE_GAP` 需补齐被截取生产片段的上下文。
 - 本任务未将任何 workshop 失败项标记为 PASS；后续任务应保留这些 Red evidence，并在对应修复后追加可复现的 Green evidence。
+
+## Task 4 revalidation: fatal network termination and output quarantine
+
+This section is the authoritative Task 4 update and supersedes the earlier preliminary WSP-04/WSP-08/WSP-09/WSP-10 entries above. The source and test files were inspected before editing. The initial RED run exposed three stale UTF-8/legacy-mojibake token contracts and one harness defect; it did not establish a product regression.
+
+### WSP-04 `test_fatal_network_stops_outer_file_controller`
+
+- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
+- Exact RED result: `AssertionError: '<expected outer-controller error token>' not found in '<patched bundle>'`.
+- Corrected contract: the test now matches the current UTF-8 error message and executes `runFileTasksParallel(..., concurrency=3)`.
+- GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller -v`
+- Exact GREEN result: `Ran 1 test ... OK`.
+- Behavioral evidence: `file-1` and the already-running `file-2` may start; `file-3` never starts; the exact fatal error object is returned by the outer controller.
+- Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
+- Boundary: Node-only extracted-production-function harness. It does not prove a real provider request, Android bridge behavior, filesystem commit, APK packaging, or device execution.
+
+### WSP-08 `test_network_failure_preempts_stale_translating_ui`
+
+- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v`
+- Exact RED result: `AssertionError: 'actionButton("<legacy network recovery action>",openSettings)' not found in '<patched bundle>'`.
+- Corrected contract: the fixture now uses the current UTF-8 labels `前往“我的”切换供应商` and `重试翻译`, and a current translating/error source text.
+- GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui -v`
+- Exact GREEN result: `Ran 1 test ... OK`.
+- Behavioral evidence after the fatal rejection: `snapshot.state === "failed"`, `snapshot.reason === "network"`, `snapshot.raw` preserves the actionable provider error, and both recovery actions are wired.
+- Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
+- Boundary: Node-only extracted `readTaskSnapshot()`/`renderStateBody()` harness. It does not prove native UI rendering, Android lifecycle behavior, or a device-visible failure state.
+
+### WSP-09 `test_network_failures_stop_batches_without_recursive_splitting`
+
+- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v`
+- Exact RED result: `AssertionError: '<legacy provider-message token>' not found in '<patched bundle>'`.
+- Corrected contract: the fixture now asserts the current UTF-8 provider message while retaining ordinary content-error recursive splitting checks.
+- GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting -v`
+- Exact GREEN result: `Ran 1 test ... OK`.
+- Behavioral evidence: ordinary content errors retain split shape `4,2,1,1,2,1,1`; the fatal network error escapes `Bo()` without splitting; `requestCalls === 1` for the first fatal rejection; the coordinator stops acquiring later batches while allowing the already in-flight batch to settle.
+- Classification: `STALE_CONTRACT`; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
+- Boundary: Node-only extracted provider/batch/coordinator harness. It does not prove remote service availability, SDK retry behavior outside the extracted function, or Android/device networking.
+
+### WSP-10 `test_partial_network_failure_never_writes_or_packages`
+
+- RED command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v`
+- Exact RED result: `ReferenceError: _maxDone is not defined`.
+- Root cause: fixture defect. `_maxDone` is harness-owned context needed by the extracted production fragment; the fixture now defines `_maxDone=0` before evaluating it. No `_maxDone` production addition was made for this test.
+- GREEN command: `python -m unittest test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages -v`
+- Exact GREEN result: `Ran 1 test ... OK`.
+- Behavioral evidence after the first fatal rejection: `requestCalls === 1`, `writeCalls === 0`, `buildCalls === 0`, `completedFiles === 0`; the fatal result survives the file controller; the write bridge and `buildPatchedApk` guard are both bypassed.
+- Classification: `FIXTURE_GAP` resolved; change set: `apk-work/ui-redesign/test_workshop_patch.py`; no production change.
+- Boundary: Node-only extracted file-result/package-guard harness. It does not prove native file writes, APK assembly/signing, cache persistence, or a real Android install.
+
+### Task 4 focused regression evidence
+
+Command:
+
+```powershell
+python -m unittest `
+  test_workshop_patch.WorkshopPatchContractTest.test_network_failures_stop_batches_without_recursive_splitting `
+  test_workshop_patch.WorkshopPatchContractTest.test_fatal_network_stops_outer_file_controller `
+  test_workshop_patch.WorkshopPatchContractTest.test_partial_network_failure_never_writes_or_packages `
+  test_workshop_patch.WorkshopPatchContractTest.test_network_failure_preempts_stale_translating_ui `
+  test_engine_performance.py -v
+```
+
+Exact result: `Ran 8 tests ... OK` (four Task 4 contracts plus four performance-regression tests). The automated evidence is complete for the Node/Python harness scope only; real provider/network, native bridge, APK build/package, Android installation, and device/game evidence remain outside this task.
