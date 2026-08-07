@@ -1,6 +1,6 @@
 | requirementId | sourceRequirement | implementation | automatedTest | command | status | artifact | residualRisk | commit |
 |---|---|---|---|---|---|---|---|---|
-| T6 | Structured Ren'Py text records | Task 6 not executed in Task 0 | NOT-RUN: Task 6 test suite | NOT-RUN: Task 6 command | NOT-RUN | NOT-RUN | Structured-record behavior is unverified until Task 6 | NOT-RUN |
+| T6 | B06-01..B06-05: Structured Ren'Py text records | `RenpyTextRecord` fields plus `RpycTextExtractor.extractRecords`; legacy `extractTexts` projection retained | Focused B06 harness PASS; full scanner regression has one unrelated workshop failure | Focused 4-test command PASS; `python -m unittest test_fast_scanner.py -v` = 71 tests, 1 failure | FAIL | JVM/stub extractor harness; no APK/device artifact | B06-01..B06-04 are directly verified; B06-05 remains FAIL until the pre-existing workshop token failure is resolved outside Task 8 scope | HEAD (this Task 8 commit) |
 | T7 | Official marked-string coverage | Task 7 not executed in Task 0 | NOT-RUN: Task 7 test suite | NOT-RUN: Task 7 command | NOT-RUN | NOT-RUN | Official marker coverage is unverified until Task 7 | NOT-RUN |
 | T8 | Context collision detection and structured corpus | Task 8 not executed in Task 0 | NOT-RUN: Task 8 test suite | NOT-RUN: Task 8 command | NOT-RUN | NOT-RUN | Collision handling is unverified until Task 8 | NOT-RUN |
 | T9 | Strict placeholder and Ren'Py text lint | Task 9 not executed in Task 0 | NOT-RUN: Task 9 test suite | NOT-RUN: Task 9 command | NOT-RUN | NOT-RUN | Placeholder/lint safety is unverified until Task 9 | NOT-RUN |
@@ -16,3 +16,15 @@ Status model: `PASS` means the named requirement was verified by the listed
 command and artifact; `FAIL` means the command ran and exposed a failure;
 `NOT-RUN` means no verification was performed. No status may be inferred from
 missing fixtures, absent tools, or an older ledger.
+
+### Task 8 B06 step ledger
+
+| requirementId | source requirement | Java mapping | current test/evidence | status | boundary |
+|---|---|---|---|---|---|
+| B06-01 | Original Task 6 Step 1: structured fixture covers dialogue, menu, name, old/new and source metadata | `RenpyTextRecord.Kind`; `text`, `kind`, `speaker`, `identifier`, `sourcePath`, `sourceLine`, `occurrence`, `coverageCertain`; `RpycTextExtractor.extractRecords` | `test_rpyc_extractor_returns_structured_records_without_breaking_text_api` plus adjacent-node speaker harness; 4-test focused command exited 0 | PASS | Python fixture and real JVM extractor compiled with repository stubs; no real APK/device claim |
+| B06-02 | Original Task 6 Step 2: record model and compatibility adapter | `RenpyTextRecord` constructor normalization; `extractRecords`; `extractTexts(byte[])` and `extractTexts(byte[], boolean)` project `record.text` | Structured-record harness asserts kinds, fields, old-only filtering and legacy text API; 4-test focused command exited 0 | PASS | JVM/stub behavior only |
+| B06-03 | Original Task 6 Step 3: preserve RPA virtual source path | `extractRecords(..., sourcePath, ...)` passes the caller-supplied virtual path into every record | Structured harness uses `assets/x-game/archive.rpa!/game/chapter1.rpyc` and asserts `sourcePath`; 4-test focused command exited 0 | PASS | Direct extractor path propagation; RPA enumeration and Android APK integration are not proven here |
+| B06-04 | Original Task 6 Step 4: bridge returns legacy strings and structured records | `FastApkScanner.readRenpyTexts`; `RpycTextExtractor.extractRecords`; `renpyRecords` JSON plus legacy `content` | Structured test checks bridge source contract and runs extractor harness; 4-test focused command exited 0 | PASS | Source/static bridge contract plus JVM/stub extractor; not a built DEX, Android or device result |
+| B06-05 | Original Task 6 Step 5: run focused and scanner regression | Existing `test_fast_scanner.py` regression gate; no production Java change justified | Focused 4-test command: PASS, 4 tests/8.306s. Full scanner: FAIL, 71 tests/1 failure at `test_workshop_patch_propagates_activation_mode_and_guidance`; discover: FAIL, 179 tests/5 failures/1 skip | FAIL | Failure is outside the new extractor/speaker behavior and cannot be honestly converted to PASS within Task 8 allowed production scope |
+
+Evidence boundary: the passing focused tests execute the actual Java extractor and all native sources through `javac`/`java` with repository stubs, plus Python test orchestration. They do not establish D8/DEX output, a real APK/Android/Capacitor runtime, an installed device, or a real Ren'Py game corpus. The full scanner and discover failures remain recorded as failures rather than being inferred away.

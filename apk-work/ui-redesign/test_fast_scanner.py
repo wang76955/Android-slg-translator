@@ -330,6 +330,34 @@ def build_structured_records_fixture_rpyc() -> bytes:
     return RPC2_MAGIC + bytes(table) + slot + slot + b"\x00" * 16
 
 
+def build_adjacent_dialogue_speaker_fixture_rpyc() -> bytes:
+    """Two independent Say nodes: only the first has a speaker."""
+    p = bytearray()
+    p += b"\x80\x02\x5d\x28"  # PROTO 2, EMPTY_LIST, MARK
+    p += pickle_short("renpy.ast") + pickle_short("Say") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("linenumber") + pickle_int1(31)
+    p += pickle_short("filename") + pickle_short("game/speakers.rpy")
+    p += pickle_short("who") + pickle_short("alice")
+    p += pickle_short("what") + pickle_short("First adjacent line")
+    p += b"\x75\x86\x62"
+    p += pickle_short("renpy.ast") + pickle_short("Say") + b"\x93"
+    p += b"\x29\x81\x4e\x7d\x28"
+    p += pickle_short("linenumber") + pickle_int1(32)
+    p += pickle_short("filename") + pickle_short("game/speakers.rpy")
+    p += pickle_short("what") + pickle_short("Second adjacent line")
+    p += b"\x75\x86\x62\x65."
+    import zlib
+    slot = zlib.compress(bytes(p))
+    table = bytearray()
+    data_start = len(RPC2_MAGIC) + 3 * 12
+    for slot_id in (1, 2):
+        table += struct.pack("<III", slot_id, data_start, len(slot))
+        data_start += len(slot)
+    table += struct.pack("<III", 0, 0, 0)
+    return RPC2_MAGIC + bytes(table) + slot + slot
+
+
 def build_dialogue_id_fixture_rpyc() -> bytes:
     """Two TranslateSay nodes share old text but retain different IDs."""
     p = bytearray()
@@ -3401,6 +3429,73 @@ public final class StructuredRecordsHarness {
             )
             subprocess.run(
                 [str(JAVA), "-cp", str(classes), "StructuredRecordsHarness", str(fixture_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_rpyc_extractor_does_not_leak_speaker_between_adjacent_dialogue_nodes(self):
+        fixture = build_adjacent_dialogue_speaker_fixture_rpyc()
+        harness = r"""
+import com.slgtranslator.app.RenpyTextRecord;
+import com.slgtranslator.app.RpycTextExtractor;
+import java.nio.file.Files;
+import java.util.List;
+
+public final class AdjacentDialogueSpeakerHarness {
+    public static void main(String[] args) throws Exception {
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(args[0]));
+        List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
+                bytes, "game/speakers.rpyc", false);
+        require(find(records, "First adjacent line", "alice", 31),
+                "first adjacent dialogue must retain alice");
+        require(find(records, "Second adjacent line", "", 32),
+                "second adjacent dialogue without who must have an empty speaker");
+    }
+
+    private static boolean find(List<RenpyTextRecord> records, String text,
+                                String speaker, int sourceLine) {
+        for (RenpyTextRecord record : records) {
+            if (text.equals(record.text)
+                    && record.kind == RenpyTextRecord.Kind.DIALOGUE
+                    && speaker.equals(record.speaker)
+                    && record.sourceLine == sourceLine) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
+"""
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="adjacent-dialogue-speaker-test-") as temporary:
+            temporary_path = Path(temporary)
+            fixture_path = temporary_path / "fixture.rpyc"
+            harness_path = temporary_path / "AdjacentDialogueSpeakerHarness.java"
+            classes = temporary_path / "classes"
+            fixture_path.write_bytes(fixture)
+            harness_path.write_text(harness, "utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [
+                    str(JAVAC),
+                    "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                    "-d", str(classes),
+                    "-classpath", third_party_classpath(),
+                    *map(str, stubs),
+                    *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                    str(harness_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                [str(JAVA), "-cp", str(classes), "AdjacentDialogueSpeakerHarness", str(fixture_path)],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
