@@ -2,7 +2,7 @@
 
 > 适用范围：`docs/superpowers/plans/2026-08-07-renpy-app-compatibility-optimization.md` 的 Task 16，以及本次 C16/Task 19 发布机器矩阵和自动化门禁复核。
 >
-> 当前状态：未批准发布。Task 19 fresh 自动化门禁和 Task 20 本地产物门禁已通过：scanner `77` 项、workshop `60` 项、quality/coverage/performance 合计 `37` 项（1 个明确 audit-fixture skip）、full discover `192` 项（1 个明确 audit-fixture skip），均无 failures/errors；helper DEX、APK 哈希、v2/v3 签名和版本元数据已记录。Task 21–23 的真实游戏样本和真机验收仍是独立条件；本工作区没有完整第三方 Ren'Py 游戏样本，真实样本的 coverage、安装、启动、old save 和 rollback 仍为 `NOT-RUN`。
+> 当前状态：未批准发布。Task 19 自动化门禁、Task 20 本地产物门禁和 Task 23 文档审计已通过；但 Task 21/22 的真实游戏样本、安装、启动、语言、old save 和 rollback 仍为 `NOT-RUN`，因此最终发布决策仍是“未批准发布”。
 
 ## 1. 发布原则
 
@@ -156,14 +156,14 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 
 | 门禁 | 通过条件 | 当前状态 |
 |---|---|---|
-| 自动化测试 | full discover 无失败；所有 skip 有外部条件 | ☐ |
-| 真实样本覆盖 | `missing == 0`，或用户明确选择并看到 incomplete test patch | ☐ |
-| rejected | `rejected == 0` | ☐ |
-| 编译产物 | `RenpyPatchValidator` 通过，签名在 validator 之后进行 | ☐ |
-| 字体终检 | `missingCodePoints` 为空，覆盖报告已保存 | ☐ |
-| 语言激活 | 每种声明支持的激活模式已在设备观察到译文 | ☐ |
-| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | ☐ |
-| 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | ☐ |
+| 自动化测试 | full discover 无失败；所有 skip 有外部条件 | PASS — Task 19 |
+| 真实样本覆盖 | `missing == 0`，或用户明确选择并看到 incomplete test patch | NOT-RUN — 无批准真实样本 |
+| rejected | `rejected == 0` | NOT-RUN — 无批准真实样本 |
+| 编译产物 | `RenpyPatchValidator` 通过，签名在 validator 之后进行 | PASS — Task 20 本地工具产物；不代表真实游戏 |
+| 字体终检 | `missingCodePoints` 为空，覆盖报告已保存 | NOT-RUN — 真实语料/字体未执行 |
+| 语言激活 | 每种声明支持的激活模式已在设备观察到译文 | NOT-RUN — 未安装真实游戏 |
+| 安装/存档 | 单 APK、split（如适用）、新游戏和旧存档回归通过 | NOT-RUN — 真机流程未执行 |
+| 不支持样本 | 被稳定阻止，无崩溃、无伪成功 | PASS — controlled unsupported gate；真实样本仍 NOT-RUN |
 
 当前缺任一项都必须保持“未批准发布”。特别是 `EXTRACT_ONLY`/`UNSUPPORTED` 样本被正确阻断，是安全行为，不是可以通过发布门禁的理由。
 
@@ -178,7 +178,7 @@ Task 19 fresh 重新执行的 discover 为 `192` 项、0 failures/errors、1 个
 | C16-03 | selectable、always-on、标准/自定义/无菜单和菜单注入失败 | SAFE/WARNING/EXTRACT_ONLY/UNSUPPORTED | selectable / always-on / NONE | C13/T12/C15 UI/compile fixtures；real menu/source counts `not-run` | real missing/rejected/font `not-run` | tool build PASS；real activation/startup/old save/rollback NOT-RUN | PASS (controlled); device NOT-RUN |
 | C16-04 | 对话、菜单、角色名、UI、`{#}`、插值、printf、重复语境和字体 | inherited source level | inherited activation; advanced dialogue ID default-off | T8–T11/C15 controlled counts/collision/lint/font；real template/source `not-run` | complete real build requires `missing == 0` and `rejected == 0`; real font `not-run` | controlled gates PASS；real install/startup/save/rollback NOT-RUN | PASS (controlled); real corpus NOT-RUN |
 | C16-05 | `single APK` 与 `base + split` 的构建/签名/单 session 安装 | inherited source level | inherited activation | C14 split lifecycle; Task 20 helper/APK artifact gate；`versionCode=7`/`versionName=1.0.7`；SHA-256 `AF5D55B12AD0089C50539B99D9D370B4D197B90CCDD9CECAD83729C84C974295` | real missing/rejected/font `not-run` | local build/signature/asset PASS；v2/v3 true；real install/startup/old save/rollback NOT-RUN | PASS (local artifact); device NOT-RUN |
-| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 21–22 and Task 23 audit still pending | NOT-RUN |
+| C16-06 | 最终定义的自动化、artifact、样本、语言、安装/存档和不支持门禁 | all declared levels require evidence | all applicable modes require evidence | current evidence index; real source/template/counts `not-run` | mandatory real rows `NOT-RUN` | Task 23 audit complete；Task 21–22 real sample/device rows remain NOT-RUN | NOT-RUN — 未批准发布 |
 
 ## 8. 签字与交接
 
