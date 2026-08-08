@@ -18,7 +18,7 @@
 采用“并存一个发布周期，再决定移除 ML Kit”的迁移方式：
 
 1. 新增 `marian` 引擎，使用 Marian 英译中模型、ONNX Runtime Android 和 INT8 权重量化；
-2. 新安装或没有本地翻译偏好的用户默认选择 Marian；
+2. 候选/内部验证构建继续以 ML Kit 为默认；只有 `AUTOMATED_PASS`、`DEVICE_PASS` 和 `QUALITY_PASS` 同时成立的生产并存版本，才让新安装或没有本地翻译偏好的用户默认选择 Marian；
 3. 已保存 `mlkit` 偏好的用户继续使用 ML Kit，不进行静默强制迁移；
 4. 设置页同时提供 Marian、ML Kit 和 Qwen，Marian 标记为推荐，ML Kit 标记为兼容回退；
 5. Marian 未安装、模型损坏、设备不支持或验收未通过时，不自动把失败结果伪装为成功；用户可以明确切换到 ML Kit；
@@ -73,9 +73,15 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 
 职责：
 
-- 返回固定模型目录和当前模型版本；
+- 模型根目录固定为 `new File(context.getFilesDir(), "models/marian")`，下载 staging、已安装版本和活动指针都必须位于该根目录内；
+- 目录布局固定为 `.staging/<uuid>/`、`versions/<modelId>-<manifestSha256>/` 和 `active.json`，不使用外部存储、公共下载目录或用户可配置路径作为安装目录；
 - 下载模型包与许可证文件；
-- 使用 `.part` 文件、长度检查、逐文件 SHA-256 和原子目录切换；
+- 在 `.staging/<uuid>/` 内使用 `.part` 文件完成下载、解包、长度检查、逐文件 SHA-256、manifest 校验和可加载性 smoke；
+- 校验通过后，将 staging 目录在同一模型根目录内重命名为不可变版本目录，再通过同目录中的 `active.json.tmp` 原子替换 `active.json` 激活新版本；
+- 在目录重命名和活动指针替换前同步文件内容，并通过 native helper 同步对应目录项；
+- 安装前验证 staging、versions 和 active pointer 的 canonical path 均位于 `getFilesDir()` 下，并通过 native `stat.st_dev` 验证 staging 与最终目录属于同一文件系统；
+- `rename` 返回 `EXDEV`、目标冲突或其他失败时保留当前活动版本、删除或隔离 staging，并返回安装失败；禁止用跨卷复制或非原子目录移动自动兜底；
+- 已存在相同 `modelId + manifestSha256` 的完整版本时复用该不可变目录，不覆盖其中任何文件；
 - 提供 `supported`、`installed`、`ready`、`downloading`、`downloadState`、`downloadedBytes`、`totalBytes`、`modelVersion` 和 `lastError`；
 - 删除模型前关闭 `MarianNativeRuntime` 的共享 native handle；
 - 模型不完整、校验失败或版本不一致时返回 `ready=false`，不得继续推理。
@@ -213,6 +219,7 @@ Marian 响应结构固定为：
 行为规则：
 
 - 没有保存偏好的新用户默认 `marian`；
+- 上述默认只在生产发布配置 `DEFAULT_LOCAL_ENGINE="marian"` 经过三项 PASS 批准后启用；候选/内部验证构建固定 `DEFAULT_LOCAL_ENGINE="mlkit"`，但仍显示 Marian 实验选项；
 - 已保存 `model:"mlkit"` 的用户仍选中 ML Kit；
 - 已保存 `model:"qwen"` 的用户仍映射到原生 `llm`；
 - 不把 `mlkit` 字符串全局替换成 `marian`，避免破坏旧任务、缓存和回退入口；
@@ -261,6 +268,8 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - SHA-256 不匹配：删除临时文件，保留已安装的旧版本；
 - 存储不足：下载前按 manifest 总大小加安全余量检查；
 - 下载中断：保留可验证的 `.part` 供明确的断点续传实现使用；没有断点信息时重新下载，不把 partial 标为 installed；
+- staging 与最终目录不在同一 `st_dev`、canonical path 逃出内部模型根目录或 rename 返回 `EXDEV`：终止安装并保持原 `active.json` 不变，不执行复制兜底；
+- `active.json` 损坏或指向不存在/未通过校验的版本：返回 `ready=false`，尝试从最近一个完整不可变版本恢复活动指针前必须重新校验该版本；
 - native handle 或 Session 创建失败：关闭已创建资源并允许用户切换 ML Kit；
 - 单条文本失败：记录 `rejected`/`warnings`，继续同批其他条目；
 - 进程回收：翻译缓存继续由现有 WebView 任务快照恢复，native handle 下次按模型状态重新创建；
@@ -293,7 +302,7 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 
 ### 12.3 UI 契约测试
 
-- 新设置默认 Marian；旧 `mlkit` 和 `qwen` 偏好保持不变；
+- 候选构建的新设置默认 ML Kit，三项 PASS 批准后的生产并存构建默认 Marian；旧 `mlkit` 和 `qwen` 偏好始终保持不变；
 - Marian/ML Kit/Qwen 三项均可选择；
 - Marian 下载、状态、删除和翻译调用包含正确 engine；
 - 本地供应商不要求 API Key；
@@ -313,19 +322,53 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 
 ## 13. 质量与性能验收
 
-建立两个固定语料集：
+验收拆成三个互不替代的状态：
+
+- `AUTOMATED_PASS`：CI 可自动执行的模型、运行时、结构、指标和构建门禁；
+- `DEVICE_PASS`：批准 Android 设备上的性能、离线、稳定性和完整工作流门禁；
+- `QUALITY_PASS`：人工盲评和严重错误审查门禁。
+
+CI 获得 `AUTOMATED_PASS` 后可以生成和分发内部验证 APK，不需要等待人工盲评。Marian 只有同时获得三个 PASS 才能作为生产默认；人工盲评失败或未执行不会把自动测试改写为失败，但发布状态保持“实验/候选”，ML Kit 继续作为默认。
+
+### 13.1 固定语料集
+
+建立三个带来源、许可证、固定 revision 和 SHA-256 的语料集：
 
 1. `local-engine-smoke`：不少于 200 条，覆盖菜单、短对白、长对白、角色名、标点、emoji、Ren'Py 标签、插值、printf 和不可翻译文本；
-2. `real-game-quality`：从真实 `10251` 条唯一原文中按固定种子分层抽取不少于 500 条，保留文本类型和长度分布。
+2. `marian-reference`：不少于 1000 对具有人工中文参考译文的公开英文到中文测试句，用于 SacreBLEU 和 chrF++；
+3. `real-game-quality`：从真实 `10251` 条唯一原文中按固定种子分层抽取不少于 500 条，保留文本类型和长度分布，用于 Marian 与 ML Kit 的人工盲评。
 
-质量验收：
+不得把当前 ML Kit 输出或 Marian FP32 输出当作 `marian-reference` 的人工参考译文。模型输出只能用于退化和运行时一致性比较。
 
-- placeholder/markup 结构通过率必须为 100%；
-- smoke 集不得产生空译文、残留 sentinel 或不可解析输出；
-- 500 条质量集由盲评比较 Marian 与当前 ML Kit，Marian 的“更好”比例必须至少比“更差”比例高 10 个百分点；
+### 13.2 自动质量门禁
+
+CI 固定计算并保存 SacreBLEU 的 signature、BLEU 和 chrF++，不使用未声明 tokenizer、大小写或归一化参数的裸分数。
+
+自动门限固定为：
+
+- `local-engine-smoke` placeholder/markup 结构通过率为 100%；
+- smoke 集没有空译文、残留 sentinel、不可解析输出或未分类异常；
+- 上游 Transformers FP32、ONNX FP32 和 ONNX INT8 使用同一固定 generation 配置；
+- ONNX FP32 相对 Transformers FP32 在 `marian-reference` 上的 chrF++ 下降不超过 `0.2`，BLEU 下降不超过 `0.1`；
+- ONNX INT8 相对 ONNX FP32 的 chrF++ 下降不超过 `1.0`，BLEU 下降不超过 `0.5`；
+- Android native INT8 相对离线 ONNX INT8 固定输出的 aggregate chrF++ 至少为 `99.0`，逐句完全一致率至少为 `95%`；
+- 任一版本出现数字、占位符、标签或特殊 token 结构损坏时直接失败，不允许由 aggregate 指标抵消；
+- `marian-reference` 的绝对 BLEU/chrF++ 作为趋势指标保存，但在没有对该固定语料完成独立校准前，不采用来源不明的单一绝对阈值，例如无条件写死 `chrF >= 55`。
+
+这些门限只证明导出、量化和 Android runtime 没有相对固定上游基线发生不可接受的退化，不证明 Marian 比 ML Kit 更符合游戏文本风格。
+
+### 13.3 人工质量门禁
+
+`real-game-quality` 的 500 条使用隐藏引擎身份、随机左右顺序的盲评，比较 Marian 与当前 ML Kit：
+
+- Marian 的“更好”比例至少比“更差”比例高 10 个百分点；
 - 严重错误率不得高于 ML Kit，包括反义、漏掉关键否定、人物/数字错误和明显未翻译；
 - 固定术语一致性不得低于 ML Kit；
-- 质量门限未通过时 Marian 不成为默认引擎，ML Kit 保持默认并记录 FAIL。
+- 评审记录包含评审人数、分歧处理、样本 SHA-256 和最终统计；
+- 未执行时状态为 `QUALITY_NOT_RUN`，不阻断 CI 构建内部验证 APK，但阻断 Marian 成为生产默认和 ML Kit 移除；
+- 未通过时状态为 `QUALITY_FAIL`，ML Kit 保持默认，Marian 只能保留为实验选项或停止发布。
+
+### 13.4 设备性能门禁
 
 性能验收在 `PEMM20` 或性能不高于该设备的批准设备上执行：
 
@@ -337,7 +380,7 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - 设备锁屏/解锁或应用前后台切换后，任务状态和已完成缓存保持一致；
 - Marian 的 200 条总耗时不得超过同机 ML Kit 的 4 倍；
 - 真实 `10251` 条路线必须在应用允许的长任务边界内完成，不出现持续无进展 5 分钟以上的批次；
-- 如果性能门限未通过，保留 Marian 为实验选项或阻断发布，不通过隐藏降级掩盖失败。
+- 如果性能门限未通过，记录 `DEVICE_FAIL`，保留 Marian 为实验选项或阻断发布，不通过隐藏降级掩盖失败。
 
 ## 14. 真实设备与端到端验收
 
@@ -368,14 +411,24 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - 生成补丁安装结果、中文菜单、真实对白和启动日志；
 - 同一版本中 ML Kit 回退 smoke 路线仍然可用。
 
-Marian 只有在真实路线达到 `missing=0`、`rejected=0`、`uncertain=0`，且没有选择 incomplete test patch 时，才可获得与当前 ML Kit 基线同等级的 scoped PASS。任何缺少设备、模型、网络、存储或真实样本证据的情况保持 `NOT-RUN` 或 `BLOCKED`，不得推断通过。
+真实路线达到 `missing=0`、`rejected=0`、`uncertain=0`，且没有选择 incomplete test patch 时，只授予该路线 `DEVICE_PASS`；它证明覆盖率、确定性校验、编译和运行链路完整，不代替人工翻译质量结论。任何缺少设备、模型、网络、存储或真实样本证据的情况保持 `DEVICE_NOT_RUN`、`BLOCKED` 或 `DEVICE_FAIL`，不得推断通过。
+
+发布状态按以下规则合成：
+
+| Automated | Device | Quality | 允许结果 |
+| --- | --- | --- | --- |
+| PASS | 未执行/失败 | 任意 | 只生成 CI 内部验证产物 |
+| PASS | PASS | 未执行 | 可进行候选版/内部设备试用，ML Kit 仍为默认 |
+| PASS | PASS | FAIL | Marian 保持实验选项或撤回 |
+| PASS | PASS | PASS | Marian 可成为生产默认，仍保留一个发布周期的 ML Kit 回退 |
+| FAIL | 任意 | 任意 | 不生成 Marian 候选 APK |
 
 ## 15. ML Kit 移除门禁
 
 并存版本发布后，只有同时满足以下条件，才能启动独立的 ML Kit 移除计划：
 
 1. Marian 自动化测试、完整 discover、APK 构建和签名全部通过；
-2. 固定质量集和性能门限通过；
+2. `AUTOMATED_PASS`、`DEVICE_PASS` 和 `QUALITY_PASS` 均已取得；
 3. 至少一次真实 `10251` 条完整路线通过；
 4. 至少一次断网完整 smoke 和前后台恢复通过；
 5. Marian 版本发布后没有 P0/P1 模型损坏、崩溃、严重错译或无法下载问题；
@@ -387,9 +440,9 @@ ML Kit 移除必须是单独设计、单独计划和单独发布门禁，不作�
 
 ## 16. 发布与回滚
 
-### 16.1 并存版本
+### 16.1 通过全部门禁的生产并存版本
 
-- Marian 为新默认；
+- Marian 为新安装和无既有偏好用户的新默认；
 - ML Kit 为显式兼容回退；
 - Qwen 行为不变；
 - 旧用户偏好和旧任务缓存继续可读；
@@ -416,7 +469,7 @@ ML Kit 移除必须是单独设计、单独计划和单独发布门禁，不作�
 - ML Kit 与 Qwen 路线没有回归；
 - 模型和依赖均有固定版本、许可证和 SHA-256；
 - 自动化、完整 discover、APK 构建、签名和安装验证通过；
-- 固定质量与性能门限通过；
+- `AUTOMATED_PASS`、`DEVICE_PASS` 和 `QUALITY_PASS` 均已取得；
 - 真实 `content://`、完整语料、补丁安装和中文游戏路线通过；
 - QA 证据明确区分 PASS、FAIL、BLOCKED 和 NOT-RUN；
 - ML Kit 仍然存在，且是否移除由后续独立计划决定。
