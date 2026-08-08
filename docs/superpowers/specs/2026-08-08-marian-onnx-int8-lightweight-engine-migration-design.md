@@ -96,7 +96,10 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 - decoder 循环复用预分配工作区、encoder states 和 KV cache，不把 token logits、past tensors 或 attention mask 逐 token 返回 Java；
 - 保证空文本、未知字符、中文输出、emoji、Ren'Py sentinel 和超长文本拥有确定性行为；
 - 每个 native handle 只允许一个活动 `translateBatch`；SentencePiece 的 `Load`、模型切换和 handle 关闭使用独占锁，Encode/Decode 虽然是 const 操作，仍与共享 decoder 工作区一起受该 handle 的推理互斥锁保护；
+- 每个活动请求创建独立的 `RequestContext` RAII 对象，拥有该请求的 `Ort::RunOptions`、`Ort::MemoryInfo`、全部输入/输出 `Ort::Value`、token buffers、encoder outputs、KV cache、beam state、workspace lease 和取消标记；这些对象不得存入 handle 级全局容器或跨请求复用；
+- `RequestContext` 内只使用 `Ort::Value`、标准容器和 `std::unique_ptr` 等拥有明确析构语义的对象；禁止在取消/异常路径留下未归属的裸 `OrtValue*`、malloc buffer 或 JNI local/global reference；
 - `cancel` 可以从另一后台线程设置 request-scoped 原子取消标记，并对当前请求专属的 ONNX Runtime `RunOptions` 调用 terminate；当前 `Session::Run` 返回取消状态后 native decoder 立即退出，不通过并发 `close(Session)` 取消；
+- 共享 Session 属于 handle 而不属于请求；取消后必须先等待当前 `Session::Run` 返回，再析构完整 `RequestContext`，随后同一 Session 才能接收队列中的下一请求；
 - 原生 handle 只属于一个已验证模型版本，删除、切换模型或内存回收时必须释放。
 
 ### 6.3 `MarianOnnxEngine`
@@ -321,14 +324,19 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - 每个 `translateBatch` 创建 request-scoped `Ort::RunOptions` 和原子取消标记，不在请求之间复用 terminated RunOptions；
 - `cancel(handle, requestId)` 先设置原子标记，再对当前 RunOptions 调用 terminate；native 循环在每次 tokenizer segment、encoder、decoder step 和 batch 边界检查标记；
 - 正在执行的 ONNX kernel 只能在 ONNX Runtime 响应 terminate 后返回，UI 在此期间显示“正在取消”，不得并发关闭或删除 Session；
-- Run 返回取消状态后，native 释放该请求的 tensors、KV cache 和工作区，返回 `MARIAN_CANCELLED`，不写入当前 micro-batch 的部分译文；
+- Run 返回取消状态后，native 按 RAII 逆序释放该请求的 `Ort::Value`、MemoryInfo、tensors、KV cache、工作区和 JNI references，返回 `MARIAN_CANCELLED`，不写入当前 micro-batch 的部分译文；
+- ONNX Runtime 支持清除 terminate 标记后复用 RunOptions，但本实现禁止该复用：每个请求销毁旧 RunOptions 并为下一请求创建新实例；Session 本身保持打开；
+- 下一请求只能在前一 `RequestContext` 析构完成后开始；取消后立即执行的 smoke request 必须能够使用同一 Session 成功完成；
 - 目标设备上从用户取消到 native 调用返回的 P95 必须不超过 5 秒；超过门限记为 `DEVICE_FAIL`，不得以强关 Session 规避。
 
 ### 11.2 模型预热
 
 - 模型下载、校验和活动指针切换后，在后台打开共享 handle，并使用固定输入 `Hello` 执行一次完整 tokenizer、encoder、decoder-with-past 和 decode warm-up；
+- Session graph optimization 的时间归入 `warmupOpenMs`；首次 Run 可能发生的执行提供程序初始化、内存 arena 建立、kernel/JIT准备或设备相关调优归入 `warmupRunMs`，不能把两者合并成未经测量的单一“auto-tuning”结论；
+- warm-up 使用随后真实翻译继续复用的同一组 Session 和 handle，不在 warm-up 后立即关闭；进程退出后不假设这些内存态缓存持久存在，下次需要 Marian 时重新后台 warm-up；
+- 只有选定 execution provider 官方支持且缓存目录、模型构建ID和缓存校验均已固定时，才允许启用持久化调优/编译缓存；首版不能假设一次 warm-up 会把图优化结果永久写盘；
 - warm-up 输出不进入用户缓存，但必须通过非空、EOS、Unicode 和占位符基础检查；
-- `localStatus.marian` 增加 `warmingUp`、`warmupReady`、`warmupMs` 和 `warmupErrorCode`；`localDownload(engine="marian")` 只有在 warm-up 通过后才返回 `ready=true` 并触发 pending start 自动重试；
+- `localStatus.marian` 增加 `warmingUp`、`warmupReady`、`warmupOpenMs`、`warmupRunMs`、`warmupMs` 和 `warmupErrorCode`；`localDownload(engine="marian")` 只有在 warm-up 通过后才返回 `ready=true` 并触发 pending start 自动重试；
 - 进程冷启动不在主线程或应用首屏同步预热；只有用户进入本地翻译设置、恢复 Marian 任务或准备开始 Marian 翻译时才启动后台预热；
 - warm-up 失败返回 `MARIAN_WARMUP_FAILED`，模型文件保留用于诊断或重试，但不能进入翻译循环。
 
@@ -382,8 +390,10 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - decoder 第一步之后只执行 decoder-with-past，encoder 每个 micro-batch 恰好执行一次；
 - 同一 handle 的两个翻译请求不会并发使用共享工作区；排队取消和 `MARIAN_ENGINE_BUSY` 行为可重复；
 - `cancel` 会 terminate 当前 request 的 RunOptions，P95 门限在设备测试中验证，取消后不保留部分 micro-batch 结果；
+- host native 测试在 ASan/LSan 下重复正常、模型异常、token上限和取消路径，退出时没有泄漏；测试计数器证明每个请求结束后活动 `RequestContext`、request-owned OrtValue、workspace lease 和 JNI global reference 均归零；
+- 目标设备连续执行至少 100 次“开始长句翻译→取消→使用同一 Session 翻译 Hello”，每次后续请求均成功，最终 native PSS 相对稳定基线增长不超过 16 MiB，且最后 50 次不呈单调增长；
 - NFC、换行、BOM、零宽字符、双向控制字符和 sentinel 的处理顺序固定，新增危险控制字符被拒绝；
-- warm-up 成功才报告 `warmupReady=true`，失败稳定返回 `MARIAN_WARMUP_FAILED`；
+- warm-up 分别记录 `warmupOpenMs` 和 `warmupRunMs`；成功才报告 `warmupReady=true`，失败稳定返回 `MARIAN_WARMUP_FAILED`；
 - Java 生产类不导入或调用 ONNX Runtime Java binding；
 - 占位符丢失和 `RenpyTextValidator` 失败进入 `rejected`；
 - 模型删除会关闭 native handle，删除后状态变为未安装；
