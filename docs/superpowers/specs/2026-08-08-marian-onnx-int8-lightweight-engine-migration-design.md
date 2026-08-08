@@ -46,25 +46,26 @@
 
 ## 5. 候选架构与选择
 
-### 5.1 采用：ONNX Runtime Java API + SentencePiece JNI
+### 5.1 采用：单次 JNI 批调用 + 统一 C++ Marian Runtime
 
-Java 层负责模型状态、下载、ONNX Session 生命周期、张量准备、自回归解码、结果恢复和 Capacitor 响应；一个边界清晰的小型 JNI 库只负责 SentencePiece 的加载、编码和解码。
+Java 层负责模型状态、下载、任务线程、占位符保护、最终 Ren'Py 验证和 Capacitor 响应。SentencePiece、ONNX Runtime C/C++ API、encoder、初始 decoder、带 KV cache 的 decoder、自回归生成循环和 beam/greedy 状态全部位于一个统一 native runtime 中。每个内部 micro-batch 从 Java 进入 native 一次，生成完成或失败后一次性返回译文和逐项状态；输出 token 数量不得增加 JNI 往返次数。
 
 选择原因：
 
 - 当前本地翻译主体已经是 Java，新增引擎可以沿用现有线程、`PluginCall`、`JSObject`、错误文案和测试夹具；
-- ONNX Runtime Android AAR 可以沿用第三方依赖解包、D8 合并和 ARM64 `.so` 注入路径；
+- 自回归 decoder 每个 token 都需要一次 ONNX 执行；如果循环位于 Java，`OrtSession.run()`、输入/输出包装和 Java/JNI 边界成本会随输出长度线性增长，在 `10251` 条真实语料规模上形成不可接受的额外开销；
+- native runtime 在一次 JNI 调用内复用 Session、encoder states、KV cache、张量描述和解码工作区，避免每 token 创建 Java 对象或跨层传递张量；
 - SentencePiece 使用原生实现可避免纯 Java 重写在 Unicode、normalization、unknown token 和词表兼容方面产生偏差；
-- 解码循环留在 Java，便于用 JVM fixture 测试 EOS、长度限制、beam 排序、取消和失败分类；
-- 后续更换为其他 Marian 模型时，JNI 分词边界不必跟随业务逻辑重写。
+- 统一输出一个仓库自管的 `libslg_marian.so`，更符合当前手工注入 ARM64 native library 的构建方式，也减少多个 JNI AAR 的符号和装载冲突；
+- Java 仍保留模型管理、业务验证和用户可见错误，native 层只负责可独立测试的模型执行协议。
 
-### 5.2 不采用：全部放入统一 C++ JNI 内核
+### 5.2 不采用：Java 层逐 token 调用 ONNX Runtime
 
-该方案可能减少 Java/native 往返并获得更高性能，但会把 ONNX Runtime C API、SentencePiece、beam search、错误分类和模型管理集中到新的 NDK 子系统。对于当前以 Java、Python 构建脚本和 JVM harness 为主的仓库，首版维护和回归成本过高。
+该方案接入代码更接近现有 Java 引擎，但每生成一个 token 都需要 Java `OrtSession.run()` 进入 native，并处理输入、输出和生命周期对象。即使单次边界成本小于模型计算，它也会按句子输出长度和语料条数累积；因此不作为生产架构。Java ONNX API 只允许用于离线转换验证或非发布实验，不进入工具 APK 的 Marian 生产路径。
 
 ### 5.3 不采用：纯 Java SentencePiece
 
-自行实现 SentencePiece 会增加 normalization、Unicode 分段、特殊 token 和模型兼容风险。首版不以减少一个小型 JNI 库为代价复制分词算法。
+自行实现 SentencePiece 会增加 normalization、Unicode 分段、特殊 token 和模型兼容风险。首版不以减少 native runtime 的一个依赖为代价复制分词算法。
 
 ## 6. 组件边界
 
@@ -76,27 +77,29 @@ Java 层负责模型状态、下载、ONNX Session 生命周期、张量准备�
 - 下载模型包与许可证文件；
 - 使用 `.part` 文件、长度检查、逐文件 SHA-256 和原子目录切换；
 - 提供 `supported`、`installed`、`ready`、`downloading`、`downloadState`、`downloadedBytes`、`totalBytes`、`modelVersion` 和 `lastError`；
-- 删除模型前关闭 `MarianOnnxEngine` 的共享 Session；
+- 删除模型前关闭 `MarianNativeRuntime` 的共享 native handle；
 - 模型不完整、校验失败或版本不一致时返回 `ready=false`，不得继续推理。
 
-### 6.2 `MarianSentencePiece`
+### 6.2 `MarianNativeRuntime`
 
 职责：
 
-- 通过 JNI 加载固定模型包中的 source/target SentencePiece 文件；
-- 提供 `encodeSource(String): int[]`、`decodeTarget(int[]): String` 和 `close()`；
+- 通过 JNI 加载固定模型包中的 SentencePiece、encoder、decoder 和 decoder-with-past；
+- Java 边界只暴露 `open(modelDir, manifest)`、`translateBatch(handle, requestId, protectedTexts)`、`cancel(handle, requestId)` 和 `close(handle)`；
+- `translateBatch` 在一次 JNI 调用内完成 tokenization、encoder、完整自回归循环、detokenization 和逐项 native 错误分类；
+- decoder 循环复用预分配工作区、encoder states 和 KV cache，不把 token logits、past tensors 或 attention mask 逐 token 返回 Java；
 - 保证空文本、未知字符、中文输出、emoji、Ren'Py sentinel 和超长文本拥有确定性行为；
-- 原生句柄只属于一个已验证模型版本，删除或切换模型时必须释放。
+- `cancel` 可以从另一后台线程设置 request-scoped 原子取消标记，native decoder 每一步检查；
+- 原生 handle 只属于一个已验证模型版本，删除、切换模型或内存回收时必须释放。
 
 ### 6.3 `MarianOnnxEngine`
 
 职责：
 
-- 创建并复用 encoder/decoder ONNX Session；
-- 把 source token 转换为 `input_ids` 和 `attention_mask`；
-- 执行 encoder 一次，再按 generation 配置执行 decoder；
-- 支持中断、最大 token、EOS、无进展和重复输出保护；
-- 将 token 交给 target SentencePiece 解码；
+- 创建、复用和关闭 `MarianNativeRuntime` handle；
+- 按 token 长度估计形成 micro-batch，并为每批生成唯一 `requestId`；
+- 每个 micro-batch 只调用一次 `translateBatch`，不得在 Java 中按 token 调用 ONNX Runtime；
+- 将线程中断转换为 `cancel(handle, requestId)`，等待 native 调用有界退出；
 - 恢复占位符并调用统一的译文接受门禁；
 - 返回与现有本地引擎兼容的结果结构。
 
@@ -122,6 +125,7 @@ marian-opus-en-zh-int8-v1/
   manifest.json
   encoder_model.int8.onnx
   decoder_model.int8.onnx
+  decoder_with_past_model.int8.onnx
   source.spm
   target.spm
   tokenizer_config.json
@@ -148,13 +152,13 @@ marian-opus-en-zh-int8-v1/
 
 实际生成的 manifest 必须额外包含 `sourceRevision`，其值为转换工具实际检出的 40 位小写十六进制上游 commit SHA；转换命令只接受 commit SHA，不接受 `main`、tag 或短 SHA。`files` 必须写入真实文件项，每项包含相对路径、字节数和 SHA-256。转换工具在无法解析或验证 commit SHA 时直接失败，不生成可发布模型包。
 
-量化范围固定为权重 INT8。首版不使用 INT4，不量化 SentencePiece，不在没有质量对照的情况下量化激活。模型转换必须保存一套未量化 ONNX 参考产物用于离线差异测试，但参考产物不随 Android 模型包发布。
+量化范围固定为权重 INT8。首版不使用 INT4，不量化 SentencePiece，不在没有质量对照的情况下量化激活。模型转换必须导出可复用 past key/value 的 decoder-with-past；如果固定模型和导出工具无法生成或验证 KV cache 路线，Marian 移动端迁移保持阻断，不回退到每一步重算完整 decoder prefix。转换同时保存一套未量化 ONNX 参考产物用于离线差异测试，但参考产物不随 Android 模型包发布。
 
 ## 8. 解码与批处理
 
 ### 8.1 文本入口
 
-WebView 继续按最多 20 条调用原生桥。原生 Marian 引擎不假设 20 条必须同时进入一个张量，而是按 token 长度排序后形成最多 4 条的内部 micro-batch，避免单条长文本拖大整个 batch 的 padding。
+WebView 继续按最多 20 条调用原生桥。Java 只负责把受保护文本按长度估计形成最多 4 条的内部 micro-batch，避免单条长文本拖大整个 batch 的 padding。每个 micro-batch 通过一次 `MarianNativeRuntime.translateBatch` 进入 C++；SentencePiece、encoder 和全部 decoder token step 均在这次调用内完成。JNI 调用次数只允许与 micro-batch 数量相关，不允许与输出 token 数量相关。
 
 ### 8.2 占位符
 
@@ -170,6 +174,8 @@ WebView 继续按最多 20 条调用原生桥。原生 Marian 引擎不假设 20
 - 否则使用 greedy；
 - 被选配置写入 `generation_config.json` 并由 SHA-256 固定，运行时不允许 UI 覆盖；
 - 两种配置都必须使用明确的 `decoder_start_token_id`、`eos_token_id`、`pad_token_id`、最大 source token 和最大 target token；
+- 初始 token 使用 `decoder_model.int8.onnx`，后续 token 必须使用 `decoder_with_past_model.int8.onnx` 和复用的 KV cache；
+- native 循环复用张量元数据和工作区，禁止每 token 重新打开 Session、重新执行 encoder 或重新构造完整历史 prefix；
 - 达到最大 token、连续重复、空输出或未产生 EOS 时返回明确警告或拒绝，不截断后伪装为完整译文。
 
 ### 8.4 结果接受
@@ -218,21 +224,31 @@ Marian 响应结构固定为：
 
 ## 10. 构建与依赖
 
-### 10.1 ONNX Runtime
+### 10.1 统一 Native Runtime
 
-`fetch_third_party.py` 新增固定版本的 `com.microsoft.onnxruntime:onnxruntime-android` 根依赖，并把 AAR、POM、文件大小和 SHA-256 写入现有 `SHA256SUMS.txt`。版本只能在专项兼容测试通过后更新。
+生产 APK 不引入 ONNX Runtime Java binding，也不在 Java 中持有 `OrtSession`。新增一个独立、可重复的 NDK 构建单元，输入固定 commit 的 ONNX Runtime 和 SentencePiece source，输出仅包含 `arm64-v8a` 的 `libslg_marian.so`。该库静态链接裁剪后的 ONNX Runtime mobile runtime 和 SentencePiece，并导出仓库自有 JNI 符号。
+
+native 构建必须：
+
+- 固定 ONNX Runtime、SentencePiece、NDK、CMake 和编译参数；
+- 根据 encoder、decoder、decoder-with-past 模型生成 required-operator 配置，只编入实际使用的算子和类型；
+- 默认关闭异常、RTTI 或其他特性前，必须证明 JNI 错误映射和 ONNX Runtime 构建仍完整；
+- 生成 `libslg_marian.so`、构建元数据、符号清单、文件大小和 SHA-256；
+- 运行 host/native 测试后才把 `.so` 复制到 `third-party/` 或专用 pinned-native 目录；
+- 不依赖开发者机器中未记录的全局 CMake、NDK、Python 包或环境变量。
 
 `build_fast_scanner.py` 必须：
 
-- 从 ONNX Runtime AAR 提取 `classes.jar` 参与 javac/D8；
-- 仅注入 `arm64-v8a` 所需 `.so`；
+- 把 Marian Java bridge 类合入 helper DEX，并验证类描述符归属唯一；
+- 仅注入 `arm64-v8a/libslg_marian.so`；
 - 检测同名 native library 冲突并失败，而不是后写覆盖；
-- 验证最终 APK 中每个要求的 ORT/SentencePiece `.so` 恰好存在一次；
-- 把 Marian Java 类合入 helper DEX，并验证类描述符归属唯一。
+- 验证最终 APK 中 `libslg_marian.so` 恰好存在一次；
+- 验证 Marian 生产 DEX 不引用 `ai.onnxruntime.OrtSession`、`OnnxTensor` 或其他 Java binding 类；
+- 保持现有 llama 和 ML Kit native library 注入路径不变。
 
-### 10.2 SentencePiece JNI
+### 10.2 JNI 协议
 
-新增一个独立、可重复的 NDK 构建脚本，输入固定 SentencePiece source revision，输出仅包含 `arm64-v8a` 的 JNI `.so`。构建产物及 source revision 必须写入 checksum 清单。该脚本不能依赖开发者机器中未记录的全局 CMake/NDK 状态。
+JNI 只传递模型目录、manifest、受保护字符串数组、request ID、译文数组和逐项状态。encoder states、logits、token IDs、attention masks、KV cache 和 beam state 不得穿越 Java/native 边界。`translateBatch` 的一次调用必须覆盖一个 micro-batch 的完整生成过程；取消通过独立 `cancel(handle, requestId)` 设置 native 原子标志，不通过杀死线程或泄漏 Session 实现。
 
 ### 10.3 ML Kit 并存
 
@@ -245,11 +261,11 @@ Marian 响应结构固定为：
 - SHA-256 不匹配：删除临时文件，保留已安装的旧版本；
 - 存储不足：下载前按 manifest 总大小加安全余量检查；
 - 下载中断：保留可验证的 `.part` 供明确的断点续传实现使用；没有断点信息时重新下载，不把 partial 标为 installed；
-- Session 创建失败：关闭已创建资源并允许用户切换 ML Kit；
+- native handle 或 Session 创建失败：关闭已创建资源并允许用户切换 ML Kit；
 - 单条文本失败：记录 `rejected`/`warnings`，继续同批其他条目；
-- 进程回收：翻译缓存继续由现有 WebView 任务快照恢复，原生 Session 下次按模型状态重新创建；
-- 删除模型：先阻止新的 Marian 调用，再等待或取消当前推理，关闭 Session/tokenizer，最后删除目录；
-- 内存压力：允许关闭共享 Session，但不得删除模型文件或破坏任务缓存。
+- 进程回收：翻译缓存继续由现有 WebView 任务快照恢复，native handle 下次按模型状态重新创建；
+- 删除模型：先阻止新的 Marian 调用，再取消并有界等待当前 request，关闭 native handle，最后删除目录；
+- 内存压力：允许关闭共享 native handle，但不得删除模型文件或破坏任务缓存。
 
 ## 12. 测试设计
 
@@ -265,12 +281,15 @@ Marian 响应结构固定为：
 
 - `localStatus` 同时返回 `marian`、`mlkit`、`llm`；
 - 缺省 `localDownload` 仍走 ML Kit，新调用通过 `engine:"marian"` 下载 Marian；
-- SentencePiece 编解码覆盖 ASCII、中文、emoji、sentinel、空文本和未知字符；
-- encoder/decoder 输入名称、维度和 dtype 与模型 manifest 一致；
+- native SentencePiece 编解码覆盖 ASCII、中文、emoji、sentinel、空文本和未知字符；
+- encoder/decoder/decoder-with-past 输入名称、维度和 dtype 与模型 manifest 一致；
 - EOS、最大长度、中断、空输出、重复输出和异常张量稳定失败；
+- 1、10、50 个输出 token 的 JNI `translateBatch` 调用次数均为 1，native ONNX decoder 执行次数按 token 增长；
+- decoder 第一步之后只执行 decoder-with-past，encoder 每个 micro-batch 恰好执行一次；
+- Java 生产类不导入或调用 ONNX Runtime Java binding；
 - 占位符丢失和 `RenpyTextValidator` 失败进入 `rejected`；
-- 模型删除会关闭 Session，删除后状态变为未安装；
-- 并发下载和并发初始化不会创建两套可写模型目录或两个共享 Session。
+- 模型删除会关闭 native handle，删除后状态变为未安装；
+- 并发下载和并发初始化不会创建两套可写模型目录或两个共享 native handle。
 
 ### 12.3 UI 契约测试
 
@@ -285,7 +304,9 @@ Marian 响应结构固定为：
 
 - 第三方 checksum 全部通过；
 - helper DEX 中 Marian 类恰好一份；
-- 最终 APK 中 ORT、SentencePiece、llama 和 ML Kit 要求的 ARM64 `.so` 均存在且无同名冲突；
+- 最终 APK 中 `libslg_marian.so`、llama 和 ML Kit 要求的 ARM64 `.so` 均存在且无同名冲突；
+- `libslg_marian.so` 的 SHA-256、ABI、依赖符号和导出 JNI 符号与 pinned manifest 一致；
+- Marian 生产 DEX 不包含 ONNX Runtime Java API 引用；
 - manifest、ML Kit 资源和现有 Capacitor bridge 保持有效；
 - `zipalign`、APK v2/v3 签名、版本和包名检查通过；
 - APK 能在目标 Android 13 设备替换安装且不清除应用数据。
@@ -308,7 +329,10 @@ Marian 响应结构固定为：
 
 性能验收在 `PEMM20` 或性能不高于该设备的批准设备上执行：
 
-- 首次 Session 初始化峰值内存、稳定内存和耗时必须有实测记录；
+- 首次 native handle/Session 初始化峰值内存、稳定内存和耗时必须有实测记录；
+- 使用 native 计数器或 Perfetto/atrace 证明每个 micro-batch 只有一次 `translateBatch` JNI 入口；JNI 调用数不得随生成 token 数增长；
+- 分别记录 10、50、100 个输出 token 的 native decoder 时间和 Java 端端到端时间，用差值监控 JNI、字符串封送和调度开销；不使用未经本机测量的固定毫秒估算替代证据；
+- decoder-with-past 命中率必须为 100%（第一步除外），encoder 每个 micro-batch 只执行一次；
 - 200 条 smoke 集翻译过程不得发生 OOM、ANR、WebView 崩溃或进程被系统杀死；
 - 设备锁屏/解锁或应用前后台切换后，任务状态和已完成缓存保持一致；
 - Marian 的 200 条总耗时不得超过同机 ML Kit 的 4 倍；
@@ -388,7 +412,7 @@ ML Kit 移除必须是单独设计、单独计划和单独发布门禁，不作�
 
 本设计的实现阶段只有在以下结果同时成立时完成：
 
-- `marian` 引擎、模型管理、SentencePiece JNI、ONNX 推理和 UI 路由全部实现；
+- `marian` 引擎、模型管理、统一 C++ runtime、单次 JNI 批协议和 UI 路由全部实现；
 - ML Kit 与 Qwen 路线没有回归；
 - 模型和依赖均有固定版本、许可证和 SHA-256；
 - 自动化、完整 discover、APK 构建、签名和安装验证通过；
