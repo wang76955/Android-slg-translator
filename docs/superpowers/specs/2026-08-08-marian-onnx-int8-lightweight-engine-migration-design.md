@@ -74,15 +74,15 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 职责：
 
 - 模型根目录固定为 `new File(context.getFilesDir(), "models/marian")`，下载 staging、已安装版本和活动指针都必须位于该根目录内；
-- 目录布局固定为 `.staging/<uuid>/`、`versions/<modelId>-<manifestSha256>/` 和 `active.json`，不使用外部存储、公共下载目录或用户可配置路径作为安装目录；
+- 目录布局固定为 `.staging/<uuid>/`、`versions/<modelBuildId>-<packageContentSha256>/` 和 `active.json`，不使用外部存储、公共下载目录或用户可配置路径作为安装目录；
 - 下载模型包与许可证文件；
 - 在 `.staging/<uuid>/` 内使用 `.part` 文件完成下载、解包、长度检查、逐文件 SHA-256、manifest 校验和可加载性 smoke；
 - 校验通过后，将 staging 目录在同一模型根目录内重命名为不可变版本目录，再通过同目录中的 `active.json.tmp` 原子替换 `active.json` 激活新版本；
 - 在目录重命名和活动指针替换前同步文件内容，并通过 native helper 同步对应目录项；
 - 安装前验证 staging、versions 和 active pointer 的 canonical path 均位于 `getFilesDir()` 下，并通过 native `stat.st_dev` 验证 staging 与最终目录属于同一文件系统；
 - `rename` 返回 `EXDEV`、目标冲突或其他失败时保留当前活动版本、删除或隔离 staging，并返回安装失败；禁止用跨卷复制或非原子目录移动自动兜底；
-- 已存在相同 `modelId + manifestSha256` 的完整版本时复用该不可变目录，不覆盖其中任何文件；
-- 提供 `supported`、`installed`、`ready`、`downloading`、`downloadState`、`downloadedBytes`、`totalBytes`、`modelVersion` 和 `lastError`；
+- 已存在相同 `modelBuildId + packageContentSha256` 的完整版本时复用该不可变目录，不覆盖其中任何文件；
+- 提供 `supported`、`installed`、`ready`、`downloading`、`downloadState`、`downloadedBytes`、`downloadBytes`、`installedBytes`、`modelVersion`、`modelBuildId` 和 `lastError`；
 - 删除模型前关闭 `MarianNativeRuntime` 的共享 native handle；
 - 模型不完整、校验失败或版本不一致时返回 `ready=false`，不得继续推理。
 
@@ -95,7 +95,8 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 - `translateBatch` 在一次 JNI 调用内完成 tokenization、encoder、完整自回归循环、detokenization 和逐项 native 错误分类；
 - decoder 循环复用预分配工作区、encoder states 和 KV cache，不把 token logits、past tensors 或 attention mask 逐 token 返回 Java；
 - 保证空文本、未知字符、中文输出、emoji、Ren'Py sentinel 和超长文本拥有确定性行为；
-- `cancel` 可以从另一后台线程设置 request-scoped 原子取消标记，native decoder 每一步检查；
+- 每个 native handle 只允许一个活动 `translateBatch`；SentencePiece 的 `Load`、模型切换和 handle 关闭使用独占锁，Encode/Decode 虽然是 const 操作，仍与共享 decoder 工作区一起受该 handle 的推理互斥锁保护；
+- `cancel` 可以从另一后台线程设置 request-scoped 原子取消标记，并对当前请求专属的 ONNX Runtime `RunOptions` 调用 terminate；当前 `Session::Run` 返回取消状态后 native decoder 立即退出，不通过并发 `close(Session)` 取消；
 - 原生 handle 只属于一个已验证模型版本，删除、切换模型或内存回收时必须释放。
 
 ### 6.3 `MarianOnnxEngine`
@@ -103,8 +104,10 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 职责：
 
 - 创建、复用和关闭 `MarianNativeRuntime` handle；
-- 按 token 长度估计形成 micro-batch，并为每批生成唯一 `requestId`；
-- 每个 micro-batch 只调用一次 `translateBatch`，不得在 Java 中按 token 调用 ONNX Runtime；
+- 为每个 WebView chunk 生成唯一 `requestId`，一次性把最多 20 条受保护文本交给 native；
+- native 完成真实 SentencePiece tokenization 后再执行动态 batch planning，Java 不用字符长度猜测 token 数；
+- 每个 WebView chunk 只调用一次 `translateBatch`，不得在 Java 中按 item、micro-batch 或 token 调用 ONNX Runtime；
+- Java 侧使用公平的单引擎串行队列，避免 Capacitor 后台线程并发进入同一个 handle；排队请求必须可取消，超过队列上限时返回 `MARIAN_ENGINE_BUSY`；
 - 将线程中断转换为 `cancel(handle, requestId)`，等待 native 调用有界退出；
 - 恢复占位符并调用统一的译文接受门禁；
 - 返回与现有本地引擎兼容的结果结构。
@@ -127,7 +130,7 @@ Java 层负责模型状态、下载、任务线程、占位符保护、最终 Re
 运行模型包固定为：
 
 ```text
-marian-opus-en-zh-int8-v1/
+marian-opus-en-zh-int8-1.0.0/
   manifest.json
   encoder_model.int8.onnx
   decoder_model.int8.onnx
@@ -146,7 +149,8 @@ marian-opus-en-zh-int8-v1/
 ```json
 {
   "engine": "marian",
-  "modelId": "marian-opus-en-zh-int8-v1",
+  "modelFamilyId": "marian-opus-en-zh-int8",
+  "modelVersion": "1.0.0",
   "sourceLanguage": "en",
   "targetLanguage": "zh",
   "format": "onnx-int8",
@@ -156,7 +160,15 @@ marian-opus-en-zh-int8-v1/
 }
 ```
 
-实际生成的 manifest 必须额外包含 `sourceRevision`，其值为转换工具实际检出的 40 位小写十六进制上游 commit SHA；转换命令只接受 commit SHA，不接受 `main`、tag 或短 SHA。`files` 必须写入真实文件项，每项包含相对路径、字节数和 SHA-256。转换工具在无法解析或验证 commit SHA 时直接失败，不生成可发布模型包。
+实际生成的 manifest 必须额外包含：
+
+- `sourceRevision`：转换工具实际检出的 40 位小写十六进制上游 commit SHA，仅用于来源追踪，不参与版本先后比较；
+- `packageContentSha256`：按路径排序后的 `files` 项进行 canonical serialization 后计算的内容摘要；
+- `modelBuildId`：固定为 `<modelVersion>+<packageContentSha256前12位>`，例如 `1.0.0+4f8c2a61bd90`；
+- `createdUtc`：构建记录字段，不参与安装身份和升级判断；
+- `files`：真实文件项，每项包含相对路径、字节数和 SHA-256。
+
+转换命令只接受 commit SHA，不接受 `main`、tag 或短 SHA。任何会改变模型输出、tokenizer、generation 配置、文件内容或 native 兼容要求的重新转换都必须递增语义化 `modelVersion`；同一 `modelVersion` 出现不同 `packageContentSha256` 时，发布流水线按不可变版本被篡改处理并失败，不允许以构建时间戳掩盖。安装、状态、缓存和更新比较使用完整 `modelBuildId`，不能只比较 `modelFamilyId`、`modelVersion` 或 `sourceRevision`。
 
 量化范围固定为权重 INT8。首版不使用 INT4，不量化 SentencePiece，不在没有质量对照的情况下量化激活。模型转换必须导出可复用 past key/value 的 decoder-with-past；如果固定模型和导出工具无法生成或验证 KV cache 路线，Marian 移动端迁移保持阻断，不回退到每一步重算完整 decoder prefix。转换同时保存一套未量化 ONNX 参考产物用于离线差异测试，但参考产物不随 Android 模型包发布。
 
@@ -164,13 +176,36 @@ marian-opus-en-zh-int8-v1/
 
 ### 8.1 文本入口
 
-WebView 继续按最多 20 条调用原生桥。Java 只负责把受保护文本按长度估计形成最多 4 条的内部 micro-batch，避免单条长文本拖大整个 batch 的 padding。每个 micro-batch 通过一次 `MarianNativeRuntime.translateBatch` 进入 C++；SentencePiece、encoder 和全部 decoder token step 均在这次调用内完成。JNI 调用次数只允许与 micro-batch 数量相关，不允许与输出 token 数量相关。
+WebView 继续按最多 20 条调用原生桥，并把整个 chunk 通过一次 `MarianNativeRuntime.translateBatch` 交给 C++。native 先对全部条目执行真实 SentencePiece tokenization，再按 token 成本动态规划内部 micro-batch；JNI 调用次数只允许与 WebView chunk 数量相关，不允许与内部 micro-batch 或输出 token 数量相关。
 
-### 8.2 占位符
+动态规划规则固定为：
+
+- `generation_config.json` 固定 `maxSourceTokens=512`、`maxBatchItems=20` 和首版 `maxPaddedSourceTokens=512`；
+- 对可直接翻译的条目按 source token 数降序排列，使用 first-fit-decreasing 放入 batch；加入条目后的 padded cost 定义为 `batchItemCount * maxSourceLength`，不得超过 `maxPaddedSourceTokens`；
+- 20 条短词只要 padded cost 不超过预算即可进入一个 batch，不人为拆成 5 个四条 batch；
+- 单条超过 `maxSourceTokens` 时先按换行、句末标点和安全空白边界分段，sentinel 和 Ren'Py 标记不可拆分；各段分别翻译后按原分隔符重组；
+- 无法安全分段或单个不可拆单元仍超过上限时返回 `MARIAN_SOURCE_TOO_LONG`，不截断、不尝试超预算推理；
+- batch planner 的输入长度、padded cost、分组结果和拒绝原因进入无文本内容的诊断指标。
+
+### 8.2 启动预检、下载与热切换
+
+每个翻译任务在首次调用 Marian 前固定 `engineId="marian"` 和当前 `modelBuildId`，并执行本地 preflight：
+
+- `ready=false` 或模型缺失时，前端不调用翻译循环，展示模型大小、网络要求和“一键下载并继续”；
+- 用户确认后调用 `localDownload({engine:"marian"})`，下载、校验、激活和 warm-up 全部成功后自动重试原 pending start action；
+- 用户取消、下载失败或校验失败时任务保持 `ready/paused`，已扫描文本和缓存不丢失，不进入编译；
+- 同一界面提供“改用 ML Kit”显式操作，但不得自动降级；
+- 原生 `translateLocal` 无论前端是否做过 preflight，都必须再次校验并使用稳定错误码拒绝：`MARIAN_MODEL_NOT_READY`、`MARIAN_MODEL_CORRUPT`、`MARIAN_MODEL_CHANGED`、`MARIAN_ENGINE_BUSY` 或 `MARIAN_WARMUP_FAILED`；
+- preflight 失败不得返回 `translations:{}` 的成功响应，不增加 success count，不写翻译缓存，因此不会生成空对白或不完整补丁；
+- 任务快照和缓存命名空间必须包含 `engineId + modelBuildId`；活动模型在任务运行中更新时，既有任务继续持有旧不可变版本的 handle，新任务使用新活动版本；
+- 用户在已有成功译文后切换 Marian/ML Kit/Qwen，必须在批次边界暂停并确认“使用新引擎重新翻译”；确认后清空当前任务的活动 translation map，旧引擎缓存保留在独立命名空间，不允许一个发布补丁静默混合多个引擎或模型构建的译文；
+- 旧版本目录只有在没有任务引用且新的活动版本通过校验后才允许清理。
+
+### 8.3 占位符
 
 进入 SentencePiece 前，继续调用现有 `LocalLlmEngine.protectPlaceholders` 生成 `__SLGPHn__` sentinel。输出解码后调用 `restorePlaceholders`；任何 sentinel 缺失、重复、顺序错误或残留都进入 `rejected`，不能写入 `translations`。
 
-### 8.3 Generation 配置
+### 8.4 Generation 配置
 
 首版只比较两种候选配置：greedy 和 beam size 2。beam size 4 不进入移动端首版候选，以控制内存和十万级 decoder step 风险。
 
@@ -184,7 +219,7 @@ WebView 继续按最多 20 条调用原生桥。Java 只负责把受保护文本
 - native 循环复用张量元数据和工作区，禁止每 token 重新打开 Session、重新执行 encoder 或重新构造完整历史 prefix；
 - 达到最大 token、连续重复、空输出或未产生 EOS 时返回明确警告或拒绝，不截断后伪装为完整译文。
 
-### 8.4 结果接受
+### 8.5 结果接受
 
 Marian 与 Qwen 共用同一套最终接受语义：
 
@@ -204,7 +239,8 @@ Marian 响应结构固定为：
   "warnings": [],
   "rejected": [],
   "engine": "marian",
-  "modelVersion": "marian-opus-en-zh-int8-v1"
+  "modelVersion": "1.0.0",
+  "modelBuildId": "1.0.0+4f8c2a61bd90"
 }
 ```
 
@@ -218,8 +254,7 @@ Marian 响应结构固定为：
 
 行为规则：
 
-- 没有保存偏好的新用户默认 `marian`；
-- 上述默认只在生产发布配置 `DEFAULT_LOCAL_ENGINE="marian"` 经过三项 PASS 批准后启用；候选/内部验证构建固定 `DEFAULT_LOCAL_ENGINE="mlkit"`，但仍显示 Marian 实验选项；
+- 没有保存偏好的新用户只在生产发布配置 `DEFAULT_LOCAL_ENGINE="marian"` 经过三项 PASS 批准后默认 Marian；候选/内部验证构建固定 `DEFAULT_LOCAL_ENGINE="mlkit"`，但仍显示 Marian 实验选项；
 - 已保存 `model:"mlkit"` 的用户仍选中 ML Kit；
 - 已保存 `model:"qwen"` 的用户仍映射到原生 `llm`；
 - 不把 `mlkit` 字符串全局替换成 `marian`，避免破坏旧任务、缓存和回退入口；
@@ -241,6 +276,7 @@ native 构建必须：
 - 根据 encoder、decoder、decoder-with-past 模型生成 required-operator 配置，只编入实际使用的算子和类型；
 - 默认关闭异常、RTTI 或其他特性前，必须证明 JNI 错误映射和 ONNX Runtime 构建仍完整；
 - 生成 `libslg_marian.so`、构建元数据、符号清单、文件大小和 SHA-256；
+- 使用 NDK libc++ 静态运行时和 hidden visibility；C++ 对象不跨 JNI ABI 边界，最终动态依赖中不得出现 `libc++_shared.so`、`libprotobuf.so` 或 `libonnxruntime.so`；
 - 运行 host/native 测试后才把 `.so` 复制到 `third-party/` 或专用 pinned-native 目录；
 - 不依赖开发者机器中未记录的全局 CMake、NDK、Python 包或环境变量。
 
@@ -251,11 +287,14 @@ native 构建必须：
 - 检测同名 native library 冲突并失败，而不是后写覆盖；
 - 验证最终 APK 中 `libslg_marian.so` 恰好存在一次；
 - 验证 Marian 生产 DEX 不引用 `ai.onnxruntime.OrtSession`、`OnnxTensor` 或其他 Java binding 类；
+- 使用 NDK `llvm-readelf -d` 验证 SONAME 恰好为 `libslg_marian.so`，并验证 `DT_NEEDED` 只包含批准的 Android NDK 公共系统库 allowlist；
+- 使用 `llvm-readelf --dyn-syms --version-info` 验证只导出批准 JNI/诊断符号，不出现意外 `GLIBC`、`GLIBCXX`、protobuf、ONNX Runtime 或超出 API 24 的符号版本依赖；Android 使用 libc++，因此不能只搜索 `GLIBCXX` 就宣布兼容；
+- 在 API 24 arm64 模拟器或批准的真实 Android 7 设备执行 `System.loadLibrary("slg_marian")`、native ABI probe、Session open 和一句 smoke 翻译；只有静态 readelf 检查不能替代实际装载；
 - 保持现有 llama 和 ML Kit native library 注入路径不变。
 
 ### 10.2 JNI 协议
 
-JNI 只传递模型目录、manifest、受保护字符串数组、request ID、译文数组和逐项状态。encoder states、logits、token IDs、attention masks、KV cache 和 beam state 不得穿越 Java/native 边界。`translateBatch` 的一次调用必须覆盖一个 micro-batch 的完整生成过程；取消通过独立 `cancel(handle, requestId)` 设置 native 原子标志，不通过杀死线程或泄漏 Session 实现。
+JNI 只传递模型目录、manifest、受保护字符串数组、request ID、译文数组和逐项状态。encoder states、logits、token IDs、attention masks、KV cache 和 beam state 不得穿越 Java/native 边界。`translateBatch` 的一次调用必须覆盖一个 WebView chunk 的 tokenization、动态 micro-batch planning 和完整生成过程；取消通过独立 `cancel(handle, requestId)` 设置 native 原子标志，不通过杀死线程或泄漏 Session 实现。
 
 ### 10.3 ML Kit 并存
 
@@ -266,8 +305,9 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - ONNX Runtime 初始化失败：`supported=false` 或 `ready=false`，记录短错误码和可读中文信息；
 - 模型缺失：拒绝翻译并提示先下载，不创建空结果补丁；
 - SHA-256 不匹配：删除临时文件，保留已安装的旧版本；
-- 存储不足：下载前按 manifest 总大小加安全余量检查；
+- 存储不足：manifest 必须分别声明压缩/传输体积 `downloadBytes` 和解包后的 `installedBytes`；开始下载前通过 `StatFs` 要求 `availableBytes >= downloadBytes + installedBytes + max(50 MiB, ceil(installedBytes * 0.5))`；如果旧格式只提供单一 `totalBytes`，使用保守公式 `ceil(totalBytes * 2.5) + 50 MiB`；
 - 下载中断：保留可验证的 `.part` 供明确的断点续传实现使用；没有断点信息时重新下载，不把 partial 标为 installed；
+- 下载完成和每个大文件解包前重新检查剩余空间；任何写入、解压、fsync 或 rename 的 `ENOSPC` 失败都关闭句柄、删除当前 staging 和 `.part`、保留旧活动版本，并返回 `MARIAN_STORAGE_INSUFFICIENT`；
 - staging 与最终目录不在同一 `st_dev`、canonical path 逃出内部模型根目录或 rename 返回 `EXDEV`：终止安装并保持原 `active.json` 不变，不执行复制兜底；
 - `active.json` 损坏或指向不存在/未通过校验的版本：返回 `ready=false`，尝试从最近一个完整不可变版本恢复活动指针前必须重新校验该版本；
 - native handle 或 Session 创建失败：关闭已创建资源并允许用户切换 ML Kit；
@@ -275,6 +315,47 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - 进程回收：翻译缓存继续由现有 WebView 任务快照恢复，native handle 下次按模型状态重新创建；
 - 删除模型：先阻止新的 Marian 调用，再取消并有界等待当前 request，关闭 native handle，最后删除目录；
 - 内存压力：允许关闭共享 native handle，但不得删除模型文件或破坏任务缓存。
+
+### 11.1 取消协议
+
+- 每个 `translateBatch` 创建 request-scoped `Ort::RunOptions` 和原子取消标记，不在请求之间复用 terminated RunOptions；
+- `cancel(handle, requestId)` 先设置原子标记，再对当前 RunOptions 调用 terminate；native 循环在每次 tokenizer segment、encoder、decoder step 和 batch 边界检查标记；
+- 正在执行的 ONNX kernel 只能在 ONNX Runtime 响应 terminate 后返回，UI 在此期间显示“正在取消”，不得并发关闭或删除 Session；
+- Run 返回取消状态后，native 释放该请求的 tensors、KV cache 和工作区，返回 `MARIAN_CANCELLED`，不写入当前 micro-batch 的部分译文；
+- 目标设备上从用户取消到 native 调用返回的 P95 必须不超过 5 秒；超过门限记为 `DEVICE_FAIL`，不得以强关 Session 规避。
+
+### 11.2 模型预热
+
+- 模型下载、校验和活动指针切换后，在后台打开共享 handle，并使用固定输入 `Hello` 执行一次完整 tokenizer、encoder、decoder-with-past 和 decode warm-up；
+- warm-up 输出不进入用户缓存，但必须通过非空、EOS、Unicode 和占位符基础检查；
+- `localStatus.marian` 增加 `warmingUp`、`warmupReady`、`warmupMs` 和 `warmupErrorCode`；`localDownload(engine="marian")` 只有在 warm-up 通过后才返回 `ready=true` 并触发 pending start 自动重试；
+- 进程冷启动不在主线程或应用首屏同步预热；只有用户进入本地翻译设置、恢复 Marian 任务或准备开始 Marian 翻译时才启动后台预热；
+- warm-up 失败返回 `MARIAN_WARMUP_FAILED`，模型文件保留用于诊断或重试，但不能进入翻译循环。
+
+### 11.3 输出规范化
+
+模型输出按固定顺序处理：
+
+1. 将 `CRLF` 和孤立 `CR` 统一为 `LF`；
+2. 使用 Java `Normalizer.normalize(text, Normalizer.Form.NFC)`，禁止使用会改变兼容字符语义的 NFKC；
+3. 移除单个开头 BOM `U+FEFF`；
+4. 检查 NUL、非换行/制表的 C0 控制字符、`U+200B`、`U+2060`、双向控制字符和中间位置 BOM；仅当同一字符原文中已经存在时才允许保留，否则以 `unsafe_control_character` 拒绝，不静默删除；
+5. 恢复 sentinel 占位符；
+6. 执行 `RenpyTextValidator` 和 exact-old 冲突检查。
+
+规范化前后的字符数、被拒绝的 Unicode code point 和错误码可以进入诊断日志，但不得记录原文或完整译文。
+
+### 11.4 日志与诊断指标
+
+每个 WebView chunk 和内部 micro-batch 记录结构化指标：
+
+- `requestId`、`engine`、`modelBuildId`、chunk/batch 序号和 item 数；
+- source token、padded token、generated token、分段数和 beam 配置；
+- queue wait、tokenize、encoder、decoder、decode、Unicode/validator 和总耗时；
+- 峰值 native working-set 采样、取消延迟、错误码、rejected 数和 retry 次数；
+- warm-up、handle open/close、模型激活和活动指针恢复事件。
+
+日志不得包含 API Key、文件正文、原文、译文、完整文件路径或可还原游戏内容的 token 序列。应用内诊断环形缓冲最多保留 1000 条事件或 2 MiB，先到者触发覆盖；用户导出诊断时继续执行现有脱敏规则。
 
 ## 12. 测试设计
 
@@ -284,6 +365,8 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - ONNX FP32 与原始 Transformers 输出在固定语料上语义一致；
 - INT8 与 FP32 在固定质量集上没有超过门限的退化；
 - 每个发布文件的大小和 SHA-256 与 manifest 一致；
+- `modelBuildId` 与 canonical `packageContentSha256` 一致；相同 `modelVersion` 配不同内容摘要时发布流水线必须失败；
+- `downloadBytes`、`installedBytes` 和实际下载/解包体积一致，磁盘公式覆盖压缩包、staging、解包结果和 50 MiB 最小余量；
 - 损坏、缺失、额外和版本错误文件均不能通过模型校验。
 
 ### 12.2 JVM/原生契约测试
@@ -294,7 +377,13 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - encoder/decoder/decoder-with-past 输入名称、维度和 dtype 与模型 manifest 一致；
 - EOS、最大长度、中断、空输出、重复输出和异常张量稳定失败；
 - 1、10、50 个输出 token 的 JNI `translateBatch` 调用次数均为 1，native ONNX decoder 执行次数按 token 增长；
+- 20 条短文本在 padded cost 预算允许时形成一个内部 batch；混合长短文本按 first-fit-decreasing 分组且每批成本不超过 `maxPaddedSourceTokens`；
+- 超过 `maxSourceTokens` 的文本只能安全分段或返回 `MARIAN_SOURCE_TOO_LONG`，不能截断或触发超预算分配；
 - decoder 第一步之后只执行 decoder-with-past，encoder 每个 micro-batch 恰好执行一次；
+- 同一 handle 的两个翻译请求不会并发使用共享工作区；排队取消和 `MARIAN_ENGINE_BUSY` 行为可重复；
+- `cancel` 会 terminate 当前 request 的 RunOptions，P95 门限在设备测试中验证，取消后不保留部分 micro-batch 结果；
+- NFC、换行、BOM、零宽字符、双向控制字符和 sentinel 的处理顺序固定，新增危险控制字符被拒绝；
+- warm-up 成功才报告 `warmupReady=true`，失败稳定返回 `MARIAN_WARMUP_FAILED`；
 - Java 生产类不导入或调用 ONNX Runtime Java binding；
 - 占位符丢失和 `RenpyTextValidator` 失败进入 `rejected`；
 - 模型删除会关闭 native handle，删除后状态变为未安装；
@@ -305,6 +394,8 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - 候选构建的新设置默认 ML Kit，三项 PASS 批准后的生产并存构建默认 Marian；旧 `mlkit` 和 `qwen` 偏好始终保持不变；
 - Marian/ML Kit/Qwen 三项均可选择；
 - Marian 下载、状态、删除和翻译调用包含正确 engine；
+- Marian 未下载时不会进入翻译循环，用户确认下载后能够自动重试 pending start；取消或失败不会返回空成功、增加 success count 或进入编译；
+- 任务快照固定 `engineId + modelBuildId`；模型更新不改变运行中任务，切换引擎必须显式清空当前活动 translation map；
 - 本地供应商不要求 API Key；
 - Marian 失败不会自动切换、继续编译或伪造成功数；
 - 旧 ML Kit 路线的现有自动化继续通过。
@@ -315,6 +406,8 @@ JNI 只传递模型目录、manifest、受保护字符串数组、request ID、�
 - helper DEX 中 Marian 类恰好一份；
 - 最终 APK 中 `libslg_marian.so`、llama 和 ML Kit 要求的 ARM64 `.so` 均存在且无同名冲突；
 - `libslg_marian.so` 的 SHA-256、ABI、依赖符号和导出 JNI 符号与 pinned manifest 一致；
+- `llvm-readelf` 证明 SONAME、DT_NEEDED allowlist、动态符号和版本依赖合规，不存在动态 protobuf、ONNX Runtime、libc++_shared、GLIBC 或 GLIBCXX 依赖；
+- API 24 arm64 环境能够加载 `libslg_marian.so`、打开 Session 并完成一句 smoke 翻译；
 - Marian 生产 DEX 不包含 ONNX Runtime Java API 引用；
 - manifest、ML Kit 资源和现有 Capacitor bridge 保持有效；
 - `zipalign`、APK v2/v3 签名、版本和包名检查通过；
@@ -373,9 +466,11 @@ CI 固定计算并保存 SacreBLEU 的 signature、BLEU 和 chrF++，不使用�
 性能验收在 `PEMM20` 或性能不高于该设备的批准设备上执行：
 
 - 首次 native handle/Session 初始化峰值内存、稳定内存和耗时必须有实测记录；
-- 使用 native 计数器或 Perfetto/atrace 证明每个 micro-batch 只有一次 `translateBatch` JNI 入口；JNI 调用数不得随生成 token 数增长；
+- 使用 native 计数器或 Perfetto/atrace 证明每个 WebView chunk 只有一次 `translateBatch` JNI 入口；内部 micro-batch 和生成 token 数不得增加 JNI 调用数；
 - 分别记录 10、50、100 个输出 token 的 native decoder 时间和 Java 端端到端时间，用差值监控 JNI、字符串封送和调度开销；不使用未经本机测量的固定毫秒估算替代证据；
 - decoder-with-past 命中率必须为 100%（第一步除外），encoder 每个 micro-batch 只执行一次；
+- 冷启动 warm-up 时间、warm-up 后首个真实 chunk 延迟和取消 P50/P95 必须单独记录；
+- 结构化诊断中每个 chunk 都能关联 source/padded/generated token 和各阶段耗时，同时抽查日志不包含原文或译文；
 - 200 条 smoke 集翻译过程不得发生 OOM、ANR、WebView 崩溃或进程被系统杀死；
 - 设备锁屏/解锁或应用前后台切换后，任务状态和已完成缓存保持一致；
 - Marian 的 200 条总耗时不得超过同机 ML Kit 的 4 倍；
@@ -404,7 +499,7 @@ CI 固定计算并保存 SacreBLEU 的 signature、BLEU 和 chrF++，不使用�
 必须记录：
 
 - 工具 APK SHA-256、版本、签名、设备型号和 Android 版本；
-- Marian 模型 ID、上游 revision、模型包 SHA-256 和 generation 配置；
+- Marian `modelFamilyId`、`modelVersion`、`modelBuildId`、上游 revision、模型包 SHA-256 和 generation 配置；
 - 下载完成后的离线状态和断网翻译结果；
 - 批次数、唯一原文、总出现、validated、missing、rejected、uncertain 和 compiled；
 - 总耗时、峰值内存、失败批次、重试和前后台行为；
