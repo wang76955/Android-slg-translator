@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 
-from patch_local_ui import enhance_local_runtime
+from patch_local_ui import _CORE_LOCAL_BRIDGE, enhance_local_runtime
 from scan_flow_constants import SCAN_FLOW
 
 
@@ -129,11 +129,11 @@ color-scheme:light dark}
 .workshop-brand-panel p,.workshop-brand-panel h2{position:relative}
 .workshop-brand-panel p{margin:0;font-size:var(--workshop-font-base);line-height:1.5;opacity:.92;max-width:32ch}
 .workshop-brand-panel h2{margin:6px 0 0;font-size:var(--workshop-font-display);line-height:1.18;font-weight:800;letter-spacing:-.025em;text-wrap:balance}
-.workshop-steps{display:grid;gap:10px;margin:0;padding:14px 16px;list-style:none;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}
-.workshop-steps li{display:grid;grid-template-columns:30px 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center}
-.workshop-step-index{display:grid;place-items:center;grid-row:1 / span 2;width:28px;height:28px;border-radius:50%;background:var(--workshop-primary-soft);color:var(--workshop-primary);font-size:var(--workshop-font-xs);font-weight:800;font-variant-numeric:tabular-nums}
-.workshop-step-copy{font-size:var(--workshop-font-base);font-weight:750;line-height:1.3}
-.workshop-step-note{color:var(--workshop-muted);font-size:var(--workshop-font-xs);line-height:1.4}
+.workshop-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0;padding:14px 12px;list-style:none;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm)}
+.workshop-steps li{display:grid;grid-template-columns:1fr;grid-template-rows:auto auto auto;min-width:0;align-content:start;padding:4px 6px}
+.workshop-step-index{display:grid;place-items:center;width:30px;height:30px;margin-bottom:8px;border-radius:50%;background:var(--workshop-primary-soft);color:var(--workshop-primary);font-size:var(--workshop-font-xs);font-weight:800;font-variant-numeric:tabular-nums}
+.workshop-step-copy{min-width:0;font-size:13px;font-weight:750;line-height:1.3}
+.workshop-step-note{min-width:0;margin-top:2px;color:var(--workshop-muted);font-size:11px;line-height:1.35}
 .workshop-task-card{padding:18px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm);animation:workshopRise 200ms var(--workshop-ease)}
 .workshop-task-shell[data-workshop-state="translating"] .workshop-task-card{animation:none}
 .workshop-task-shell[data-workshop-state="patching"] .workshop-task-card{animation:none}
@@ -151,7 +151,7 @@ color-scheme:light dark}
 .workshop-state-icon-empty,.workshop-state-icon-failed{background:color-mix(in oklch,var(--workshop-error) 12%,var(--workshop-surface));color:var(--workshop-error)}
 .workshop-progress{height:8px;margin-top:16px;border-radius:999px;background:color-mix(in oklch,var(--workshop-primary) 14%,transparent);overflow:hidden;position:relative}
 .workshop-progress>i{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--workshop-primary),color-mix(in oklch,var(--workshop-primary) 55%,var(--workshop-accent)));transition:width 240ms var(--workshop-ease)}
-.workshop-progress>i::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,transparent,color-mix(in oklch,var(--workshop-accent) 45%,transparent),transparent);background-size:200% 100%;animation:workshopShimmer 1.8s linear infinite}
+.workshop-progress>i::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,transparent,color-mix(in oklch,var(--workshop-accent) 45%,transparent),transparent);background-size:200% 100%;animation:workshopShimmer 900ms ease-out 1 both}
 @keyframes workshopShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 .workshop-progress-label{display:block;margin-top:8px;color:var(--workshop-muted);font-size:var(--workshop-font-xs);font-weight:750;font-variant-numeric:tabular-nums;text-align:right}
 .workshop-summary-list{display:grid;gap:10px;margin:16px 0 0;padding:0;list-style:none}
@@ -171,9 +171,9 @@ color-scheme:light dark}
 .workshop-task-shell[data-workshop-state="patching"] .workshop-progress{display:block}
 .workshop-task-shell[data-workshop-state="completed"] .workshop-progress{display:none}
 .workshop-task-shell[data-workshop-state="failed"] .workshop-progress{display:none}
-.workshop-settings-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}
+.workshop-settings-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto;contain:layout paint}
 .workshop-settings-shell[hidden]{display:none!important}
-.workshop-settings-card{padding:20px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm);animation:workshopRise 200ms var(--workshop-ease)}
+.workshop-settings-card{padding:20px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);box-shadow:var(--workshop-shadow-sm);animation:none}
 .workshop-settings-card label{display:block;margin-bottom:8px;font-size:var(--workshop-font-base);font-weight:720}
 .workshop-settings-input{box-sizing:border-box;width:100%;min-height:52px;padding:12px 14px;border:1px solid var(--workshop-outline);border-radius:var(--workshop-radius-sm);background:var(--workshop-bg);color:var(--workshop-ink);font-size:16px;transition:border-color 160ms ease-out,box-shadow 160ms ease-out}
 .workshop-settings-input:focus{outline:none;box-shadow:0 0 0 3px var(--workshop-focus-ring);border-color:var(--workshop-primary)}
@@ -224,12 +224,14 @@ color-scheme:light dark}
 .workshop-runtime[data-workshop-task="active"] .workshop-bottom-nav{display:none!important}
 .workshop-runtime[data-workshop-task="active"] main{display:none!important}
 body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{display:none!important}
-.workshop-bottom-nav{position:fixed;z-index:30;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,1fr);padding:6px;border:1px solid var(--workshop-border);border-radius:26px;background:color-mix(in oklch,var(--workshop-bg) 88%,transparent);box-shadow:var(--workshop-shadow-md);backdrop-filter:blur(14px)}
-.workshop-bottom-nav button{position:relative;display:grid;grid-template-rows:22px auto;place-items:center;gap:3px;min-height:56px;padding:7px 4px 5px;border:0;border-radius:18px;background:transparent;color:var(--workshop-muted);font-size:var(--workshop-font-xs);font-weight:660;transition:color 160ms ease-out,background-color 160ms ease-out,transform 120ms ease-out}
+.workshop-bottom-nav{position:fixed;z-index:30;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(3,1fr);padding:8px 12px max(8px,env(safe-area-inset-bottom));border:0;border-top:1px solid var(--workshop-border);border-radius:0;background:var(--workshop-surface);box-shadow:0 -2px 10px color-mix(in oklch,var(--workshop-ink) 6%,transparent);backdrop-filter:none}
+.workshop-bottom-nav button{position:relative;isolation:isolate;display:grid;grid-template-rows:22px auto;place-items:center;gap:3px;min-height:48px;padding:7px 4px 5px;border:0;border-radius:16px;background:transparent;color:var(--workshop-muted);font-size:var(--workshop-font-xs);font-weight:660;transition:color 160ms ease-out,background-color 160ms ease-out,transform 120ms ease-out}
 .workshop-bottom-nav button:active{transform:scale(.96)}
 .workshop-bottom-nav .workshop-nav-icon{display:grid;place-items:center;width:22px;height:22px}
 .workshop-bottom-nav .workshop-nav-icon svg{display:block}
-.workshop-bottom-nav button[aria-current="page"]{background:var(--workshop-primary);color:var(--workshop-on-primary);box-shadow:var(--workshop-shadow-sm)}
+.workshop-bottom-nav button[aria-current="page"]{background:transparent;color:var(--workshop-primary);box-shadow:none}
+.workshop-bottom-nav button[aria-current="page"]::before{content:"";position:absolute;z-index:-1;top:3px;left:50%;width:64px;height:32px;border-radius:999px;background:var(--workshop-primary-soft);transform:translateX(-50%)}
+.workshop-bottom-nav button>span{position:relative;z-index:1}
 .workshop-gallery-shell{position:fixed;z-index:40;inset:0;display:flex;flex-direction:column;gap:16px;padding:20px 16px max(24px,env(safe-area-inset-bottom));background:var(--workshop-bg);color:var(--workshop-ink);overflow:auto}.workshop-gallery-shell[hidden]{display:none!important}.workshop-gallery-content{display:grid;gap:10px}.workshop-gallery-status{margin:0;padding:16px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface);color:var(--workshop-muted);line-height:1.5}.workshop-gallery-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}
 .workshop-empty-state{display:grid;place-items:center;gap:10px;padding:30px 18px;border:1px dashed var(--workshop-border);border-radius:var(--workshop-radius-lg);background:var(--workshop-surface);text-align:center}
 .workshop-empty-icon{display:grid;place-items:center;width:56px;height:56px;border-radius:18px;background:var(--workshop-primary-soft);color:var(--workshop-primary)}
@@ -243,7 +245,7 @@ body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{di
 .workshop-patch-copy{min-width:0;flex:1 1 auto}
 .workshop-patch-name{font-weight:730;overflow-wrap:anywhere}
 .workshop-patch-meta{margin-top:4px;color:var(--workshop-muted);font-size:var(--workshop-font-xs)}
-.workshop-patch-save{min-height:44px;margin-top:10px;padding:0 16px;border:0;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:720;transition:transform 120ms ease-out,filter 160ms ease-out}.workshop-patch-save:active{transform:scale(.98)}
+.workshop-patch-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:10px}.workshop-patch-save{min-height:44px;padding:0 16px;border:0;border-radius:var(--workshop-radius-sm);background:var(--workshop-primary);color:var(--workshop-on-primary);font-weight:720;transition:transform 120ms ease-out,filter 160ms ease-out}.workshop-patch-save:active{transform:scale(.98)}.workshop-patch-delete{display:grid;place-items:center;width:48px;min-width:48px;height:48px;min-height:48px;padding:0;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-sm);background:transparent;color:var(--workshop-error)}.workshop-patch-delete:disabled{opacity:.55}.workshop-patch-delete svg{display:block}
 .workshop-gallery-shell .workshop-secondary-action{align-self:flex-start;min-height:48px;padding:0 12px;border:0;background:transparent;color:var(--workshop-primary);font-weight:720}
 .workshop-settings-menu{display:grid;gap:10px;margin-top:4px}
 .workshop-menu-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:10px 14px;border:1px solid var(--workshop-border);border-radius:var(--workshop-radius-md);background:var(--workshop-surface);color:var(--workshop-ink);text-align:left;box-shadow:var(--workshop-shadow-sm);transition:transform 120ms ease-out,background-color 160ms ease-out,border-color 160ms ease-out}
@@ -261,6 +263,43 @@ body:has(.workshop-runtime[data-workshop-task="active"]) .workshop-bottom-nav{di
 .workshop-settings-menu-hint{margin:2px 4px 0;padding:10px 12px;border-radius:var(--workshop-radius-sm);background:var(--workshop-surface-2);color:var(--workshop-muted);font-size:var(--workshop-font-sm);line-height:1.5}
 .workshop-settings-menu-hint[hidden]{display:none!important}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+"""
+
+WORKSHOP_MOTION_CSS = r"""
+@supports not (color:oklch(0 0 0)){:root{--workshop-bg:#f7f8f2;--workshop-surface:#ffffff;--workshop-surface-2:#eef1e8;--workshop-ink:#263027;--workshop-muted:#667268;--workshop-primary:#55724d;--workshop-primary-soft:#e5eee0;--workshop-on-primary:#ffffff;--workshop-error:#b3261e;--workshop-border:rgba(38,48,39,.14);--workshop-outline:rgba(38,48,39,.24);--workshop-focus-ring:rgba(85,114,77,.32)}}
+.workshop-task-shell[data-workshop-state="idle"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="scanning"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="empty"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="ready"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="translating"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="patching"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="completed"] .workshop-task-body{contain:layout style}
+.workshop-task-shell[data-workshop-state="failed"] .workshop-task-body{contain:layout style}
+.workshop-task-body.workshop-state-enter{animation:workshopFadeThrough 180ms var(--workshop-ease) both}
+.workshop-task-body.workshop-state-exit{animation:workshopFadeThrough 120ms ease-out both}
+.workshop-task-body.workshop-motion-rise{animation-name:workshopRise}
+.workshop-task-body.workshop-motion-instant{animation:none}
+.workshop-row-enter{animation:workshopRowEnter 200ms var(--workshop-ease) both}
+.workshop-row-leave{animation:workshopRowLeave 180ms var(--workshop-ease) both;pointer-events:none}
+.workshop-row-pending{position:relative;opacity:.78;pointer-events:none}
+.workshop-row-pending::after{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--workshop-primary-soft);opacity:.26;pointer-events:none}
+.workshop-row-error{border-color:color-mix(in oklch,var(--workshop-error) 48%,var(--workshop-border));background:color-mix(in oklch,var(--workshop-error) 6%,var(--workshop-surface))}
+.workshop-sr-status{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.workshop-progress>i{will-change:width}
+@keyframes workshopFadeThrough{from{transform:translateY(4px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes workshopRowEnter{from{transform:translateY(5px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes workshopRowLeave{from{transform:translateY(0);opacity:1}to{transform:translateY(-4px);opacity:0}}
+.workshop-settings-shell{animation:none}
+.workshop-gallery-shell{animation:workshopOverlayIn 220ms var(--workshop-ease) both}
+.workshop-source-dialog.workshop-overlay-closing,.workshop-installed-dialog.workshop-overlay-closing,.workshop-gallery-shell.workshop-overlay-closing{animation:workshopOverlayOut 200ms ease-out both;pointer-events:none}
+.workshop-settings-shell.workshop-overlay-closing{animation:none;pointer-events:none}
+.workshop-overlay-closing .workshop-modal-panel{animation:workshopSheetOut 200ms ease-out both}
+@keyframes workshopOverlayIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes workshopOverlayOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(8px)}}
+@keyframes workshopSheetOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(12px)}}
+@media(min-width:720px){.workshop-task-shell{max-width:760px;margin:0 auto;padding-left:24px;padding-right:24px}.workshop-settings-shell{padding-left:24px;padding-right:24px}.workshop-modal-panel{max-width:640px}.workshop-bottom-nav{left:50%;right:auto;bottom:16px;width:min(560px,calc(100% - 48px));border:1px solid var(--workshop-border);border-radius:24px;transform:translateX(-50%);box-shadow:var(--workshop-shadow-md)}}
+@media(orientation:landscape) and (max-height:600px){.workshop-task-shell{min-height:auto;padding-bottom:24px}.workshop-brand-panel{padding-top:16px;padding-bottom:16px}.workshop-steps{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.workshop-primary-action{margin-top:8px}}
+@media(prefers-reduced-motion:reduce){.workshop-runtime *,.workshop-runtime *::before,.workshop-runtime *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.workshop-runtime .workshop-row-enter,.workshop-runtime .workshop-row-leave{transform:none!important;opacity:1!important}.workshop-runtime .workshop-progress>i::after{display:none!important}}
 """
 
 WORKSHOP_RUNTIME = r"""
@@ -462,7 +501,20 @@ def patch_scan_flow(js: str) -> str:
         "s.splitUris=splitTupleComplete?next.splitUris:previousSplitUris;s.splitNames=splitTupleComplete?next.splitNames:previousSplitNames;"
         "s.splitCount=splitTupleComplete?nextSplitCount:previousSplitCount;"
         "s.packageName=next.packageName??previous.packageName??\"\";s.versionCode=next.versionCode??previous.versionCode??\"\";"
-        "s.source=next.source??previous.source??(next.packageName?\"installed\":\"file\");return s},scanSelectedApk=async(e,selectionEpoch)=>{"
+        "s.source=next.source??previous.source??(next.packageName?\"installed\":\"file\");return s},"
+        "persistSelectionSession=selection=>{if(!selection?.uri)return;let translating=false;"
+        "try{const previous=JSON.parse(globalThis.localStorage?.getItem('slg-workshop-session-v1')||'null');"
+        "const sameSource=!!previous&&String(previous.uri||'')===String(selection.uri||'')&&"
+        "String(previous.packageName||'')===String(selection.packageName||'')&&"
+        "String(previous.versionCode??'')===String(selection.versionCode??'');"
+        "translating=sameSource&&previous.translating===true}catch{}"
+        "try{globalThis.localStorage?.setItem('slg-workshop-session-v1',JSON.stringify(Object.assign({},selection,{"
+        "uri:selection.uri,baseUri:selection.baseUri||selection.uri,"
+        "splitUris:Array.isArray(selection.splitUris)?selection.splitUris:[],"
+        "splitNames:Array.isArray(selection.splitNames)?selection.splitNames:[],"
+        "splitCount:Number(selection.splitCount||0),savedAt:Date.now(),"
+        "translating:selection.translating===false?false:selection.translating===true||translating}))) }catch{}},"
+        "scanSelectedApk=async(e,selectionEpoch)=>{"
     )
     if patched.count(normalize_marker) != 1:
         raise ValueError("APK scan normalizer signature is not unique")
@@ -525,17 +577,37 @@ def patch_scan_flow(js: str) -> str:
         "):``,window.__slgActivationMode=`always_on`,window.__slgCompiledPath=``,s(t.entries)",
         1,
     )
-    patched = patched.replace(
-        "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''",
-        "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':'',window.__slgActivationMode=(_m&&_m.ready)?`selectable`:`always_on`",
-        1,
-    )
+    resolved_uri_marker = "_m&&_m.resolvedApkUri"
+    activation_assignment = "window.__slgActivationMode=(_m&&_m.ready)?`selectable`:`always_on`"
+    if resolved_uri_marker not in patched:
+        patched = patched.replace(
+            "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''",
+            "_m&&_m.resolvedApkUri&&(window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,{uri:_m.resolvedApkUri,baseUri:_m.resolvedApkUri})),window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''",
+            1,
+        )
+    if activation_assignment not in patched:
+        patched = patched.replace(
+            "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''",
+            "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':''," + activation_assignment,
+            1,
+        )
     patched = patched.replace(
         "catch{window.__slgTranslatorLang=''}}",
         "catch{window.__slgTranslatorLang='';window.__slgActivationMode=`always_on`}}",
         1,
     )
     return patched
+
+def patch_installed_refresh_runtime(runtime: str) -> str:
+    """Keep previously loaded installed-app rows visible during refresh failures."""
+    start = runtime.find("function renderInstalledApps(){")
+    end = runtime.find("async function loadInstalledApps(){", start)
+    if start < 0 or end < 0:
+        raise ValueError("Installed-app renderer signature not found")
+    renderer = r'''function renderInstalledApps(){if(!installedDialog)return;installedDialog.setAttribute("aria-busy",String(installedLoading||installedBusy));const list=installedDialog.querySelector(".workshop-installed-content"),search=installedDialog.querySelector(".workshop-installed-search"),cancel=installedDialog.querySelector(".workshop-modal-panel > .workshop-modal-action");if(cancel)cancel.disabled=installedBusy;if(!list)return;list.replaceChildren();const needle=(search?.value||"").trim().toLocaleLowerCase(),allApps=Array.isArray(installedApps)?installedApps:[],visible=needle?allApps.filter(app=>`${app.label||""}\n${app.packageName||""}`.toLocaleLowerCase().includes(needle)):allApps;const renderRows=()=>{if(!visible.length)return null;const rows=textNode("ul","workshop-app-list");for(const app of visible){const item=textNode("li","");const button=textNode("button","workshop-app-row");button.type="button";button.disabled=installedBusy;button.append(textNode("span","workshop-app-label",app.label||app.packageName),textNode("span","workshop-app-package",app.packageName));button.onclick=()=>chooseInstalledApp(app);item.append(button);rows.append(item)}return rows};const rows=renderRows();if(installedLoading&&installedApps.length){list.append(textNode("p","workshop-installed-status","正在刷新应用列表…"),rows);focusInstalledTarget();return}if(installedError&&installedApps.length){const message=textNode("p","workshop-installed-status workshop-installed-error",`应用列表刷新失败：${installedError}`);const retry=actionButton("重新加载",loadInstalledApps);retry.className="workshop-source-option";retry.disabled=installedBusy;const file=actionButton("从文件选择 APK",()=>{closeInstalledApps();triggerReactButton(sourceButton)},true);file.className="workshop-modal-action";file.disabled=installedBusy;list.append(message,retry,file,rows);focusInstalledTarget();return}if(installedLoading){list.append(textNode("p","workshop-installed-status","正在读取应用列表"));focusInstalledTarget();return}if(installedError){const message=textNode("p","workshop-installed-status workshop-installed-error",`应用列表读取失败：${installedError}`);const retry=actionButton("重新加载",loadInstalledApps);retry.className="workshop-source-option";retry.disabled=installedBusy;const file=actionButton("从文件选择 APK",()=>{closeInstalledApps();triggerReactButton(sourceButton)},true);file.className="workshop-modal-action";file.disabled=installedBusy;list.append(message,retry,file);focusInstalledTarget();return}if(!rows){const empty=textNode("p","workshop-installed-status","没有找到可选择的已安装应用。你仍可从文件选择 APK。");const file=actionButton("从文件选择 APK",()=>{closeInstalledApps();triggerReactButton(sourceButton)},true);file.className="workshop-modal-action";file.disabled=installedBusy;list.append(empty,file);focusInstalledTarget();return}list.append(rows);focusInstalledTarget()}
+'''
+    return runtime[:start] + renderer + runtime[end:]
+
 
 def patch_saves_runtime(js: str) -> str:
     open_old = 'function openSettings(){armModalHistory();settingsOpen=true;manualIdle=true;reactApiInput=reactApiInput||findReactApiInput();if(!settingsPrevNav){const nav=document.querySelector(".workshop-bottom-nav");settingsPrevNav=nav?.querySelector("button[aria-current=page]")?.textContent||"首页"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("我的"))?.setAttribute("aria-current","page")}let menuView=null,serviceView=null,savesView=null,cleanupView=null,aboutView=null;const showMenu=()=>{if(menuView)menuView.hidden=false;if(serviceView)serviceView.hidden=true;if(savesView)savesView.hidden=true;if(cleanupView)cleanupView.hidden=true;if(aboutView)aboutView.hidden=true};const showView=(v)=>{if(!menuView)return;menuView.hidden=true;serviceView.hidden=v!==serviceView;savesView.hidden=v!==savesView;cleanupView.hidden=v!==cleanupView;aboutView.hidden=v!==aboutView};if(!settingsShell){settingsShell=document.createElement("section");settingsShell.className="workshop-settings-shell";settingsShell.setAttribute("role","dialog");settingsShell.setAttribute("aria-modal","true");settingsShell.setAttribute("aria-label","我的设置");function makeView(){const v=textNode("section","workshop-settings-view");v.hidden=true;return v}function viewBack(label,handler){const b=textNode("button","workshop-task-back","‹ 返回");b.type="button";b.setAttribute("aria-label",label);b.onclick=handler;return b}menuView=makeView();serviceView=makeView();savesView=makeView();cleanupView=makeView();aboutView=makeView();const menuTop=textNode("header","workshop-task-topbar");const back=viewBack("返回任务",closeSettings);menuTop.append(back,textNode("h1","","我的设置"));const menu=textNode("div","workshop-settings-menu");function makeMenuItem(label,desc){const row=textNode("button","workshop-menu-item");row.type="button";const name=textNode("span","workshop-menu-item-label",label);const note=textNode("span","workshop-menu-item-desc",desc||"");const arrow=textNode("span","workshop-menu-item-arrow","›");row.append(name,note,arrow);return row}const service=makeMenuItem("翻译服务","配置 AI 供应商与 API Key");const saves=makeMenuItem("存档转移","备份与恢复游戏存档");const cleanup=makeMenuItem("清理安装包与旧缓存","释放手机存储空间");cleanup.classList.add("workshop-settings-cleanup");const about=makeMenuItem("关于","版本信息");menu.append(service,saves,cleanup,about);menuView.append(menuTop,menu);'
@@ -601,6 +673,16 @@ def patch_saves_runtime(js: str) -> str:
         1,
     )
     saves_new = saves_new.replace(
+        'share.disabled=true;share.textContent="分享中…";',
+        'setWorkshopRowPending(row,true);share.disabled=true;share.textContent="分享中…";',
+        1,
+    )
+    share_result_old = 'savesStatus.textContent="已分享存档。"}catch(e){savesStatus.textContent="分享失败："+(e&&e.message||String(e))}finally{share.disabled=false;'
+    share_result_new = 'setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);savesStatus.textContent="已分享存档。"}catch(e){setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),share.onclick);savesStatus.textContent="分享失败："+(e&&e.message||String(e))}finally{share.disabled=false;'
+    if saves_new.count(share_result_old) != 1:
+        raise ValueError("save share result signature not found")
+    saves_new = saves_new.replace(share_result_old, share_result_new, 1)
+    saves_new = saves_new.replace(
         'exportBtn.onclick=async()=>{const pkg=saveExportGamePackage;if(!pkg)return;',
         'exportBtn.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}const pkg=saveExportGamePackage;if(!pkg)return;',
         1,
@@ -640,9 +722,127 @@ def patch_saves_runtime(js: str) -> str:
         'const updateImportState=()=>{const busy=saveTransferBusy();const pkg=saveImportGamePackage;importGameBtn.disabled=busy;importArchiveBtn.disabled=busy;importGameBtn.textContent=',
         1,
     )
+    saves_new = saves_new.replace(
+        'const row=textNode("article","workshop-save-row");',
+        'const row=textNode("article","workshop-save-row");row.classList?.add?.("workshop-row-enter");',
+    )
+    saves_new = saves_new.replace(
+        'restore.disabled=true;restore.textContent=',
+        'setWorkshopRowPending(row,true);restore.disabled=true;restore.textContent=',
+        1,
+    )
+    restore_result_old = 'savesStatus.textContent="恢复完成。"}catch(e){savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}'
+    restore_result_new = 'setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);savesStatus.textContent="恢复完成。"}catch(e){setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),restore.onclick);savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}'
+    if saves_new.count(restore_result_old) != 1:
+        raise ValueError("save restore result signature not found")
+    saves_new = saves_new.replace(restore_result_old, restore_result_new, 1)
+    saves_new = saves_new.replace(
+        'del.disabled=true;del.textContent=',
+        'setWorkshopRowPending(row,true);del.disabled=true;del.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'del.disabled=false;del.textContent=',
+        'setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),del.onclick);del.disabled=false;del.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'importOne.disabled=true;importOne.textContent=',
+        'setWorkshopRowPending(row,true);importOne.disabled=true;importOne.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'importOne.disabled=false;importOne.textContent=',
+        'setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),importOne.onclick);importOne.disabled=false;importOne.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'delArchive.disabled=true;delArchive.textContent=',
+        'setWorkshopRowPending(row,true);delArchive.disabled=true;delArchive.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'delArchive.disabled=false;delArchive.textContent=',
+        'setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),delArchive.onclick);delArchive.disabled=false;delArchive.textContent=',
+        1,
+    )
+    saves_new = saves_new.replace(
+        'importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent=',
+        'setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent=',
+        1,
+    )
+    save_delete_success_old = 'await plugin.deleteBackup({backupDir:item.path||item.name});savesStatus.textContent="已删除备份。";await refreshSaves()'
+    save_delete_success_new = 'await plugin.deleteBackup({backupDir:item.path||item.name});setWorkshopRowPending(row,false);await waitWorkshopRowExit(row);savesStatus.textContent="已删除备份。";await refreshSaves()'
+    if saves_new.count(save_delete_success_old) != 1:
+        raise ValueError("save backup delete success signature not found")
+    saves_new = saves_new.replace(save_delete_success_old, save_delete_success_new, 1)
+    import_success_old = 'setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent='
+    import_success_new = 'setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);await waitWorkshopRowExit(row);importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent='
+    if saves_new.count(import_success_old) != 1:
+        raise ValueError("save archive import success signature not found")
+    saves_new = saves_new.replace(import_success_old, import_success_new, 1)
+    archive_delete_success_old = 'try{await plugin.deleteSaveArchive({path:item.path});importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent='
+    archive_delete_success_new = 'try{await plugin.deleteSaveArchive({path:item.path});setWorkshopRowPending(row,false);await waitWorkshopRowExit(row);importArchives=importArchives.filter(a=>a!==item);renderImportArchiveRows();importStatus.textContent='
+    if saves_new.count(archive_delete_success_old) != 1:
+        raise ValueError("save archive delete success signature not found")
+    saves_new = saves_new.replace(archive_delete_success_old, archive_delete_success_new, 1)
+    save_refresh_source_start = saves_new.find("async function refreshSaves(){")
+    save_refresh_source_end = saves_new.find("exportBtn.onclick=", save_refresh_source_start)
+    if save_refresh_source_start < 0 or save_refresh_source_end < 0:
+        raise ValueError("compact save renderer boundaries not found")
+    compact_save_refresh_source = saves_new[save_refresh_source_start:save_refresh_source_end]
+    saves_new = saves_new.replace(
+        'async function refreshSaves(){',
+        'const workshopSaveRows=new Map;async function refreshSaves(){',
+        1,
+    )
+    saves_refresh_start = saves_new.find("async function refreshSaves(){")
+    saves_refresh_end = saves_new.find("exportBtn.onclick=", saves_refresh_start)
+    if saves_refresh_start < 0 or saves_refresh_end < 0:
+        raise ValueError("stable save renderer boundaries not found")
+    stable_saves_refresh = r'''async function refreshSaves(){if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}if(!plugin){savesStatus.textContent="当前版本不支持存档转移。";return}savesStatus.textContent="正在读取备份…";try{const result=await plugin.listSaveBackups();const backups=Array.isArray(result?.backups)?result.backups:[];const keys=new Set(backups.map(item=>String(item?.path||item?.name||"未命名备份")));const stale=[];for(const [key,row] of workshopSaveRows){if(!keys.has(key))stale.push([key,row])}for(const [key,row] of stale){if(!row.classList?.contains?.("workshop-row-leave"))await waitWorkshopRowExit(row);row.remove?.();workshopSaveRows.delete(key)}if(!backups.length){savesEmpty.textContent="暂无备份。";savesEmpty.hidden=false;savesList.append(savesEmpty);savesStatus.textContent="";return}savesEmpty.hidden=true;savesEmpty.remove?.();const rows=[];for(const item of backups){const key=String(item?.path||item?.name||"未命名备份");let row=workshopSaveRows.get(key);const previous=!!row;if(!row){row=textNode("article","workshop-save-row");row.classList?.add?.("workshop-row-enter");row.__workshopSaveName=textNode("div","workshop-save-name");row.__workshopSaveMeta=textNode("div","workshop-save-meta");row.__workshopSaveActions=textNode("div","workshop-save-actions");row.__workshopSaveRestore=textNode("button","workshop-save-restore","恢复");row.__workshopSaveRestore.type="button";row.__workshopSaveShare=textNode("button","workshop-save-share","分享");row.__workshopSaveShare.type="button";row.__workshopSaveDelete=textNode("button","workshop-save-delete","删除");row.__workshopSaveDelete.type="button";row.__workshopSaveActions.append(row.__workshopSaveRestore,row.__workshopSaveShare,row.__workshopSaveDelete);row.append(row.__workshopSaveName,row.__workshopSaveMeta,row.__workshopSaveActions);workshopSaveRows.set(key,row)}row.__workshopSaveItem=item;row.dataset.savePath=key;row.setAttribute?.("data-save-path",key);row.__workshopSaveName.textContent=item.name||"未命名备份";row.__workshopSaveMeta.textContent=`${item.fileCount||0} 个文件 · ${new Date(item.modifiedAt||Date.now()).toLocaleString()}`;setWorkshopRowError(row,"",null);const backupDir=item.path||item.name;const restore=row.__workshopSaveRestore,share=row.__workshopSaveShare,del=row.__workshopSaveDelete;restore.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}if(!confirm(`恢复 ${item.name||"该备份"} 会覆盖当前存档，确定继续？`))return;setWorkshopRowPending(row,true);restore.disabled=true;restore.textContent="恢复中…";try{await plugin.restoreSaves({packageName:saveExportGamePackage,backupDir});setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);savesStatus.textContent="恢复完成。"}catch(e){setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),restore.onclick);savesStatus.textContent="恢复失败："+(e&&e.message||String(e))}finally{restore.disabled=false;restore.textContent="恢复"}};share.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}setWorkshopRowPending(row,true);share.disabled=true;share.textContent="分享中…";try{await plugin.shareSaveBackup({backupDir});setWorkshopRowPending(row,false);setWorkshopRowError(row,"",null);savesStatus.textContent="已分享存档。"}catch(e){setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),share.onclick);savesStatus.textContent="分享失败："+(e&&e.message||String(e))}finally{share.disabled=false;share.textContent="分享"}};del.onclick=async()=>{if(saveTransferBusy()){savesStatus.textContent=saveTransferBusyMessage();return}if(!confirm(`确定删除备份 ${item.name||"该备份"}？`))return;setWorkshopRowPending(row,true);del.disabled=true;del.textContent="删除中…";try{await plugin.deleteBackup({backupDir});setWorkshopRowPending(row,false);await waitWorkshopRowExit(row);row.remove?.();workshopSaveRows.delete(key);savesStatus.textContent="已删除备份。";await refreshSaves()}catch(e){savesStatus.textContent="删除失败："+(e&&e.message||String(e));setWorkshopRowPending(row,false);setWorkshopRowError(row,e&&e.message||String(e),del.onclick);del.disabled=false;del.textContent="删除"}};if(previous)setWorkshopRowPending(row,false);rows.push(row)}savesList.append(...rows);savesStatus.textContent=`共 ${backups.length} 个备份。`}catch(e){savesStatus.textContent="读取备份失败："+(e&&e.message||String(e))}}
+    '''
+    saves_new = saves_new[:saves_refresh_start] + stable_saves_refresh + saves_new[saves_refresh_end:]
+    compact_save_refresh = compact_save_refresh_source.replace(
+        "savesList.replaceChildren();",
+        "const nextSaveRows=[],seenSavePaths=new Set;",
+        1,
+    )
+    compact_save_refresh = compact_save_refresh.replace(
+        'if(!backups.length){savesList.append(savesEmpty);savesEmpty.textContent="暂无备份。";savesStatus.textContent="";return}',
+        'if(!backups.length){for(const [key,row] of workshopSaveRows){row.remove?.();workshopSaveRows.delete(key)}savesEmpty.textContent="暂无备份。";savesEmpty.hidden=false;savesList.append(savesEmpty);savesStatus.textContent="";return}',
+        1,
+    )
+    compact_save_refresh = re.sub(
+        r'const row=textNode\("article","workshop-save-row"\);(?:row\.classList\?\.add\?\.\("workshop-row-enter"\);)+',
+        'const key=String(item?.path||item?.name||"未命名备份"),previous=workshopSaveRows.get(key),row=previous||textNode("article","workshop-save-row");seenSavePaths.add(key);if(!previous){workshopSaveRows.set(key,row);row.classList?.add?.("workshop-row-enter")}else{row.replaceChildren?.()}row.dataset.savePath=key;row.setAttribute?.("data-save-path",key);savesEmpty.remove?.();',
+        compact_save_refresh,
+        count=1,
+    )
+    compact_save_refresh = compact_save_refresh.replace(
+        "savesList.append(row)",
+        "nextSaveRows.push(row)",
+        1,
+    )
+    compact_save_refresh = compact_save_refresh.replace(
+        '});savesStatus.textContent=`共 ${backups.length} 个备份。`',
+        '});for(const [key,row] of workshopSaveRows){if(!seenSavePaths.has(key)){row.remove?.();workshopSaveRows.delete(key)}}savesList.append(...nextSaveRows);savesStatus.textContent=`共 ${backups.length} 个备份。`',
+        1,
+    )
+    compact_save_start = saves_new.find("async function refreshSaves(){")
+    compact_save_end = saves_new.find("exportBtn.onclick=", compact_save_start)
+    if compact_save_start < 0 or compact_save_end < 0:
+        raise ValueError("compact save renderer output boundaries not found")
+    saves_new = saves_new[:compact_save_start] + compact_save_refresh + saves_new[compact_save_end:]
+    save_row_fallback_old = 'let saveExportGamePackage="",saveExportGameLabel="",saveImportGamePackage="",saveImportGameLabel="",saveImportArchiveUri="";'
+    save_row_fallback_new = save_row_fallback_old + 'if(typeof setWorkshopRowPending!=="function"&&typeof globalThis!=="undefined")globalThis.setWorkshopRowPending=(row,pending)=>{if(!row)return;row.classList?.toggle?.("workshop-row-pending",!!pending);row.setAttribute?.("aria-busy",String(!!pending))};if(typeof setWorkshopRowError!=="function"&&typeof globalThis!=="undefined")globalThis.setWorkshopRowError=(row,message,retry)=>{if(!row)return;if(message){row.classList?.add?.("workshop-row-error");row.setAttribute?.("aria-invalid","true");row.dataset.workshopError=String(message);row.__workshopRetry=retry}else{row.classList?.remove?.("workshop-row-error");row.removeAttribute?.("aria-invalid");delete row.dataset.workshopError;delete row.__workshopRetry}};if(typeof waitWorkshopRowExit!=="function"&&typeof globalThis!=="undefined")globalThis.waitWorkshopRowExit=row=>({then(resolve){resolve()}});'
+    if saves_new.count(save_row_fallback_old) != 1:
+        raise ValueError("save row fallback signature not found")
+    saves_new = saves_new.replace(save_row_fallback_old, save_row_fallback_new, 1)
     if js.count(saves_old) != 1:
         raise ValueError("saves runtime signature not found")
     js = js.replace(saves_old, saves_new, 1)
+    js = patch_installed_refresh_runtime(js)
 
     bottom_old = 'service.onclick=()=>showView(serviceView);saves.onclick=()=>{showView(savesView);refreshSaves()};cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}'
     bottom_new = 'service.onclick=()=>showView(serviceView);saves.onclick=()=>{showView(savesView);refreshSaves()};importItem.onclick=()=>showView(importView);cleanup.onclick=()=>showView(cleanupView);about.onclick=()=>showView(aboutView);settingsShell.append(menuView,serviceView,savesView,importView,cleanupView,aboutView);runtimeRoot?.append(settingsShell)}showMenu();settingsShell.hidden=false;if(shell)shell.hidden=true}'
@@ -650,25 +850,311 @@ def patch_saves_runtime(js: str) -> str:
         raise ValueError("settings shell append signature not found")
     js = js.replace(bottom_old, bottom_new, 1)
     return js
+def patch_task_runtime(runtime: str) -> str:
+    """Keep the task shell stable and limit high-frequency updates to local nodes."""
+    state_start = runtime.find("function setWorkshopState(state,payload={})")
+    snapshot_start = runtime.find("function snapshotKey", state_start)
+    if state_start < 0 or snapshot_start < 0:
+        raise ValueError("Workshop state runtime signature not found")
+
+    state_runtime = r'''function workshopMotionForTransition(previous,next,reduced){if(previous===next)return"none";if(reduced)return"instant";if(previous==="idle"&&next==="scanning")return"rise";return"fade-through"}
+function workshopMotionReduced(){return typeof window!=="undefined"&&window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches===true}
+function workshopStateAnnouncement(state,payload){const labels={idle:"\u5f85\u673a",scanning:"\u8bfb\u53d6\u4e2d",empty:"\u65e0\u6587\u672c",ready:"\u5df2\u5c31\u7eea",translating:"\u7ffb\u8bd1\u4e2d",patching:"\u751f\u6210\u4e2d",completed:"\u5df2\u5b8c\u6210",failed:"\u5931\u8d25"};const file=payload?.fileName?`：${payload.fileName}`:"";return`\u72b6\u6001\uff1a${labels[state]||state}${file}`}
+ function mountWorkshopRegions(state,payload){const topbar=renderTopbar(state),body=renderStateBody(state,payload),live=textNode("p","workshop-sr-status");live.setAttribute("role","status");live.setAttribute("aria-live","polite");live.setAttribute("aria-atomic","true");live.hidden=true;shell.replaceChildren(topbar,body,live);const regions={shell,topbar,body,live};if(typeof taskRegions!=="undefined")taskRegions=regions;globalThis.__slgTaskRegions=regions;return regions}
+ function updateWorkshopProgress(payload){const regions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?null:taskRegions),body=regions?.body;if(!body)return false;const fill=body.querySelector?.(".workshop-progress > i"),label=body.querySelector?.(".workshop-progress-label"),latest=body.querySelector?.(".workshop-live-line"),elapsed=body.querySelector?.(".workshop-scan-elapsed");const current=Math.max(0,Number(payload?.current)||0),total=Math.max(0,Number(payload?.total||payload?.count)||0);if(fill&&total){const pct=Math.max(2,Math.min(100,Math.round(current/total*100)));fill.style.width=`${pct}%`;if(label)label.textContent=`${pct}%`}if(latest&&payload?.latest)latest.textContent=payload.latest;if(elapsed&&typeof scanStartedAt!=="undefined"&&scanStartedAt)elapsed.textContent=`\u5df2用时 ${Math.floor((Date.now()-scanStartedAt)/1000)} \u79d2`;const detail=body.querySelector?.(".workshop-detail-body");if(detail&&payload?.raw&&detail.dataset.open==="true")detail.textContent=payload.raw;return!!(fill||label||latest||elapsed)}
+  function setWorkshopRowPending(row,pending){if(!row)return;row.classList?.toggle?.("workshop-row-pending",!!pending);row.setAttribute?.("aria-busy",String(!!pending))}
+function setWorkshopRowError(row,message,retry){if(!row)return;if(message){row.classList?.add?.("workshop-row-error");row.setAttribute?.("aria-invalid","true");row.dataset.workshopError=String(message);row.__workshopRetry=retry}else{row.classList?.remove?.("workshop-row-error");row.removeAttribute?.("aria-invalid");delete row.dataset.workshopError;delete row.__workshopRetry}}
+ function retryWorkshopRow(row){const retry=row?.__workshopRetry;return typeof retry==="function"?Promise.resolve(retry()).catch(()=>false):Promise.resolve(false)}
+function waitWorkshopRowExit(row){if(!row)return Promise.resolve();row.classList?.remove?.("workshop-row-enter");row.classList?.add?.("workshop-row-leave");if(typeof window==="undefined"||window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches===true)return Promise.resolve();return new Promise(resolve=>{let finished=false;const finish=()=>{if(finished)return;finished=true;resolve()};const timer=window.setTimeout(finish,220);row.addEventListener?.("animationend",()=>{window.clearTimeout(timer);finish()},{once:true})})}
+function setWorkshopState(state,payload={}){if(!shell)return;if(state==="translating"||state==="patching"){try{if(typeof navigator!=="undefined")navigator.wakeLock?.request("screen").then(w=>{globalThis.__slgWakeLock=w}).catch(()=>{})}catch{}}else if(globalThis.__slgWakeLock){try{globalThis.__slgWakeLock.release().catch(()=>{})}catch{}globalThis.__slgWakeLock=null}if(typeof startScanClock==="function"&&typeof stopScanClock==="function"){state==="scanning"?startScanClock():stopScanClock()}const regions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?null:taskRegions),previous=globalThis.__slgLastWorkshopState||((typeof lastWorkshopState==="undefined"?"":lastWorkshopState)||shell.dataset.workshopState||""),same=previous===state&&regions?.shell===shell;shell.dataset.workshopState=state;shell.setAttribute("data-workshop-state",state);shell.dataset.workshopTask=state==="idle"?"idle":"active";const task=shell.dataset.workshopTask;shell.setAttribute("data-workshop-task",task);runtimeRoot?.setAttribute("data-workshop-state",state);runtimeRoot?.setAttribute("data-workshop-task",task);shell.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");shell.classList.add(`workshop-state-${state}`);runtimeRoot?.classList.remove("workshop-state-idle","workshop-state-scanning","workshop-state-empty","workshop-state-ready","workshop-state-translating","workshop-state-patching","workshop-state-completed","workshop-state-failed");runtimeRoot?.classList.add(`workshop-state-${state}`);if(!regions||regions.shell!==shell){if(typeof mountWorkshopRegions==="function")mountWorkshopRegions(state,payload);else{const fallbackTopbar=renderTopbar(state),fallbackBody=renderStateBody(state,payload);shell.replaceChildren(fallbackTopbar,fallbackBody);if(typeof taskRegions!=="undefined")taskRegions={shell,topbar:fallbackTopbar,body:fallbackBody,live:null}}if(typeof taskRegions!=="undefined"){if(!taskRegions?.shell)taskRegions.shell=shell;globalThis.__slgTaskRegions=taskRegions}else if(!globalThis.__slgTaskRegions)globalThis.__slgTaskRegions={shell}}else if(same){if(state==="scanning"||state==="translating"||state==="patching")updateWorkshopProgress(payload)}else{const nextTopbar=renderTopbar(state),nextBody=renderStateBody(state,payload),activeRegions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?regions:taskRegions);if(typeof activeRegions.topbar?.replaceWith==="function")activeRegions.topbar.replaceWith(nextTopbar);if(typeof activeRegions.body?.replaceWith==="function")activeRegions.body.replaceWith(nextBody);if(typeof activeRegions.topbar?.replaceWith!=="function")shell.replaceChildren(nextTopbar,nextBody,activeRegions.live);activeRegions.topbar=nextTopbar;activeRegions.body=nextBody;if(typeof taskRegions!=="undefined")taskRegions=activeRegions;globalThis.__slgTaskRegions=activeRegions;const motion=workshopMotionForTransition(previous,state,workshopMotionReduced());if(motion!=="none"){nextBody.classList?.add("workshop-state-enter",`workshop-motion-${motion}`);const priorMotionTimer=globalThis.__slgWorkshopMotionTimer||0;if(priorMotionTimer&&typeof window!=="undefined")window.clearTimeout(priorMotionTimer);if(motion!=="instant"&&typeof window!=="undefined"&&typeof window.setTimeout==="function"){const timer=window.setTimeout(()=>{nextBody.classList?.remove("workshop-state-enter","workshop-motion-rise","workshop-motion-fade-through")},260);globalThis.__slgWorkshopMotionTimer=timer;if(typeof workshopMotionTimer!=="undefined")workshopMotionTimer=timer}}}const activeRegions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?null:taskRegions);if(activeRegions?.live&&(!same||payload?.latest))activeRegions.live.textContent=typeof workshopStateAnnouncement==="function"?workshopStateAnnouncement(state,payload):"";globalThis.__slgLastWorkshopState=state;if(typeof lastWorkshopState!=="undefined")lastWorkshopState=state}
+'''
+    state_runtime = state_runtime.replace(
+        'live.hidden=true;',
+        'live.hidden=false;',
+        1,
+    )
+    row_error_old = re.search(
+        r'function setWorkshopRowError\(row,message,retry\)\{[^\n]*\}',
+        state_runtime,
+    )
+    if not row_error_old:
+        raise ValueError("Workshop row error helper signature not found")
+    row_error_new = (
+        'function setWorkshopRowError(row,message,retry){if(!row)return;'
+        'const previous=row.querySelector?.(".workshop-row-retry");'
+        'if(previous?.remove)previous.remove();if(row.children?.filter)row.children=row.children.filter(node=>node!==previous);'
+        'if(message){row.classList?.add?.("workshop-row-error");'
+        'row.setAttribute?.("aria-invalid","true");'
+        'row.dataset.workshopError=String(message);row.__workshopRetry=retry;'
+        'const button=typeof actionButton==="function"?actionButton("重试",()=>retryWorkshopRow(row),true):textNode("button","workshop-row-retry","重试");'
+        'button.className="workshop-row-retry";button.type="button";'
+        'button.onclick=()=>retryWorkshopRow(row);'
+        'button.setAttribute?.("aria-label","重试");row.append?.(button)}else{'
+        'row.classList?.remove?.("workshop-row-error");row.removeAttribute?.("aria-invalid");'
+        'delete row.dataset.workshopError;delete row.__workshopRetry}}'
+    )
+    state_runtime = state_runtime[:row_error_old.start()] + row_error_new + state_runtime[row_error_old.end():]
+    state_runtime, wake_count = re.subn(
+        r'function setWorkshopState\(state,payload=\{\}\)\{if\(!shell\)return;if\(state==="translating"\|\|state==="patching"\).*?const regions=',
+        'function setWorkshopState(state,payload={}){if(!shell)return;const regions=',
+        state_runtime,
+        count=1,
+    )
+    if wake_count != 1:
+        raise ValueError("Workshop wake-lock scheduling signature not found")
+    state_runtime = state_runtime.replace(
+        'workshopMotionForTransition(previous,state,workshopMotionReduced())',
+        'workshopMotionForTransition(previous,state,typeof workshopMotionReduced==="function"?workshopMotionReduced():false)',
+        1,
+    )
+    state_runtime = state_runtime.replace(
+        (
+            'const nextTopbar=renderTopbar(state),'
+            'nextBody=renderStateBody(state,payload),'
+            'activeRegions=globalThis.__slgTaskRegions||'
+            '(typeof taskRegions==="undefined"?regions:taskRegions);'
+            'if(typeof activeRegions.topbar?.replaceWith==="function")'
+        ),
+        (
+            'const nextTopbar=renderTopbar(state),'
+            'nextBody=renderStateBody(state,payload),'
+            'activeRegions=globalThis.__slgTaskRegions||'
+            '(typeof taskRegions==="undefined"?regions:taskRegions);'
+            'const previousBody=activeRegions?.body;'
+            'previousBody?.classList?.add?.("workshop-state-exit");'
+            'if(typeof activeRegions.topbar?.replaceWith==="function")'
+        ),
+        1,
+    )
+    state_runtime = state_runtime.replace(
+        'const regions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?null:taskRegions),previous=globalThis.__slgLastWorkshopState||((typeof lastWorkshopState==="undefined"?"":lastWorkshopState)||shell.dataset.workshopState||""),same=previous===state&&regions?.shell===shell;',
+        'const regions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?null:taskRegions),previous=globalThis.__slgLastWorkshopState||((typeof lastWorkshopState==="undefined"?"":lastWorkshopState)||shell.dataset.workshopState||""),same=previous===state&&regions?.shell===shell;const wakeActive=state==="translating"||state==="patching",wakeWasActive=previous==="translating"||previous==="patching";if(!wakeActive){const lock=globalThis.__slgWakeLock;globalThis.__slgWakeLock=null;globalThis.__slgWakeLockPending=false;if(lock){try{Promise.resolve(lock.release?.()).catch(()=>{})}catch{}}}else if(!wakeWasActive&&!globalThis.__slgWakeLock&&!globalThis.__slgWakeLockPending){globalThis.__slgWakeLockPending=true;try{const request=typeof navigator==="undefined"?null:navigator.wakeLock?.request?.("screen");if(!request)globalThis.__slgWakeLockPending=false;else Promise.resolve(request).then(lock=>{if(globalThis.__slgWakeLockPending)globalThis.__slgWakeLock=lock;else{try{lock?.release?.()}catch{}}}).catch(()=>{}).finally(()=>{globalThis.__slgWakeLockPending=false})}catch{globalThis.__slgWakeLockPending=false}};',
+        1,
+    )
+    state_runtime = state_runtime.replace(
+        '}catch{globalThis.__slgWakeLockPending=false}};shell.dataset.workshopState=state;',
+        '}catch{globalThis.__slgWakeLockPending=false}};if(typeof startScanClock==="function"&&typeof stopScanClock==="function"){state==="scanning"?startScanClock():stopScanClock()}shell.dataset.workshopState=state;',
+        1,
+    )
+    state_runtime = state_runtime.replace(
+        '}else if(same){if(state==="scanning"||state==="translating"||state==="patching")updateWorkshopProgress(payload)}else{',
+        '}else if(same){if(state==="scanning"||state==="translating"||state==="patching")updateWorkshopProgress(payload);else{const nextBody=renderStateBody(state,payload),activeRegions=globalThis.__slgTaskRegions||(typeof taskRegions==="undefined"?regions:taskRegions);if(typeof activeRegions?.body?.replaceWith==="function")activeRegions.body.replaceWith.apply(activeRegions.body,[nextBody]);else shell.replaceChildren(activeRegions?.topbar||renderTopbar(state),nextBody,activeRegions?.live);if(activeRegions){activeRegions.body=nextBody;globalThis.__slgTaskRegions=activeRegions;if(typeof taskRegions!=="undefined")taskRegions=activeRegions}}}else{',
+        1,
+    )
+    runtime = runtime[:state_start] + state_runtime + runtime[snapshot_start:]
+
+    back_old = 'back.onclick=()=>setWorkshopState("idle",{fromBack:true})'
+    back_new = 'back.onclick=()=>{manualIdle=true;setWorkshopState("idle",{fromBack:true})}'
+    if runtime.count(back_old) != 1:
+        raise ValueError("Workshop task back signature not found")
+    runtime = runtime.replace(back_old, back_new, 1)
+    refresh_gate_old = 'if(manualIdle&&!active)return;'
+    refresh_gate_new = 'if(manualIdle)return;'
+    if runtime.count(refresh_gate_old) != 1:
+        raise ValueError("Workshop manual-idle refresh gate signature not found")
+    runtime = runtime.replace(refresh_gate_old, refresh_gate_new, 1)
+
+    runtime, snapshot_count = re.subn(
+        r'function snapshotKey\(s\)\{return\[[^\n]*?\]\.join\("\|"\)\}',
+        'function snapshotKey(s){return[s.state,s.fileName||"",s.count||"",s.translated||"",s.reason||"",s.installAvailable?"install":"",s.sessionRestoredAt?`restored-${s.sessionRestoredAt}`:"",s.splitApk?`split-${s.splitCount||0}`:""].join("|")}',
+        runtime,
+        count=1,
+    )
+    if snapshot_count != 1:
+        raise ValueError("Workshop snapshot key signature not found")
+    refresh_old = 'const key=snapshotKey(snap);if(key===lastSnapshot)return;lastSnapshot=key;setWorkshopState(snap.state,snap)'
+    refresh_new = 'const key=snapshotKey(snap);if(key===lastSnapshot){if(snap.state==="scanning"||snap.state==="translating"||snap.state==="patching")updateWorkshopProgress(snap);return}lastSnapshot=key;setWorkshopState(snap.state,snap)'
+    if runtime.count(refresh_old) != 1:
+        raise ValueError("Workshop refresh scheduling signature not found")
+    runtime = runtime.replace(refresh_old, refresh_new, 1)
+
+    state_marker = "galleryHeading=null;"
+    if runtime.count(state_marker) != 1:
+        raise ValueError("Workshop runtime state storage signature not found")
+    runtime = runtime.replace(
+        state_marker,
+        'galleryHeading=null,taskRegions=null,lastWorkshopState="",workshopMotionTimer=0;',
+        1,
+    )
+
+    runtime = runtime.replace(
+        'observer=null,debounceTimer=0,lastSnapshot=',
+        'observer=null,debounceTimer=0,observerFrame=0,lastSnapshot=',
+        1,
+    )
+    schedule_old = 'function schedule(){clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)}'
+    schedule_new = 'function schedule(){clearTimeout(debounceTimer);if(observerFrame)return;const flush=()=>{observerFrame=0;debounceTimer=window.setTimeout(mount,120)};observerFrame=typeof window!=="undefined"&&typeof window.requestAnimationFrame==="function"?window.requestAnimationFrame(flush):window.setTimeout(flush,16)}'
+    if runtime.count(schedule_old) != 1:
+        raise ValueError("Workshop observer schedule signature not found")
+    runtime = runtime.replace(schedule_old, schedule_new, 1)
+
+    gallery_row = 'const card=textNode("div","workshop-patch-row");'
+    if runtime.count(gallery_row) == 1:
+        runtime = runtime.replace(
+            gallery_row,
+            'const card=textNode("div","workshop-patch-row");card.classList?.add?.("workshop-row-enter");',
+            1,
+        )
+    gallery_path = 'card.dataset.patchPath=patch.path||"";'
+    if runtime.count(gallery_path) == 1:
+        runtime = runtime.replace(
+            gallery_path,
+            'card.dataset.patchPath=patch.path||"";if(galleryDeleting.has(patch.path))setWorkshopRowPending(card,true);if(galleryError&&galleryFocusPath===patch.path)setWorkshopRowError(card,galleryError,()=>deletePatch(patch));',
+            1,
+        )
+
+    save_row = 'const row=textNode("article","workshop-save-row");'
+    if runtime.count(save_row):
+        runtime = runtime.replace(
+            save_row,
+            'const row=textNode("article","workshop-save-row");row.classList?.add?.("workshop-row-enter");',
+        )
+    restore_pending = 'restore.disabled=true;restore.textContent="\\u6062\\u590d\\u4e2d\\u2026";'
+    if runtime.count(restore_pending):
+        runtime = runtime.replace(
+            restore_pending,
+            'setWorkshopRowPending(row,true);restore.disabled=true;restore.textContent="\\u6062\\u590d\\u4e2d\\u2026";',
+        )
+    delete_pending = 'del.disabled=true;del.textContent="\\u5220\\u9664\\u4e2d\\u2026";'
+    if runtime.count(delete_pending):
+        runtime = runtime.replace(
+            delete_pending,
+            'setWorkshopRowPending(row,true);del.disabled=true;del.textContent="\\u5220\\u9664\\u4e2d\\u2026";',
+        )
+    return runtime
+
+
 def enhance_runtime(runtime: str) -> str:
     runtime = runtime.replace(
         "manualIdle=false,retrying=false,detailsOpen=false;\nfunction textNode",
-        "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0;\nfunction textNode",
+        "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,scanInitialTimer=0,workshopFocusFrame=0,workshopDetailFrame=0;\nfunction textNode",
         1,
     )
+    failure_helpers = r'''function workshopFailureCode(message){const raw=String(message??``);const match=raw.match(/(?:font_preflight_[a-z0-9_]+|renpy_font_[a-z0-9_]+|renpy_memory_budget_exceeded|memory_budget_[a-z0-9_]+|transaction_memory_[a-z0-9_]+|translation_validation_[a-z0-9_]+|translation_collision_[a-z0-9_]+|renpy_limit_[a-z0-9_]+|ENOSPC|OutOfMemoryError)/i);if(match)return match[0];if(/No space left(?: on device)?/i.test(raw))return `ENOSPC`;if(/compile failure/i.test(raw))return `compile_failure`;if(/failed(?: to |-to-)fetch/i.test(raw))return `network_failure`;return ``}
+function classifyWorkshopFailure(message){const raw=String(message??``);if(/font_preflight_|renpy_font_/i.test(raw))return `font`;if(/OutOfMemoryError|Java heap space|memory_budget|transaction_memory|renpy_memory_budget|Cannot allocate memory/i.test(raw))return `memory`;if(/\b(?:ENOSPC|No space left(?: on device)?|errno\s*=?\s*28)\b/i.test(raw))return `space`;if(/translation_validation|translation_collision|compile failure|renpy_limit_/i.test(raw))return `compile`;if(/无法连接|网络|ERR_NETWORK|ERR_(?:CONNECTION|INTERNET|NAME)|failed(?: to |-to-)fetch|DNS_PROBE|timed out|timeout|offline/i.test(raw))return `network`;if(/选择文件失败|scan failed|entry not found|cannot read APK|APK.*(?:read|scan)/i.test(raw))return `scan`;return `unknown`}
+'''
+    read_task_anchor = "function readTaskSnapshot(){"
+    if runtime.count(read_task_anchor) != 1:
+        raise ValueError("Task snapshot signature not found")
+    runtime = runtime.replace(read_task_anchor, failure_helpers + read_task_anchor, 1)
+    runtime = runtime.replace(
+        'function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog=',
+        'function readTaskSnapshot(){const _failureCode=typeof workshopFailureCode==="function"?workshopFailureCode:()=>"";const _failureKind=typeof classifyWorkshopFailure==="function"?classifyWorkshopFailure:()=>"unknown";const selectionError=window.__slgSelectionError;if(selectionError){const _raw=selectionError.message||String(selectionError);return{state:"failed",reason:"scan",code:_failureCode(_raw),fileName:selectionError.fileName||"",raw:_raw}}const compatibilityReport=window.__slgRenpyCompatibilityReport;const compatibilityBlocked=window.__slgRenpyCompatibilityBlocked===true||!!(compatibilityReport&&(compatibilityReport.supportLevel===`UNSUPPORTED`||compatibilityReport.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`));if(compatibilityBlocked)return{state:`failed`,reason:`compatibility`,code:(compatibilityReport?.issues||[]).map(issue=>issue?.code).find(Boolean)||`renpy_compatibility_blocked`,fileName:window.__slgSelectionMeta?.name||window.__slgSelectionMeta?.label||``,raw:(compatibilityReport?.issues||[]).map(issue=>issue?.code).filter(Boolean).join(`, `)||`RenPy compatibility preflight blocked patch writing`,compatibilityReport};const watchdog=',
+        1,
+    )
+    runtime = runtime.replace(
+        r'function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){',
+        r'function triggerReactButton(button){const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){const compatibilityReport=window.__slgRenpyCompatibilityReport;const compatibilityBlocked=window.__slgRenpyCompatibilityBlocked===true||!!(compatibilityReport&&(compatibilityReport.supportLevel===`UNSUPPORTED`||compatibilityReport.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`));if(compatibilityBlocked)return}manualIdle=false;if(isStart){',
+        1,
+    )
+    persist_start_old = 'if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}'
+    persist_start_new = 'if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}'
+    if runtime.count(persist_start_old) != 1:
+        raise ValueError("start session persistence signature not found")
+    runtime = runtime.replace(persist_start_old, '', 1)
+    dispatch_old = 'target?.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}))'
+    dispatch_new = persist_start_new + dispatch_old
+    if runtime.count(dispatch_old) != 1:
+        raise ValueError("React dispatch signature not found")
+    runtime = runtime.replace(dispatch_old, dispatch_new, 1)
+    source_text_old = 'function sourceText(){const root=document.querySelector("#root");if(!root)return"";const clone=root.cloneNode(true);clone.querySelector(".workshop-task-shell")?.remove();clone.querySelector(".workshop-bottom-nav")?.remove();clone.querySelector(".workshop-source-dialog")?.remove();clone.querySelector(".workshop-installed-dialog")?.remove();clone.querySelector(".workshop-settings-shell")?.remove();clone.querySelector(".workshop-gallery-shell")?.remove();return clone.textContent||""}'
+    source_text_new = 'function sourceText(){const app=runtimeRoot||document.querySelector("#root>div");if(!app)return"";const ignored=["workshop-task-shell","workshop-bottom-nav","workshop-source-dialog","workshop-installed-dialog","workshop-settings-shell","workshop-gallery-shell"];return[...(app.children||[])].filter(child=>!ignored.some(name=>child.classList?.contains?.(name))).map(child=>child.textContent||"").join("")}'
+    if runtime.count(source_text_old) != 1:
+        raise ValueError("source text signature not found")
+    runtime = runtime.replace(source_text_old, source_text_new, 1)
     runtime = runtime.replace(
         "function setReactInputValue(input,value)",
         """function updateScanClock(){const elapsed=shell?.querySelector(\".workshop-scan-elapsed\");if(elapsed&&scanStartedAt)elapsed.textContent=`已用时 ${Math.floor((Date.now()-scanStartedAt)/1000)} 秒`}
-function startScanClock(){if(!scanStartedAt)scanStartedAt=Date.now();if(!scanTimer)scanTimer=window.setInterval(updateScanClock,1000);window.setTimeout(updateScanClock,0)}
-function stopScanClock(){if(scanTimer)window.clearInterval(scanTimer);scanTimer=0;scanStartedAt=0}
-function setReactInputValue(input,value)""",
+ function startScanClock(){if(!scanStartedAt)scanStartedAt=Date.now();if(!scanTimer)scanTimer=window.setInterval(updateScanClock,1000);if(!scanInitialTimer)scanInitialTimer=window.setTimeout(()=>{scanInitialTimer=0;updateScanClock()},0)}
+ function stopScanClock(){if(scanTimer)window.clearInterval(scanTimer);if(scanInitialTimer)window.clearTimeout(scanInitialTimer);scanTimer=0;scanInitialTimer=0;scanStartedAt=0}
+ function setReactInputValue(input,value)""",
+        1,
+    )
+    focus_runtime_old = (
+        'function focusInstalledTarget(){window.requestAnimationFrame(()=>{'
+        'if(!installedDialog||installedDialog.hidden)return;'
+        'const search=installedDialog.querySelector(".workshop-installed-search"),'
+        'first=installedDialog.querySelector(".workshop-installed-content button");'
+        '(search||first)?.focus()})}'
+    )
+    focus_runtime_new = (
+        'function focusInstalledTarget(){'
+        'const prior=globalThis.__slgWorkshopFocusFrame||0;'
+        'if(prior){window.cancelAnimationFrame?.(prior);window.clearTimeout?.(prior)}'
+        'const run=()=>{globalThis.__slgWorkshopFocusFrame=0;'
+        'if(!installedDialog||installedDialog.hidden)return;'
+        'const search=installedDialog.querySelector(".workshop-installed-search"),'
+        'first=installedDialog.querySelector(".workshop-installed-content button");'
+        '(search||first)?.focus()};'
+        'const id=typeof window.requestAnimationFrame==="function"?window.requestAnimationFrame(run):window.setTimeout(run,0);'
+        'globalThis.__slgWorkshopFocusFrame=id}'
+    )
+    if runtime.count(focus_runtime_old) != 1:
+        raise ValueError("Installed-app focus runtime signature not found")
+    runtime = runtime.replace(focus_runtime_old, focus_runtime_new, 1)
+    source_focus_old = (
+        'window.requestAnimationFrame(()=>{try{focusableIn(sourceDialog)[0]?.focus()}catch{}})'
+    )
+    source_focus_new = (
+        '(()=>{const prior=globalThis.__slgWorkshopFocusFrame||0;'
+        'if(prior){window.cancelAnimationFrame?.(prior);window.clearTimeout?.(prior)}'
+        'const run=()=>{globalThis.__slgWorkshopFocusFrame=0;'
+        'try{focusableIn(sourceDialog)[0]?.focus()}catch{}};'
+        'globalThis.__slgWorkshopFocusFrame=window.requestAnimationFrame(run)})()'
+    )
+    if runtime.count(source_focus_old) != 1:
+        raise ValueError("Source chooser focus runtime signature not found")
+    runtime = runtime.replace(source_focus_old, source_focus_new, 1)
+    detail_focus_old = (
+        'const scrollLatest=()=>{if(live&&detailsOpen)window.requestAnimationFrame(()=>{'
+        'body.scrollTop=body.scrollHeight})};'
+    )
+    detail_focus_new = (
+        'const scrollLatest=()=>{if(live&&detailsOpen){'
+        'const prior=globalThis.__slgWorkshopDetailFrame||0;'
+        'if(prior){window.cancelAnimationFrame?.(prior);window.clearTimeout?.(prior)}'
+        'globalThis.__slgWorkshopDetailFrame=window.requestAnimationFrame(()=>{'
+        'globalThis.__slgWorkshopDetailFrame=0;body.scrollTop=body.scrollHeight})}};'
+    )
+    if runtime.count(detail_focus_old) != 1:
+        raise ValueError("Detail scroll runtime signature not found")
+    runtime = runtime.replace(detail_focus_old, detail_focus_new, 1)
+    runtime = runtime.replace(
+        'if(payload.reason==="network"){',
+        'if(payload.reason==="compatibility"){const report=payload.compatibilityReport||window.__slgRenpyCompatibilityReport||{};const issues=(report.issues||[]).map(issue=>issue?.code).filter(Boolean).join("、");const title=textNode("h2","workshop-error-title","这个 APK 暂不支持安全写入");const copy=textNode("p","workshop-state-copy","扫描已完成，但当前脚本格式只能提取文本，无法生成可运行的翻译补丁。请重新选择兼容的 APK。");const detail=textNode("p","workshop-settings-status",`支持等级：${report.supportLevel||"暂不支持"}`);card.append(title,copy,detail,detailToggle(payload.raw||issues||"RenPy compatibility preflight blocked patch writing"));body.append(card,actionButton("重新选择 APK",()=>triggerReactButton(sourceButton)));return body}if(payload.reason==="font"){const title=textNode("h2","workshop-error-title","字体资源过大或不完整");const copy=textNode("p","workshop-state-copy","当前 APK 的字体资源无法覆盖译文所需字形，或字体资源超过安全预算。请更换包含中文字体的 APK 后重试。");const details=detailToggle(payload.raw||payload.code||"font_preflight_failed");card.append(title,copy,details);body.append(card,actionButton("重新选择 APK",()=>triggerReactButton(sourceButton)),actionButton("重新预检",()=>retryTask({reason:"font",fileName:payload.fileName,raw:""}),true));return body}if(payload.reason==="memory"){const title=textNode("h2","workshop-error-title","内存不足");const copy=textNode("p","workshop-state-copy","本次处理超过设备可用内存。请关闭其他应用后重试，或减少一次处理的文件数量。");const details=detailToggle(payload.raw||payload.code||"memory_budget_exceeded");card.append(title,copy,details);body.append(card,actionButton("重试",()=>retryTask({reason:"memory",fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}if(payload.reason==="compile"){const title=textNode("h2","workshop-error-title","补丁生成失败");const copy=textNode("p","workshop-state-copy","译文已经生成，但写入或校验补丁 APK 时失败。请查看详情后重试。");const details=detailToggle(payload.raw||payload.code||"compile_failure");card.append(title,copy,details);body.append(card,actionButton("重试",()=>retryTask({reason:"compile",fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}if(payload.reason==="network"){',
+        1,
+    )
+    generic_error_start = 'const title=textNode("h2","workshop-error-title","手机空间不足");'
+    generic_error_end = 'return body}'
+    start = runtime.find(generic_error_start)
+    end = runtime.find(generic_error_end, start)
+    if start < 0 or end < 0:
+        raise ValueError("Generic failure renderer signature not found")
+    end += len(generic_error_end)
+    generic_error = 'if(payload.reason==="space"){const title=textNode("h2","workshop-error-title","手机空间不足");const copy=textNode("p","workshop-state-copy","请释放空间后重试。"),details=detailToggle(payload.raw||payload.code||"ENOSPC|No space left");card.append(title,copy,details);body.append(card,actionButton("释放空间后重试",()=>retryTask({reason:"space",fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}const title=textNode("h2","workshop-error-title","处理失败");const copy=textNode("p","workshop-state-copy","这次翻译没有完成。请查看处理详情后重试，或重新选择 APK。");const details=detailToggle(payload.raw||payload.code||"unknown_failure");card.append(title,copy,details);body.append(card,actionButton("重试",()=>retryTask({reason:payload.reason||"unknown",fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}'
+    runtime = runtime[:start] + generic_error + runtime[end:]
+    runtime = runtime.replace(
+        'const failed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("写入补丁 APK 失败"));',
+        'const failed=[...document.querySelectorAll("#root *")].find(el=>{if(el.closest(".workshop-task-shell"))return false;const _text=el.textContent||"";return /写入补丁 APK 失败|编译翻译资源失败|预检失败|font_preflight_|renpy_font_|memory_budget|transaction_memory|OutOfMemoryError|translation_validation|renpy_limit_/i.test(_text)});',
         1,
     )
     runtime = runtime.replace(
-        'if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))',
-        'const scanFailed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("选择文件失败:")&&(el.textContent?.length||0)<500);if(scanFailed)return{state:"failed",reason:"scan",raw:scanFailed.textContent};if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))',
+        'if(networkFailed)return{state:"failed",reason:"network",raw:networkFailed[1]};',
+        'if(networkFailed)return{state:"failed",reason:"network",code:_failureCode(networkFailed[1])||"network_failure",raw:networkFailed[1]};',
         1,
     )
+    old_failure_branch = (
+        'if(failed&&/ENOSPC|No space left/i.test(failed.textContent||""))'
+        'return{state:"failed",reason:"space",raw:failed.textContent};'
+    )
+    failure_branch = (
+        'const scanFailed=[...document.querySelectorAll("#root *")].find(el=>!el.closest(".workshop-task-shell")&&el.textContent?.includes("选择文件失败:")&&(el.textContent?.length||0)<500);'
+        'if(scanFailed){const _raw=scanFailed.textContent||"";return{state:"failed",reason:"scan",code:_failureCode(_raw),raw:_raw}}'
+        'if(failed){const _raw=failed.textContent||"";return{state:"failed",reason:_failureKind(_raw),code:_failureCode(_raw),raw:_raw}}'
+    )
+    if runtime.count(old_failure_branch) != 1:
+        raise ValueError("Legacy storage failure branch is not unique")
+    runtime = runtime.replace(old_failure_branch, failure_branch, 1)
     runtime, count = re.subn(
         r'if\(state==="scanning"\)\{card\.append\(textNode\("p","workshop-state-copy","[^"]*"\)\);const progress=',
         'if(state==="scanning"){const copy=textNode("p","workshop-state-copy","正在读取 APK 目录");copy.append(textNode("span","workshop-scan-elapsed","已用时 0 秒"));card.append(copy);const progress=',
@@ -701,11 +1187,59 @@ function setReactInputValue(input,value)""",
         1,
     )
     # --- session auto-resume (renderer-crash recovery) ---
-    session_state_old = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0;"
-    session_state_new = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError='';"
+    session_state_old = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,scanInitialTimer=0,workshopFocusFrame=0,workshopDetailFrame=0;"
+    session_state_new = "manualIdle=false,retrying=false,detailsOpen=false,scanStartedAt=0,scanTimer=0,scanInitialTimer=0,workshopFocusFrame=0,workshopDetailFrame=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError='',galleryDeleting=new Set(),galleryDeleteRequests=new Map(),galleryListEpoch=0,galleryRetryAction=null,galleryFocusPath='',galleryHeading=null;"
     if runtime.count(session_state_old) != 1:
         raise ValueError("Session state signature not found")
     runtime = runtime.replace(session_state_old, session_state_new, 1)
+
+    gallery_start = runtime.find("function openGallery(){")
+    gallery_end = runtime.find("function enableNativeBackHandling(){", gallery_start)
+    if gallery_start < 0 or gallery_end < 0:
+        raise ValueError("Gallery runtime signature not found")
+    gallery_runtime = r'''function openGallery(){armModalHistory();beginOverlay();galleryOpen=true;if(!galleryPrevNav){const nav0=document.querySelector(".workshop-bottom-nav");galleryPrevNav=nav0?.querySelector("button[aria-current=page]")?.textContent||"\u9996\u9875"}const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes("\u5b89\u88c5\u5305"))?.setAttribute("aria-current","page")}if(!galleryShell){galleryShell=textNode("section","workshop-gallery-shell");galleryShell.hidden=true;galleryShell.setAttribute("role","dialog");galleryShell.setAttribute("aria-modal","true");galleryShell.setAttribute("aria-label","\u5b89\u88c5\u5305");const top=textNode("header","workshop-task-topbar");const back=textNode("button","workshop-task-back","\u2039 \u8fd4\u56de");back.type="button";back.setAttribute("aria-label","\u8fd4\u56de\u4efb\u52a1");back.onclick=closeGallery;galleryHeading=textNode("h1","","\u5b89\u88c5\u5305");galleryHeading.tabIndex=-1;top.append(back,galleryHeading);const refresh=textNode("button","workshop-secondary-action","\u5237\u65b0");refresh.type="button";refresh.onclick=loadPatches;const list=textNode("div","workshop-gallery-content");galleryShell.append(top,list,refresh);runtimeRoot?.append(galleryShell)}galleryShell.hidden=false;if(shell)shell.hidden=true;loadPatches()}
+function closeGallery(preserveHistory=false){galleryOpen=false;endOverlay();galleryListEpoch+=1;lastSnapshot="";if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;const nav=document.querySelector(".workshop-bottom-nav");if(nav){[...nav.children].forEach(el=>el.removeAttribute("aria-current"));[...nav.children].find(el=>el.textContent?.includes(galleryPrevNav||"\u9996\u9875"))?.setAttribute("aria-current","page")}if(!preserveHistory)releaseModalHistory();refresh()}
+function galleryStatus(message,busy=false,error=false){const status=textNode("p","workshop-gallery-status"+(error?" workshop-installed-error":""),message);status.setAttribute("aria-live","polite");status.setAttribute("aria-busy",String(busy));return status}
+function focusGalleryTarget(previousPath=""){if(!galleryShell)return;const rows=[...galleryShell.querySelectorAll(".workshop-patch-row")];const target=rows.find(row=>row.dataset.patchPath!==previousPath)||rows[0]||galleryHeading;target?.focus?.()}
+function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;list.replaceChildren();const busy=galleryLoading||galleryDeleting.size>0;if(galleryLoading){list.append(galleryStatus("\u6b63\u5728\u8bfb\u53d6\u5b89\u88c5\u5305\u5217\u8868\u2026",true));return}if(galleryError){list.append(galleryStatus("\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError,busy,true));const retry=actionButton("\u91cd\u8bd5",galleryRetryAction||loadPatches);retry.type="button";list.append(retry)}if(!galleryPatches.length){const empty=textNode("div","workshop-empty-state");const eicon=textNode("span","workshop-empty-icon");if(eicon.setAttribute)eicon.setAttribute("aria-hidden","true");eicon.innerHTML='<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5-9Z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>';empty.append(eicon,textNode("h2","workshop-empty-title","\u8fd8\u6ca1\u6709\u5b89\u88c5\u5305"),textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u5df2\u751f\u6210\u7684\u5b89\u88c5\u5305 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u5b89\u88c5\u5305\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));list.append(empty);return}const rows=textNode("ul","workshop-gallery-list");for(const patch of galleryPatches){const item=textNode("li","");const card=textNode("div","workshop-patch-row");card.tabIndex=-1;card.dataset.patchPath=patch.path||"";const head=textNode("div","workshop-patch-head");const picon=textNode("span","workshop-patch-icon");if(picon.setAttribute)picon.setAttribute("aria-hidden","true");picon.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>';const copy=textNode("div","workshop-patch-copy");copy.append(textNode("div","workshop-patch-name",patch.name||"\u672a\u547d\u540d\u5b89\u88c5\u5305"));copy.append(textNode("div","workshop-patch-meta",formatBytes(patch.size)+" \u00b7 "+new Date(patch.modifiedAt||Date.now()).toLocaleString()));head.append(picon,copy);const actions=textNode("div","workshop-patch-actions");const save=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";const del=actionButton("",()=>deletePatch(patch));del.className="workshop-patch-delete";del.type="button";del.setAttribute("aria-label","\u5220\u9664\u5b89\u88c5\u5305");del.setAttribute("title","\u5220\u9664\u5b89\u88c5\u5305");del.setAttribute("aria-busy",String(galleryDeleting.has(patch.path)));del.disabled=galleryDeleting.has(patch.path);del.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';actions.append(save,del);card.append(head,actions);item.append(card);rows.append(item)}list.append(rows)}
+function deletePatch(patch){const plugin=window.Capacitor?.Plugins?.FileManager;const path=patch?.path;if(!plugin?.deletePatchedApk||!path)return Promise.resolve(false);const pending=galleryDeleteRequests.get(path);if(pending)return pending;const name=patch?.name||"\u8be5\u5b89\u88c5\u5305";if(!window.confirm(name+"\n\u5220\u9664\u6b64\u5b89\u88c5\u5305\u53ea\u4f1a\u5220\u9664\u8865\u4e01 APK\uff0c\u4e0d\u4f1a\u5378\u8f7d\u539f\u5e94\u7528\uff0c\u4e5f\u4e0d\u4f1a\u5220\u9664\u539f\u59cb APK\u3002\u786e\u5b9a\u7ee7\u7eed\uff1f"))return Promise.resolve(false);galleryDeleting.add(path);galleryFocusPath=path;galleryError="";galleryRetryAction=null;renderGallery();const request=(async()=>{try{await window.Capacitor.Plugins.FileManager.deletePatchedApk({path});await loadPatches();return true}catch(error){galleryError="\u5220\u9664\u5931\u8d25\uff1a"+(error?.message||String(error));galleryRetryAction=()=>deletePatch(patch);return false}finally{galleryDeleting.delete(path);galleryDeleteRequests.delete(path);renderGallery()}})();galleryDeleteRequests.set(path,request);return request}
+async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager;const epoch=++galleryListEpoch;const previousFocus=galleryFocusPath;galleryLoading=true;galleryError="";galleryRetryAction=null;renderGallery();if(!plugin?.listPatchedApks){if(epoch!==galleryListEpoch)return false;galleryLoading=false;galleryError="\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8bfb\u53d6\u5b89\u88c5\u5305\u5217\u8868\uff0c\u8bf7\u5347\u7ea7\u5e94\u7528";galleryRetryAction=loadPatches;renderGallery();return false}let applied=false;try{const result=await plugin.listPatchedApks();if(epoch!==galleryListEpoch)return false;galleryPatches=Array.isArray(result?.patches)?result.patches:[];galleryError="";galleryRetryAction=null;galleryFocusPath="";applied=true;return true}catch(error){if(epoch===galleryListEpoch){galleryError=error?.message||String(error);galleryRetryAction=loadPatches}return false}finally{if(epoch===galleryListEpoch){galleryLoading=false;renderGallery();if(applied)focusGalleryTarget(previousFocus)}}}
+'''
+    gallery_render_start = gallery_runtime.find("function renderGallery(){")
+    gallery_render_end = gallery_runtime.find("function deletePatch(patch){", gallery_render_start)
+    if gallery_render_start < 0 or gallery_render_end < 0:
+        raise ValueError("Gallery renderer signature not found")
+    gallery_renderer = r'''function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;list.replaceChildren();const busy=galleryLoading||galleryDeleting.size>0;if(galleryLoading&&galleryPatches.length)list.append(galleryStatus("\u6b63\u5728\u5237\u65b0\u5b89\u88c5\u5305\u5217\u8868\u2026",true));else if(galleryLoading){list.append(galleryStatus("\u6b63\u5728\u8bfb\u53d6\u5b89\u88c5\u5305\u5217\u8868\u2026",true));return}if(galleryError&&galleryPatches.length){list.append(galleryStatus("\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError,busy,true));const retry=actionButton("\u91cd\u8bd5",galleryRetryAction||loadPatches);retry.type="button";list.append(retry)}else if(galleryError){list.append(galleryStatus("\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError,busy,true));const retry=actionButton("\u91cd\u8bd5",galleryRetryAction||loadPatches);retry.type="button";list.append(retry)}if(!galleryPatches.length){const empty=textNode("div","workshop-empty-state");const eicon=textNode("span","workshop-empty-icon");if(eicon.setAttribute)eicon.setAttribute("aria-hidden","true");eicon.innerHTML='<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5-9-5Z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>';empty.append(eicon,textNode("h2","workshop-empty-title","\u8fd8\u6ca1\u6709\u5b89\u88c5\u5305"),textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u5df2\u751f\u6210\u7684\u5b89\u88c5\u5305 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u5b89\u88c5\u5305\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));list.append(empty);return}const rows=textNode("ul","workshop-gallery-list");for(const patch of galleryPatches){const item=textNode("li","");const card=textNode("div","workshop-patch-row");card.tabIndex=-1;card.dataset.patchPath=patch.path||"";const head=textNode("div","workshop-patch-head");const picon=textNode("span","workshop-patch-icon");if(picon.setAttribute)picon.setAttribute("aria-hidden","true");picon.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>';const copy=textNode("div","workshop-patch-copy");copy.append(textNode("div","workshop-patch-name",patch.name||"\u672a\u547d\u540d\u5b89\u88c5\u5305"));copy.append(textNode("div","workshop-patch-meta",formatBytes(patch.size)+" \u00b7 "+new Date(patch.modifiedAt||Date.now()).toLocaleString()));head.append(picon,copy);const actions=textNode("div","workshop-patch-actions");const save=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";const del=actionButton("",()=>deletePatch(patch));del.className="workshop-patch-delete";del.type="button";del.setAttribute("aria-label","\u5220\u9664\u5b89\u88c5\u5305");del.setAttribute("title","\u5220\u9664\u5b89\u88c5\u5305");del.setAttribute("aria-busy",String(galleryDeleting.has(patch.path)));del.disabled=galleryDeleting.has(patch.path);del.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';actions.append(save,del);card.append(head,actions);item.append(card);rows.append(item)}list.append(rows)}
+'''
+    stable_gallery_renderer = r'''function renderGallery(){if(!galleryShell)return;const list=galleryShell.querySelector(".workshop-gallery-content");if(!list)return;let status=list.querySelector?.(".workshop-gallery-status");if(!status){status=galleryStatus("",false,false);list.append(status)}let rows=list.querySelector?.(".workshop-gallery-list");if(!rows){rows=textNode("ul","workshop-gallery-list");list.append(rows)}let empty=list.querySelector?.(".workshop-empty-state");if(!empty){empty=textNode("div","workshop-empty-state");const eicon=textNode("span","workshop-empty-icon");if(eicon.setAttribute)eicon.setAttribute("aria-hidden","true");eicon.innerHTML='<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5-9-5Z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>';empty.append(eicon,textNode("h2","workshop-empty-title","\u8fd8\u6ca1\u6709\u5b89\u88c5\u5305"),textNode("p","workshop-gallery-status","\u8fd8\u6ca1\u6709\u5df2\u751f\u6210\u7684\u5b89\u88c5\u5305 APK\u3002\u7ffb\u8bd1\u5b8c\u6210\u540e\uff0c\u5b89\u88c5\u5305\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"));list.append(empty)}const busy=galleryLoading||galleryDeleting.size>0;status.hidden=!galleryLoading&&!galleryError;status.classList?.toggle?.("workshop-installed-error",!!galleryError);status.setAttribute("aria-busy",String(busy));if(galleryLoading)status.textContent=galleryPatches.length?"\u6b63\u5728\u5237\u65b0\u5b89\u88c5\u5305\u5217\u8868\u2026":"\u6b63\u5728\u8bfb\u53d6\u5b89\u88c5\u5305\u5217\u8868\u2026";else if(galleryError)status.textContent="\u8bfb\u53d6\u5931\u8d25\uff1a"+galleryError;const removeStale=keys=>{for(const [key,item] of workshopGalleryRows){if(keys.has(key))continue;const card=item.__workshopGalleryCard;card?.classList?.remove?.("workshop-row-enter");card?.classList?.add?.("workshop-row-leave");workshopGalleryRows.delete(key);previousGalleryRows.delete(key);const remove=()=>{if(!workshopGalleryRows.has(key))item.remove?.()};if(typeof window!=="undefined"&&typeof window.setTimeout==="function")window.setTimeout(remove,220);else remove()}};if(!galleryPatches.length){removeStale(new Set);rows.hidden=true;empty.hidden=!!galleryError;previousGalleryRows.clear();return}rows.hidden=false;empty.hidden=true;const nextKeys=new Set,ordered=[];for(const patch of galleryPatches){const key=String(patch?.path||patch?.name||"");if(!key)continue;const previous=previousGalleryRows.get(key);let item=workshopGalleryRows.get(key),card=item?.__workshopGalleryCard;if(!item){item=textNode("li","");card=textNode("div","workshop-patch-row");card.tabIndex=-1;item.__workshopGalleryCard=card;item.append(card);workshopGalleryRows.set(key,item)}if(!previous)card.classList?.add?.("workshop-row-enter");card.dataset.patchPath=key;card.setAttribute?.("data-patch-path",key);if(!card.__workshopPatchHead){card.__workshopPatchHead=textNode("div","workshop-patch-head");const picon=textNode("span","workshop-patch-icon");if(picon.setAttribute)picon.setAttribute("aria-hidden","true");picon.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2V8Z"/><path d="M14 3v5h5"/></svg>';card.__workshopPatchCopy=textNode("div","workshop-patch-copy");card.__workshopPatchName=textNode("div","workshop-patch-name");card.__workshopPatchMeta=textNode("div","workshop-patch-meta");card.__workshopPatchCopy.append(card.__workshopPatchName,card.__workshopPatchMeta);card.__workshopPatchHead.append(picon,card.__workshopPatchCopy);card.__workshopPatchActions=textNode("div","workshop-patch-actions");card.__workshopPatchSave=actionButton("\u4fdd\u5b58\u5230\u4e0b\u8f7d",()=>{});card.__workshopPatchSave.className="workshop-patch-save";card.__workshopPatchDelete=actionButton("",()=>{});card.__workshopPatchDelete.className="workshop-patch-delete";card.__workshopPatchDelete.type="button";card.__workshopPatchDelete.setAttribute("aria-label","\u5220\u9664\u5b89\u88c5\u5305");card.__workshopPatchDelete.setAttribute("title","\u5220\u9664\u5b89\u88c5\u5305");card.__workshopPatchDelete.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';card.__workshopPatchActions.append(card.__workshopPatchSave,card.__workshopPatchDelete);card.append(card.__workshopPatchHead,card.__workshopPatchActions)}card.__workshopPatchName.textContent=patch.name||"\u672a\u547d\u540d\u5b89\u88c5\u5305";card.__workshopPatchMeta.textContent=formatBytes(patch.size)+" \u00b7 "+new Date(patch.modifiedAt||Date.now()).toLocaleString();card.__workshopPatchSave.onclick=()=>savePatchedApk(patch.path);card.__workshopPatchDelete.onclick=()=>deletePatch(patch);card.__workshopPatchDelete.disabled=galleryDeleting.has(key);card.__workshopPatchDelete.setAttribute("aria-busy",String(galleryDeleting.has(key)));if(galleryDeleting.has(key))setWorkshopRowPending(card,true);else setWorkshopRowPending(card,false);if(galleryError&&galleryFocusPath===key)setWorkshopRowError(card,galleryError,()=>deletePatch(patch));else if(!galleryError||galleryFocusPath!==key)setWorkshopRowError(card,"",null);ordered.push(item);nextKeys.add(key)}removeStale(nextKeys);rows.append(...ordered);previousGalleryRows.clear();for(const key of nextKeys)previousGalleryRows.set(key,true)}
+    '''
+    stable_gallery_renderer = stable_gallery_renderer.replace(
+        'const busy=galleryLoading||galleryDeleting.size>0;',
+        'const refreshHasRows=galleryLoading&&galleryPatches.length,busy=galleryLoading||galleryDeleting.size>0;',
+        1,
+    ).replace(
+        'if(galleryLoading)status.textContent=galleryPatches.length?',
+        'if(galleryLoading)status.textContent=refreshHasRows?',
+        1,
+    ).replace(
+        'else if(galleryError)status.textContent="\\u8bfb\\u53d6\\u5931\\u8d25\\uff1a"+galleryError;',
+        'else if(galleryError&&galleryPatches.length)status.textContent="\\u8bfb\\u53d6\\u5931\\u8d25\\uff1a"+galleryError;else if(galleryError)status.textContent="\\u8bfb\\u53d6\\u5931\\u8d25\\uff1a"+galleryError;',
+        1,
+    )
+    stable_gallery_renderer = stable_gallery_renderer.replace(
+        'card.__workshopPatchSave=actionButton("\\u4fdd\\u5b58\\u5230\\u4e0b\\u8f7d",()=>{});card.__workshopPatchSave.className="workshop-patch-save";',
+        'const save=actionButton("\\u4fdd\\u5b58\\u5230\\u4e0b\\u8f7d",()=>savePatchedApk(patch.path));save.className="workshop-patch-save";card.__workshopPatchSave=save;',
+        1,
+    )
+    gallery_renderer = stable_gallery_renderer
+    gallery_runtime = gallery_runtime[:gallery_render_start] + gallery_renderer + gallery_runtime[gallery_render_end:]
+    gallery_runtime = "const workshopGalleryRows=new Map,previousGalleryRows=new Map;" + gallery_runtime
+    gallery_delete_old = 'await window.Capacitor.Plugins.FileManager.deletePatchedApk({path});await loadPatches();return true'
+    gallery_delete_new = 'await window.Capacitor.Plugins.FileManager.deletePatchedApk({path});const row=typeof galleryShell!=="undefined"?[...(galleryShell?.querySelectorAll?.(".workshop-patch-row")||[])].find(item=>item.dataset.patchPath===path):null;if(typeof waitWorkshopRowExit==="function")await waitWorkshopRowExit(row);await loadPatches();return true'
+    if gallery_runtime.count(gallery_delete_old) != 1:
+        raise ValueError("gallery delete success signature not found")
+    gallery_runtime = gallery_runtime.replace(gallery_delete_old, gallery_delete_new, 1)
+    runtime = runtime[:gallery_start] + gallery_runtime + runtime[gallery_end:]
 
     session_key_old = 'const SETTINGS_KEY="slg-workshop-settings-v1";'
     session_key_new = 'const SETTINGS_KEY="slg-workshop-settings-v1";const SESSION_KEY="slg-workshop-session-v1";'
@@ -766,8 +1300,10 @@ function setReactInputValue(input,value)""",
 
     # --- overlay idle-state preservation ---
     overlay_helpers = (
-        'function beginOverlay(){manualIdleBeforeOverlay=manualIdle;manualIdle=true}'
-        'function endOverlay(){manualIdle=manualIdleBeforeOverlay}\n'
+        'function cancelOverlayExit(element){globalThis.__slg_overlayExitEpoch=(Number(globalThis.__slg_overlayExitEpoch)||0)+1;const timer=globalThis.__slgWorkshopOverlayTimer||0;if(timer){window.clearTimeout?.(timer);globalThis.__slgWorkshopOverlayTimer=0}if(element)element.classList?.remove?.("workshop-overlay-closing")}'
+        'function beginOverlay(){if(typeof cancelOverlayExit==="function"){cancelOverlayExit(settingsShell);cancelOverlayExit(galleryShell)}else{globalThis.__slg_overlayExitEpoch=(Number(globalThis.__slg_overlayExitEpoch)||0)+1}manualIdleBeforeOverlay=manualIdle;manualIdle=true}'
+        'function endOverlay(){manualIdle=manualIdleBeforeOverlay}'
+        'function animateWorkshopOverlayOut(element,after){if(!element){after?.();return}const epoch=(Number(globalThis.__slg_overlayExitEpoch)||0)+1;globalThis.__slg_overlayExitEpoch=epoch;if(typeof window==="undefined"||typeof window.setTimeout!=="function"||window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches===true){if(epoch===Number(globalThis.__slg_overlayExitEpoch))element.hidden=true;after?.();return}const prior=globalThis.__slgWorkshopOverlayTimer||0;if(prior)window.clearTimeout?.(prior);element.classList?.add?.("workshop-overlay-closing");let finished=false,timer=0;const finish=()=>{if(finished||epoch!==Number(globalThis.__slg_overlayExitEpoch))return;finished=true;if(globalThis.__slgWorkshopOverlayTimer===timer)globalThis.__slgWorkshopOverlayTimer=0;window.clearTimeout?.(timer);element.classList?.remove?.("workshop-overlay-closing");element.hidden=true;after?.()};timer=window.setTimeout(finish,220);globalThis.__slgWorkshopOverlayTimer=timer;element.addEventListener?.("animationend",finish,{once:true})}\n'
     )
     settings_close_old = 'function closeSettings(preserveHistory=false){settingsOpen=false;manualIdle=false;lastSnapshot="";'
     settings_close_new = 'function closeSettings(preserveHistory=false){settingsOpen=false;endOverlay();lastSnapshot="";'
@@ -779,13 +1315,13 @@ function setReactInputValue(input,value)""",
     if runtime.count(settings_open_old) != 1:
         raise ValueError("Settings open signature not found")
     runtime = runtime.replace(settings_open_old, settings_open_new, 1)
-    gallery_open_old = 'function openGallery(){armModalHistory();galleryOpen=true;manualIdle=true;'
-    gallery_open_new = 'function openGallery(){armModalHistory();beginOverlay();galleryOpen=true;'
+    gallery_open_old = 'function openGallery(){armModalHistory();beginOverlay();galleryOpen=true;'
+    gallery_open_new = gallery_open_old
     if runtime.count(gallery_open_old) != 1:
         raise ValueError("Gallery open signature not found")
     runtime = runtime.replace(gallery_open_old, gallery_open_new, 1)
-    gallery_close_old = 'function closeGallery(preserveHistory=false){galleryOpen=false;manualIdle=false;lastSnapshot="";'
-    gallery_close_new = 'function closeGallery(preserveHistory=false){galleryOpen=false;endOverlay();lastSnapshot="";'
+    gallery_close_old = 'function closeGallery(preserveHistory=false){galleryOpen=false;endOverlay();galleryListEpoch+=1;lastSnapshot="";'
+    gallery_close_new = gallery_close_old
     if runtime.count(gallery_close_old) != 1:
         raise ValueError("Gallery close signature not found")
     runtime = runtime.replace(gallery_close_old, gallery_close_new, 1)
@@ -890,8 +1426,8 @@ function setReactInputValue(input,value)""",
         raise ValueError("Mount source-button wait signature not found")
     runtime = runtime.replace(mount_wait_old, mount_wait_new, 1)
     runtime = enhance_local_runtime(runtime)
-    local_rejected_anchor = 'const map=new Map();const warnings=[];let failedBatches=0,splitBatches=0;'
-    local_rejected_replacement = 'const map=new Map();const warnings=[],rejected=[];let failedBatches=0,splitBatches=0;'
+    local_rejected_anchor = 'const map=new Map();const warnings=[];let failedBatches=0,splitBatches=0,totalBatches=Math.ceil(input.length/20);'
+    local_rejected_replacement = 'const map=new Map();const warnings=[],rejected=[];let failedBatches=0,splitBatches=0,totalBatches=Math.ceil(input.length/20);'
     if runtime.count(local_rejected_anchor) != 1:
         raise ValueError("Local translation result state signature not found")
     runtime = runtime.replace(local_rejected_anchor, local_rejected_replacement, 1)
@@ -923,6 +1459,75 @@ function setReactInputValue(input,value)""",
         1,
     ) + runtime[scan_retry_end:]
 
+    runtime = patch_task_runtime(runtime)
+    runtime = runtime.replace(
+        'if(sourceDialog)sourceDialog.hidden=true;if(!preserveHistory)releaseModalHistory();previousSourceFocus?.focus()',
+        'if(typeof animateWorkshopOverlayOut==="function")animateWorkshopOverlayOut(sourceDialog,()=>previousSourceFocus?.focus());else{if(sourceDialog)sourceDialog.hidden=true;previousSourceFocus?.focus()}if(!preserveHistory)releaseModalHistory()',
+        1,
+    )
+    runtime = runtime.replace(
+        'if(installedDialog){installedDialog.hidden=true;installedDialog.setAttribute("aria-busy","false")}',
+        'if(installedDialog){if(typeof animateWorkshopOverlayOut==="function")animateWorkshopOverlayOut(installedDialog);else installedDialog.hidden=true;installedDialog.setAttribute("aria-busy","false")}',
+        1,
+    )
+    runtime = runtime.replace(
+        'if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;',
+        'if(typeof cancelOverlayExit==="function")cancelOverlayExit(settingsShell);if(settingsShell)settingsShell.hidden=true;if(shell)shell.hidden=false;',
+        1,
+    )
+    runtime = runtime.replace(
+        'if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false;',
+        'if(typeof animateWorkshopOverlayOut==="function")animateWorkshopOverlayOut(galleryShell,()=>{if(shell)shell.hidden=false});else{if(galleryShell)galleryShell.hidden=true;if(shell)shell.hidden=false};',
+        1,
+    )
+    source_open_old = 'sourceDialog.hidden=false;if(modalHistoryClosing){modalHistoryClosing=false;modalHistoryRearm=false}'
+    source_open_new = 'if(typeof cancelOverlayExit==="function")cancelOverlayExit(sourceDialog);sourceDialog.hidden=false;if(modalHistoryClosing){modalHistoryClosing=false;modalHistoryRearm=false}'
+    if runtime.count(source_open_old) != 1:
+        raise ValueError("Source chooser open signature not found")
+    runtime = runtime.replace(source_open_old, source_open_new, 1)
+    installed_open_old = 'installedDialog.hidden=false;installedDialog.querySelector(".workshop-installed-search").value="";focusInstalledTarget();await loadInstalledApps()'
+    installed_open_new = 'if(typeof cancelOverlayExit==="function")cancelOverlayExit(installedDialog);installedDialog.hidden=false;installedDialog.querySelector(".workshop-installed-search").value="";focusInstalledTarget();await loadInstalledApps()'
+    if runtime.count(installed_open_old) != 1:
+        raise ValueError("Installed chooser open signature not found")
+    runtime = runtime.replace(installed_open_old, installed_open_new, 1)
+    runtime = runtime.replace(
+        'const ID="workshop-runtime";',
+        'globalThis.__slgWorkshopRuntimeTeardown?.();const ID="workshop-runtime";',
+        1,
+    )
+    registration_old = 'document.addEventListener("click",event=>{if(event.target.closest?.(".workshop-task-back"))manualIdle=true},{capture:true});observer=new MutationObserver(schedule);observer.observe(document.querySelector("#root")||document.documentElement,{childList:true,subtree:true,characterData:true});window.addEventListener("popstate",handleWorkshopPopState);document.readyState==="loading"?document.addEventListener("DOMContentLoaded",mount):mount()})();'
+    registration_new = (
+        'const workshopClickHandler=event=>{if(event.target.closest?.(".workshop-task-back"))manualIdle=true};'
+        'const workshopDomContentLoadedHandler=()=>mount();'
+        'const workshopTeardown=()=>{'
+        'if(debounceTimer){window.clearTimeout(debounceTimer);debounceTimer=0}'
+        'if(observerFrame){if(typeof window.cancelAnimationFrame==="function")window.cancelAnimationFrame(observerFrame);window.clearTimeout?.(observerFrame);observerFrame=0}'
+        'if(scanTimer){window.clearInterval(scanTimer);scanTimer=0}'
+        'if(scanInitialTimer){window.clearTimeout(scanInitialTimer);scanInitialTimer=0}'
+        'if(workshopFocusFrame){window.cancelAnimationFrame?.(workshopFocusFrame);window.clearTimeout?.(workshopFocusFrame);workshopFocusFrame=0}'
+        'if(workshopDetailFrame){window.cancelAnimationFrame?.(workshopDetailFrame);window.clearTimeout?.(workshopDetailFrame);workshopDetailFrame=0}'
+        'if(globalThis.__slgWorkshopFocusFrame){window.cancelAnimationFrame?.(globalThis.__slgWorkshopFocusFrame);window.clearTimeout?.(globalThis.__slgWorkshopFocusFrame);globalThis.__slgWorkshopFocusFrame=0}'
+        'if(globalThis.__slgWorkshopDetailFrame){window.cancelAnimationFrame?.(globalThis.__slgWorkshopDetailFrame);window.clearTimeout?.(globalThis.__slgWorkshopDetailFrame);globalThis.__slgWorkshopDetailFrame=0}'
+        'if(globalThis.__slgWorkshopMotionTimer){window.clearTimeout?.(globalThis.__slgWorkshopMotionTimer);globalThis.__slgWorkshopMotionTimer=0}'
+        'if(globalThis.__slgWorkshopOverlayTimer){window.clearTimeout?.(globalThis.__slgWorkshopOverlayTimer);globalThis.__slgWorkshopOverlayTimer=0}'
+        'const lock=globalThis.__slgWakeLock;globalThis.__slgWakeLock=null;globalThis.__slgWakeLockPending=false;if(lock){try{Promise.resolve(lock.release?.()).catch(()=>{})}catch{}}'
+        'globalThis.__slg_overlayExitEpoch=(Number(globalThis.__slg_overlayExitEpoch)||0)+1;'
+        'delete globalThis.__slgTaskRegions;delete globalThis.__slgLastWorkshopState;'
+        'if(observer){observer.disconnect();observer=null}'
+        'document.removeEventListener("click",workshopClickHandler,{capture:true});'
+        'window.removeEventListener("popstate",handleWorkshopPopState);'
+        'document.removeEventListener("DOMContentLoaded",workshopDomContentLoadedHandler);'
+        'delete globalThis.__slgWorkshopRuntimeTeardown};'
+        'globalThis.__slgWorkshopRuntimeTeardown=workshopTeardown;'
+        'document.addEventListener("click",workshopClickHandler,{capture:true});'
+        'observer=new MutationObserver(schedule);'
+        'observer.observe(document.querySelector("#root")||document.documentElement,{childList:true,subtree:true,characterData:true});'
+        'window.addEventListener("popstate",handleWorkshopPopState);'
+        'document.readyState==="loading"?document.addEventListener("DOMContentLoaded",workshopDomContentLoadedHandler):mount()})();'
+    )
+    if runtime.count(registration_old) != 1:
+        raise ValueError("Workshop runtime registration signature not found")
+    runtime = runtime.replace(registration_old, registration_new, 1)
     return runtime
 
 
@@ -980,6 +1585,7 @@ def patch_local_engine(js: str) -> str:
     if js.count(old_providers) != 1:
         raise ValueError("Local engine provider anchor not found")
     js = js.replace(old_providers, local_provider, 1)
+    js = _CORE_LOCAL_BRIDGE + js
 
     # Route batch translation to the local kernel when the workshop runtime
     # arms window.__slgLocalTranslate (local engine selected in settings).
@@ -988,13 +1594,18 @@ def patch_local_engine(js: str) -> str:
         "model:o,glossary:s,batchSize:c=jo,onProgress:l}=e;if(await Co(),t.length===0)"
     )
     local_branch = (
-        "if(globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl){let _engine=\"\";try{"
+        "if((globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl||globalThis.__slgLocalSelected||"
+        "Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).some(_s=>_s.value===\"local\")||"
+        "(()=>{try{return JSON.parse(globalThis.localStorage?.getItem?.(\"slg-workshop-settings-v1\")||\"null\")?.providerId===\"local\"}"
+        "catch(_x){return false}})())){let _engine=\"\";try{"
         "const _s=document.querySelector(\"#settingsProvider\");if(_s&&_s.value===\"local\"){"
         "const _m=document.querySelector(\"#settingsModel\");_engine=(_m&&_m.value===\"qwen\")?\"llm\":\"mlkit\"}}catch(_x){}"
+        "if(!_engine){try{const _s=Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).find(_x=>_x.value===\"local\");"
+        "if(_s)_engine=\"mlkit\"}catch(_x){}}"
         "if(!_engine){try{const _p=JSON.parse(localStorage.getItem(\"slg-workshop-settings-v1\")||\"null\");"
         "if(_p&&_p.providerId===\"local\")_engine=_p.model===\"qwen\"?\"llm\":\"mlkit\"}catch(_x){}}"
         "if(_engine){let _lr=null,_le=null;try{"
-        "_lr=await (globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl)("
+        "_lr=await (globalThis.__slgLocalTranslate||globalThis.__slgLocalTranslateImpl||globalThis.__slgCoreLocalTranslate)("
         "{texts:t,sourceLang:n,targetLang:r,onProgress:l,engine:_engine});"
         "_lr?.translations&&globalThis.__slgRecordTranslationCandidates?.(t,_lr.translations);"
         "_lr?.translations&&globalThis.__slgRecordValidatorApprovedTranslations?.(t,_lr.translations);"
@@ -1013,13 +1624,19 @@ def patch_local_engine(js: str) -> str:
     # skip its apiKey gate in that case. The workshop runtime keeps
     # window.__slgLocalSelected up to date.
     old_disabled = "disabled:se||!te&&!oe"
-    new_disabled = "disabled:se||(!te&&!oe&&!window.__slgLocalSelected)"
+    new_disabled = (
+        "disabled:se||(!te&&!oe&&!((window.__slgLocalSelected||"
+        "Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).some(_s=>_s.value===\"local\"))))"
+    )
     if js.count(old_disabled) != 1:
         raise ValueError("Local engine start-button disabled anchor not found")
     js = js.replace(old_disabled, new_disabled, 1)
 
     old_gate = "if(!n||ae.length===0||!te&&!oe)return;"
-    new_gate = "if(!n||ae.length===0||(!te&&!oe&&!window.__slgLocalSelected))return;"
+    new_gate = (
+        "if(!n||ae.length===0||(!te&&!oe&&!((window.__slgLocalSelected||"
+        "Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).some(_s=>_s.value===\"local\")))))return;"
+    )
     if js.count(old_gate) != 1:
         raise ValueError("Local engine controller gate anchor not found")
     js = js.replace(old_gate, new_gate, 1)
@@ -1118,17 +1735,17 @@ async function Lo(e){'''
     # directory before translating so a cleared cache cannot break patch builds.
     old_start = "Ce=async()=>{if(!n||ae.length===0||!te&&!oe)return;"
     new_start = (
-        "Ce=async()=>{globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
+        "Ce=async()=>{globalThis.__slgTrimTranslationDiagnostics?.({reset:true});globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
-        "_r?.uri&&(window.__slgSelectionMeta.uri=_r.uri);"
-        "if(_r?.uri){window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r),window.__slgSelectionMeta.uri=_r.uri}}"
+        "if(_r?.uri){window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r),persistSelectionSession(window.__slgSelectionMeta)}}"
         "catch(_e){O(`\u91cd\u65b0\u83b7\u53d6\u6e38\u620f\u5b89\u88c5\u5305\u5931\u8d25: ${_e&&_e.message||_e}`,\u0060error\u0060)}"
-        "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgMenuInjectedForRefresh){try{"
+        "if(!window.__slgMenuInjectedForRefresh){try{"
         "const _m=await E.injectTranslatorMenu({apkUri:window.__slgSelectionMeta?.uri||n,gameTargetLang:window.__slgRenpyLang||'',translatorLang:'slgtranslated'});"
-        "window.__slgTranslatorLang=(_m&&_m.ready)?'slgtranslated':'';"
-        "window.__slgActivationMode=(_m&&_m.ready)?`selectable`:`always_on`;"
-        "if(_m&&_m.ready)window.__slgMenuInjectedForRefresh=true}catch{window.__slgTranslatorLang='';window.__slgActivationMode=`always_on`}}"
+        "if(_m?.resolvedApkUri){window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,{uri:_m.resolvedApkUri,baseUri:_m.resolvedApkUri}),persistSelectionSession(window.__slgSelectionMeta)}"
+        "window.__slgTranslatorLang=window.__slgRenpyMenuType===`renpy`&&_m&&_m.ready?'slgtranslated':'';"
+        "window.__slgActivationMode=window.__slgRenpyMenuType===`renpy`&&_m&&_m.ready?`selectable`:`always_on`;"
+        "if(_m&&(_m.ready||_m.resolvedApkUri||window.__slgRenpyMenuType!==`renpy`))window.__slgMenuInjectedForRefresh=true}catch{window.__slgTranslatorLang='';window.__slgActivationMode=`always_on`}}"
         "}"
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgFontPreflightDone){"
         "let _fontTarget=ae.find(_x=>_x.fileType===`rpyc`||_x.fileType===`rpymc`||/\\.rp(?:y|ym)c$/i.test(String(_x.name||``)));"
@@ -1143,7 +1760,7 @@ async function Lo(e){'''
         "let _cr=window.__slgRenpyCompatibilityReport;"
         "if(!_cr){window.__slgRenpyCompatibilityBlocked=true;O(`Ren'Py 兼容性预检失败：扫描器没有返回兼容性报告，已阻断模型调用。`,`error`);ce(!1);return}"
         "window.__slgRenpyCompatibilityReport=_cr;window.__slgRenpyCompatibilityBlocked=_cr.supportLevel===`UNSUPPORTED`||_cr.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`;"
-        "globalThis.__slgRenderRenpyCompatibilityReport?.(_cr);"
+        "if(typeof globalThis.__slgRenderRenpyCompatibilityReport===\"function\"){try{globalThis.__slgRenderRenpyCompatibilityReport(_cr)}catch{}}"
         "if(window.__slgRenpyCompatibilityBlocked){O(`Ren'Py 兼容性预检失败：${(_cr.issues||[]).map(_i=>_i.code).slice(0,3).join(`,`)||`unsupported`}`,`error`);ce(!1);return}"
         "window.__slgRenpyCompatibilityPreflightDone=true}"
     )
@@ -1154,13 +1771,14 @@ async function Lo(e){'''
     # Read and build from the refreshed meta uri when present.
     old_read = "E.readFileContent({uri:n,entryName:o.name})"
     new_read = (
-        "o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}).then(_r=>{"
-        "globalThis.__slgCoverageRecords=(globalThis.__slgCoverageRecords||[]).concat((_r&&_r.renpyRecords)||[]);"
+        "(o.fileType===`rpyc`?await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}).then(_r=>{"
+        "let _p=rpycContentFromRecords((_r&&_r.renpyRecords)||[]),_result=Object.assign({},_r,{content:_p});_p=null;"
+        "globalThis.__slgAppendCoverageRecords?.((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgRegisterDialogueRecords?.((_r&&_r.renpyRecords)||[]);"
         "globalThis.__slgCoverageClassifications=Object.assign({},globalThis.__slgCoverageClassifications||{},(_r&&_r.coverageClassifications)||{});"
         "globalThis.__slgAccumulateRenpyCompatibility?.((_r&&_r.renpyRecords)||[]);"
-        "globalThis.__slgRefreshTranslationCoverage?.();return _r}):"
-        "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name})"
+        "globalThis.__slgRefreshTranslationCoverage?.();return _result}):"
+        "await E.readFileContent({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:o.sourceApk||'',entryName:o.name}))"
     )
     if js.count(old_read) != 1:
         raise ValueError("Read file uri signature not found")
@@ -1175,7 +1793,7 @@ async function Lo(e){'''
         "splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],"
         "apkSet:window.__slgSelectionMeta?.apkSet||null,"
         "dialogueIdMode:!!window.__slgDialogueIdMode,dialogueTranslations:window.__slgDialogueIdTranslations||[],"
-        "files:(()=>{const _f=a.filter(_x=>{let _p=String(_x.path);return !_p.includes(`/tl/`)&&!_p.includes(`x-slgtranslated`)});return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
+        "files:(()=>{const _f=a.filter(_x=>{let _p=String(_x.path).replace(/\\\\/g,`/`).toLowerCase();return !_p.includes(`/tl/`)&&!_p.includes(`/x-tl/`)&&!_p.includes(`x-slgtranslated`)});return _f.length?_f:[{path:'assets/slg-translator-marker.txt',content:''}]})(),"
         "outputDirUri:m,outputName:Me(i),"
         "targetRenpyLanguage:window.__slgCompiledCount>0?'':is(y),sourceRenpyLanguage:window.__slgCompiledCount>0?'':is(g)}"
     )
@@ -1248,7 +1866,7 @@ async function Lo(e){'''
         'return N},2);if(!N&&(a.length>0||oe)){globalThis.__slgRefreshTranslationCoverage?.();'
         'let _coverage=globalThis.__slgBuildCoverage;if(_coverage&&(_coverage.missingCount>0||_coverage.rejectedCount>0)){'
         'if(!globalThis.__slgIncompleteTestPatchSelected){O(`coverage incomplete：缺失或拒绝的翻译仍未处理，已阻断完整构建`,`warning`);return N}'
-        'O(`incomplete test patch：覆盖率不足，仅生成不完整测试补丁，不能宣称完整翻译`,`warning`)}'
+        'O(`incomplete test patch：覆盖率不足，仅生成不完整测试补丁，不能宣称完整翻译`,`warning`)}globalThis.__slgTrimTranslationDiagnostics?.();'
     )
     build_gate_compiled = build_gate_compiled.replace(
         'return N},2);if(!N&&(a.length>0||oe)){', coverage_gate, 1
@@ -1368,8 +1986,7 @@ def patch_translation_memory(js: str) -> str:
         "let _snap={};for(const[_k,_v]of Object.entries(_dirty))_snap[_k]=_v;for(const[_k,_v]of Object.entries(vo)){"
         "if(_k.startsWith(`slg-file-v1:`))_snap[_k]=_v}let _e=JSON.stringify(_snap);"
         "try{await E.saveTranslationCache({data:_e});for(const _k of Object.keys(_snap)){if(_k.startsWith(_o))delete _dirty[_k]}}catch(e){bo=!0;globalThis.__slgCacheDbg.errors++;globalThis.__slgCacheDbg.lastError='save:'+(e&&e.message||e)}"
-        "_saveBusy=!1,_lastSaveAt=Date.now();if(_saveAgain)await new Promise(r=>setTimeout(r,1500))}while(_saveAgain);"
-        "for(let _pk of Object.keys(vo)){if(_pk.startsWith(`slg-file-v1:`))delete vo[_pk]}}"
+        "_saveBusy=!1,_lastSaveAt=Date.now();if(_saveAgain)await new Promise(r=>setTimeout(r,1500))}while(_saveAgain)}"
     )
     if js.count(old_save) != 1:
         raise ValueError("Translation cache save signature not found")
@@ -1404,8 +2021,11 @@ def patch_rpyc_string_pipeline(js: str) -> str:
         "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12).trim();"
         "!He(e,n)||i.has(e)||(i.add(e),r.push({keyPath:`${t}rpyc_string_${a++}`,text:e}))}return r}"
     )
+    rpyc_records_helper = r'''function rpycContentFromRecords(e){let t="",n="RPYC_STRING\t",r="\n";for(const i of e||[]){let e=String(i?.text??"");if(!e.trim())continue;e=e.replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/\r/g,"\\r").replace(/\t/g,"\\t"),t+=n+e+r}return t}
+'''
     new_ne = (
-        "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
+        rpyc_records_helper
+        + "function Ne(e,t=``,n){let r=[],i=new Set,a=0;for(let o of e.split(`\n`)){"
         "if(!o.startsWith(`RPYC_STRING\t`))continue;let e=o.slice(12);"
         "if(!e.trim())continue;"
         "e=e.replace("
@@ -1493,7 +2113,7 @@ def patch_speed_tuning(js: str) -> str:
         raise ValueError("File task concurrency signature not found")
     js = js.replace(old_parallel, new_parallel, 1)
     old_call = 'return N},2);if(!N&&(a.length>0||oe)){'
-    new_call = 'return N},(window.__slgLocalSelected?2:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){'
+    new_call = 'return N},(window.__slgLocalSelected?1:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){'
     if js.count(old_call) != 1:
         raise ValueError("File controller concurrency call signature not found")
     js = js.replace(old_call, new_call, 1)
@@ -1591,7 +2211,7 @@ def patch_candidate_filter(js: str) -> str:
     js = js.replace(old_jo, new_jo, 1)
 
     old_yb = "{let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:Zo(r,n)}"
-    new_yb = "{let q=Qo(r);if(q!=null){let l=es(q);if(l===`slgtranslated`)return!1;if(l===`none`)return!0;let _s=globalThis.__slgSrcLang||`en`;return $o(_s).has(l)?!0:!1}let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
+    new_yb = "{let q=Qo(r);if(q!=null){if(/(?:^|\\/)x-slgtranslator-[^/]+\\.rpyc?$/i.test(r))return!1;let l=es(q);if(l===`slgtranslated`)return!1;if(l===`none`)return!0;let _s=globalThis.__slgSrcLang||`en`;return $o(_s).has(l)?!0:!1}let e=(r.split(`/`).pop()||``).replace(/\\.[^/.]+$/,``);return _rpycSkip.test(e)?!1:!0}"
     if js.count(old_yb) != 1:
         raise ValueError("Candidate filter Yo branch signature not found")
     js = js.replace(old_yb, new_yb, 1)
@@ -1698,9 +2318,8 @@ Return only JSON: {"translations":["..."]}`),i}'''
     vo_collision_replacement = (
         "async function Vo(e,t,n,r,i,a,o){let _collisionBatch=(n||[]).map(e=>({exactOld:String(e.text??e.protectedText?.text??``),"
         "speaker:String(e.speaker??``),identifier:String(e.identifier??``),kind:String(e.kind??``),"
-        "sourcePath:String(e.keyPath??``).split(`::`)[0]})),_collisionEntries=(globalThis.__slgTranslationCollisionEntries||[]).concat(_collisionBatch);"
-        "globalThis.__slgTranslationCollisionEntries=_collisionEntries;"
-        "globalThis.__slgTranslationCollisionReport?.(_collisionEntries);"
+        "sourcePath:String(e.keyPath??``).split(`::`)[0]}));"
+        "globalThis.__slgAppendCollisionRecords?.(_collisionBatch);"
         "let s=new Map,c=Go(r,i,a,o),"
     )
     if new_vo.count(vo_collision_prefix) != 1:
@@ -1727,6 +2346,12 @@ Return only JSON: {"translations":["..."]}`),i}'''
     collision_report = r'''
 (function(){/* up to 3 representative contexts */const root=typeof window!==`undefined`?window:globalThis;function sanitize(e){return{old:String(e?.old??e?.exactOld??``),speaker:String(e?.speaker??``),identifier:String(e?.identifier??``),kind:String(e?.kind??``),sourcePath:String(e?.sourcePath??``)}}function render(report){if(typeof document===`undefined`)return;const host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;let panel=document.getElementById(`slg-translation-collision-report`);if(!panel){panel=document.createElement(`section`);panel.id=`slg-translation-collision-report`;panel.className=`workshop-translation-collision-report`;panel.style.cssText=`margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,#d97706 40%,transparent);border-radius:12px;background:color-mix(in srgb,#d97706 8%,transparent)`;host.append(panel)}panel.hidden=false;panel.replaceChildren();const title=document.createElement(`h3`);title.textContent=`翻译语境诊断`;const summary=document.createElement(`p`);summary.textContent=`唯一原文 ${report.uniqueOldCount} · 总出现 ${report.occurrenceCount} · 重复条目 ${report.duplicateCount} · 语境碰撞 ${report.collisionCount}`;const exportButton=document.createElement(`button`);exportButton.type=`button`;exportButton.textContent=`导出碰撞 JSON`;exportButton.onclick=()=>{const blob=new Blob([root.__slgTranslationCollisionReportJson||JSON.stringify(report)],{type:`application/json`}),url=URL.createObjectURL(blob),a=document.createElement(`a`);a.href=url;a.download=`renpy-translation-collisions.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),0)};const list=document.createElement(`div`);for(const item of report.entries.slice(0,20)){const row=document.createElement(`article`),old=document.createElement(`strong`),meta=document.createElement(`div`);old.textContent=item.old;meta.textContent=`出现 ${item.occurrenceCount} 次 · 重复 ${item.duplicateCount} · 语境碰撞 ${item.contextualCollision?`是`:`否`}`;row.append(old,meta);for(const context of item.contexts){const detail=document.createElement(`small`);detail.textContent=context;row.append(detail)}list.append(row)}panel.append(title,summary,exportButton,list)}function translationCollisionReport(entries){let m=new Map;for(const entry of entries||[]){const item=sanitize(entry),group=m.get(item.old)||{old:item.old,occurrences:0,contexts:new Map};group.occurrences++;const key=[item.speaker,item.identifier,item.kind,item.sourcePath].join(`\u0000`);if(!group.contexts.has(key))group.contexts.set(key,`${item.sourcePath}:${item.speaker||`无说话人`} · ${item.kind}${item.identifier?` · ${item.identifier}`:``}`);m.set(item.old,group)}const rows=Array.from(m.values()).map(group=>({old:group.old,occurrenceCount:group.occurrences,duplicateCount:Math.max(0,group.occurrences-1),contextualCollision:group.contexts.size>1,contexts:Array.from(group.contexts.values()).slice(0,3)})),report={uniqueOldCount:rows.length,occurrenceCount:rows.reduce((sum,item)=>sum+item.occurrenceCount,0),duplicateCount:rows.filter(item=>item.duplicateCount>0).length,collisionCount:rows.filter(item=>item.contextualCollision).length,entries:rows};root.__slgTranslationCollisionReportData=report;root.__slgTranslationCollisionReportJson=JSON.stringify(report);render(report);return report}function reset(){root.__slgTranslationCollisionEntries=[];root.__slgTranslationCollisionReportData=null;root.__slgTranslationCollisionReportJson=``;const panel=typeof document!==`undefined`?document.getElementById(`slg-translation-collision-report`):null;if(panel)panel.hidden=true}function rejectTranslationCollisions(pairs){const seen=new Map;for(const pair of pairs||[]){const old=String(pair?.old??pair?.[0]??``),next=String(pair?.new??pair?.[1]??``);if(seen.has(old)&&seen.get(old)!==next)throw Error(`translation_collision_conflict: conflicting translations for ${old}`);seen.set(old,next)}}root.__slgTranslationCollisionReport=translationCollisionReport;root.__slgRejectTranslationCollisions=rejectTranslationCollisions;root.__slgResetTranslationCollisionReport=reset})()
 '''
+    collision_compact_runtime = r'''const MAX_COLLISION_GROUPS=20000,MAX_COLLISION_CONTEXTS=3;function contextLabel(value){if(typeof value==="string")return value;const item=sanitize(value);return String(item.sourcePath)+":"+String(item.speaker||"无说话人")+" · "+String(item.kind)+(item.identifier?" · "+String(item.identifier):"")}function compactTranslationCollisionReport(entries){const groups=new Map;for(const entry of entries||[]){const item=sanitize(entry),old=item.old;if(!old)continue;let group=groups.get(old);if(!group)groups.set(old,group={old,occurrences:0,contexts:new Set});group.occurrences+=Math.max(1,Number(entry?.occurrenceCount)||1);const contexts=Array.isArray(entry?.contexts)&&entry.contexts.length?entry.contexts:[entry];for(const context of contexts){const label=contextLabel(context);if(label)group.contexts.add(label);if(group.contexts.size>=MAX_COLLISION_CONTEXTS)break}}const rows=Array.from(groups.values()).map(group=>({old:group.old,occurrenceCount:group.occurrences,duplicateCount:Math.max(0,group.occurrences-1),contextualCollision:group.contexts.size>1,contexts:Array.from(group.contexts).slice(0,MAX_COLLISION_CONTEXTS)})),report={uniqueOldCount:rows.length,occurrenceCount:rows.reduce((sum,item)=>sum+item.occurrenceCount,0),duplicateCount:rows.filter(item=>item.duplicateCount>0).length,collisionCount:rows.filter(item=>item.contextualCollision).length,entries:rows};root.__slgTranslationCollisionReportData=report;root.__slgTranslationCollisionReportJson=JSON.stringify(report);render(report);return report}function appendCollisionRecords(entries){const groups=root.__slgTranslationCollisionGroups instanceof Map?root.__slgTranslationCollisionGroups:new Map;let dropped=0;for(const entry of entries||[]){const item=sanitize(entry),old=item.old;if(!old)continue;let group=groups.get(old);if(!group){if(groups.size>=MAX_COLLISION_GROUPS){dropped+=1;continue}group={old,occurrences:0,contexts:new Map};groups.set(old,group)}group.occurrences+=Math.max(1,Number(entry?.occurrenceCount)||1);const key=[item.speaker,item.identifier,item.kind,item.sourcePath].join("\u0000");if(!group.contexts.has(key)&&group.contexts.size<MAX_COLLISION_CONTEXTS)group.contexts.set(key,contextLabel(item))}root.__slgTranslationCollisionGroups=groups;root.__slgTranslationCollisionDroppedCount=(Number(root.__slgTranslationCollisionDroppedCount)||0)+dropped;root.__slgTranslationCollisionEntries=Array.from(groups.values()).map(group=>({old:group.old,occurrenceCount:group.occurrences,contexts:Array.from(group.contexts.values()).slice(0,MAX_COLLISION_CONTEXTS)}));root.__slgTranslationCollisionReport?.(root.__slgTranslationCollisionEntries);return root.__slgTranslationCollisionEntries}root.__slgTranslationCollisionReport=compactTranslationCollisionReport;root.__slgAppendCollisionRecords=appendCollisionRecords;root.__slgRejectTranslationCollisions=rejectTranslationCollisions;root.__slgResetTranslationCollisionReport=()=>{root.__slgTranslationCollisionEntries=[];root.__slgTranslationCollisionGroups=new Map;root.__slgTranslationCollisionDroppedCount=0;root.__slgTranslationCollisionReportData=null;root.__slgTranslationCollisionReportJson="";const panel=typeof document!=="undefined"?document.getElementById("slg-translation-collision-report"):null;if(panel)panel.hidden=true}'''
+    collision_report = collision_report.replace(
+        "root.__slgTranslationCollisionReport=translationCollisionReport;root.__slgRejectTranslationCollisions=rejectTranslationCollisions;root.__slgResetTranslationCollisionReport=reset",
+        collision_compact_runtime,
+        1,
+    )
     coverage_report = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;
 function asMap(value){return value instanceof Map?value:new Map(Object.entries(value||{}))}
@@ -1744,13 +2369,47 @@ root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations|
     # silently turned into missing coverage or a fabricated zero.
     coverage_report = coverage_report.replace("else{missingCount++;", "else if(!group.uncertain){missingCount++;")
     coverage_report = coverage_report.replace("else file.missingCount++;", "else if(!group.uncertain)file.missingCount++;")
+    coverage_compact_runtime = r'''const MAX_COVERAGE_RECORDS=50000;function coverageParts(raw){const old=exact(raw?.exactOld??raw?.text),path=exact(raw?.sourcePath??String(raw?.keyPath??"").split("::")[0]);return{old,path}}function appendCoverageRecords(records){let map=root.__slgCoverageRecordMap instanceof Map?root.__slgCoverageRecordMap:new Map,existing=Array.isArray(root.__slgCoverageRecords)?root.__slgCoverageRecords:[],list=existing;if(!(root.__slgCoverageRecordMap instanceof Map)){map=new Map;for(const prior of existing){const part=coverageParts(prior);if(!part.old)continue;const key=part.path+"\t"+part.old,count=Math.max(1,Number(prior?.occurrenceCount)||1),current=map.get(key);if(current)current.occurrenceCount=(Number(current.occurrenceCount)||1)+count;else map.set(key,{...prior,exactOld:part.old,text:prior?.text??part.old,sourcePath:part.path,occurrenceCount:count})}list=Array.from(map.values())}let dropped=0;for(const raw of records||[]){const part=coverageParts(raw);if(!part.old)continue;const key=part.path+"\t"+part.old,count=Math.max(1,Number(raw?.occurrenceCount)||1),current=map.get(key);if(current){current.occurrenceCount=(Number(current.occurrenceCount)||1)+count;if(raw?.coverageCertain===false)current.coverageCertain=false;continue}if(map.size>=MAX_COVERAGE_RECORDS){dropped+=count;continue}const compact={...raw,exactOld:part.old,text:raw?.text??part.old,sourcePath:part.path,occurrenceCount:count};map.set(key,compact);list.push(compact)}root.__slgCoverageRecordMap=map;root.__slgCoverageRecords=list;root.__slgCoverageDroppedCount=(Number(root.__slgCoverageDroppedCount)||0)+dropped;root.__slgTranslationCoverageDiagnosticsTruncated=Number(root.__slgCoverageDroppedCount)>0;root.__slgRefreshTranslationCoverage?.();return{accepted:list.length,dropped}}root.__slgAppendCoverageRecords=appendCoverageRecords;root.__slgCoverageRecordMap=root.__slgCoverageRecordMap instanceof Map?root.__slgCoverageRecordMap:new Map;'''
+    coverage_report = coverage_report.replace(
+        "function incremental(values,validated,failed,retry){",
+        coverage_compact_runtime + "function incremental(values,validated,failed,retry){",
+        1,
+    )
+    coverage_report = coverage_report.replace(
+        "for(const raw of records||[]){",
+        "for(const raw of records||[]){const occurrenceCount=Math.max(1,Number(raw?.occurrenceCount)||1);",
+        1,
+    )
+    coverage_report = coverage_report.replace(
+        "group.occurrences++;",
+        "group.occurrences+=occurrenceCount;",
+        1,
+    )
+    coverage_report = coverage_report.replace(
+        "file.occurrences++}",
+        "file.occurrences+=occurrenceCount}",
+        1,
+    )
+    coverage_report = coverage_report.replace(
+        "blocking:missingCount>0||rejectedCount>0",
+        "blocking:missingCount>0||rejectedCount>0||Number(root.__slgCoverageDroppedCount||0)>0,diagnosticsTruncated:Number(root.__slgCoverageDroppedCount||0)>0,diagnosticsDroppedCount:Number(root.__slgCoverageDroppedCount||0)",
+        1,
+    )
     coverage_runtime_fix = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;function exact(value){return String(value??``)}root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{const map=translations instanceof Map?translations:null;for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text),value=map?.get(i)??map?.get(item.keyPath)??map?.get(item.text)??translations?.[item.keyPath]??translations?.[item.text]??translations?.[i];if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=exact(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgResetTranslationCoverage=()=>{root.__slgCoverageRecords=[];root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgIncompleteTestPatchSelected=false;root.__slgRefreshTranslationCoverage?.()}})()
 '''
     coverage_runtime_fix_v2 = r'''
 (function(){const root=typeof window!==`undefined`?window:globalThis;function exact(value){return String(value??``)}function lookup(items,translations,index){const item=items[index]||{},map=translations instanceof Map?translations:null;return map?.get(index)??map?.get(item.keyPath)??map?.get(item.text)??translations?.[item.keyPath]??translations?.[item.text]??translations?.[index]}root.__slgRecordTranslationCandidates=(items,translations)=>{const candidateMap=root.__slgTranslationCollisionCandidates instanceof Map?root.__slgTranslationCollisionCandidates:new Map(Object.entries(root.__slgTranslationCollisionCandidates||{}));for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text);let value=lookup(items,translations,i);if(!old||!value||!String(value).trim())continue;let values=candidateMap.get(old)||[];value=String(value);if(!values.includes(value))values.push(value);candidateMap.set(old,values)}root.__slgTranslationCollisionCandidates=candidateMap;root.__slgRefreshTranslationCoverage?.()};root.__slgRecordValidatorApprovedTranslations=(items,translations)=>{root.__slgRecordTranslationCandidates?.(items,translations);for(let i=0;i<(items||[]).length;i++){const item=items[i]||{},old=exact(item.text),value=lookup(items,translations,i);if(old&&value&&String(value).trim())root.__slgValidatorApprovedTranslations.set(old,String(value))}root.__slgRefreshTranslationCoverage?.()};root.__slgRecordRejectedTranslations=items=>{for(const item of items||[]){const old=exact(item?.old??item?.exactOld??item);if(old)root.__slgRejectedTranslations.add(old)}root.__slgRefreshTranslationCoverage?.()};root.__slgResetTranslationCoverage=()=>{root.__slgCoverageRecords=[];root.__slgCoverageUncertain=[];root.__slgCoverageClassifications={};root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgTranslationCollisionCandidates=new Map;root.__slgTranslationCollisionEntries=[];root.__slgIncompleteTestPatchSelected=false;root.__slgRefreshTranslationCoverage?.()}})()
 '''
-    js += collision_report + coverage_report + coverage_runtime_fix + coverage_runtime_fix_v2
+    coverage_runtime_fix_v2 = coverage_runtime_fix_v2.replace(
+        "root.__slgCoverageRecords=[];root.__slgCoverageUncertain=[];",
+        "root.__slgCoverageRecords=[];root.__slgCoverageRecordMap=new Map;root.__slgCoverageDroppedCount=0;root.__slgCoverageUncertain=[];",
+        1,
+    )
+    js += "".join(
+        terminate_top_level_iife(block)
+        for block in (collision_report, coverage_report, coverage_runtime_fix, coverage_runtime_fix_v2)
+    )
     return js
 
 
@@ -1789,6 +2448,23 @@ def patch_cache_memory(js: str) -> str:
         raise ValueError("wo save point signature not found")
     js = js.replace(old_save, new_save, 1)
     return js
+
+
+def patch_translation_diagnostics(js: str) -> str:
+    # Keep the small coverage summary needed by the UI while releasing the
+    # per-record collections that grow with every scanned script.
+    diagnostics_runtime = r'''globalThis.__slgTrimTranslationDiagnostics=globalThis.__slgTrimTranslationDiagnostics||function(options={}){const root=typeof window!==`undefined`?window:globalThis,reset=options?.reset===true,report=root.__slgTranslationCoverageReport,reportJson=root.__slgTranslationCoverageReportJson,build=root.__slgBuildCoverage;root.__slgCoverageRecords=[];root.__slgCoverageUncertain=[];root.__slgCoverageClassifications={};root.__slgRenpyCompatibilityRecords=[];root.__slgTranslationCollisionEntries=[];root.__slgTranslationCollisionCandidates=new Map;root.__slgValidatorApprovedTranslations=new Map;root.__slgRejectedTranslations=new Set;root.__slgTranslationCoverageIncrementalDiff=[];root.__slgTranslationCollisionReportData=null;root.__slgTranslationCollisionReportJson=``;if(reset){root.__slgTranslationCoverageReport=null;root.__slgTranslationCoverageReportJson=``;root.__slgBuildCoverage=null;root.__slgIncompleteTestPatch=false;root.__slgIncompleteTestPatchSelected=false}else{root.__slgTranslationCoverageReport=report;root.__slgTranslationCoverageReportJson=reportJson;root.__slgBuildCoverage=build||report}return root.__slgTranslationCoverageReport}
+'''
+    diagnostics_runtime = diagnostics_runtime.replace(
+        "root.__slgCoverageRecords=[];root.__slgCoverageUncertain=[];root.__slgCoverageClassifications={};",
+        "root.__slgCoverageRecords=[];root.__slgCoverageRecordMap=new Map;root.__slgCoverageDroppedCount=0;root.__slgCoverageUncertain=[];root.__slgCoverageClassifications={};",
+        1,
+    ).replace(
+        "root.__slgRenpyCompatibilityRecords=[];root.__slgTranslationCollisionEntries=[];root.__slgTranslationCollisionCandidates=new Map;",
+        "root.__slgRenpyCompatibilityRecords=[];root.__slgCompatibilityRecordMap=new Map;root.__slgRenpyCompatibilityDroppedCount=0;root.__slgTranslationCollisionEntries=[];root.__slgTranslationCollisionGroups=new Map;root.__slgTranslationCollisionDroppedCount=0;root.__slgTranslationCollisionCandidates=new Map;",
+        1,
+    )
+    return js + diagnostics_runtime
 
 def _verify_digest(data: bytes, expected: str, label: str) -> None:
     actual = hashlib.sha256(data).hexdigest()
@@ -1831,9 +2507,23 @@ function sanitize(report){const r=report&&typeof report===`object`?report:{},rp=
 function sanitizedJson(report){return JSON.stringify(sanitize(report))}
 function accumulate(records){const all=root.__slgRenpyCompatibilityRecords||[];for(const record of records||[]){if(record&&typeof record===`object`)all.push(record)}const unique=new Set,contexts=new Map;for(const record of all){const old=text(record?.text);if(!old)continue;unique.add(old);let set=contexts.get(old)||new Set;set.add([text(record?.speaker),text(record?.identifier),text(record?.kind),text(record?.sourcePath)].join(`\u0000`));contexts.set(old,set)}let collision=0;for(const set of contexts.values())if(set.size>1)collision++;root.__slgRenpyCompatibilityRecords=all;const current=root.__slgRenpyCompatibilityReport;if(current){root.__slgRenpyCompatibilityReport=Object.assign({},current,{uniqueTextCount:unique.size,occurrenceCount:all.filter(record=>text(record?.text)).length,collisionCount:collision});root.__slgRenpyCompatibilityReportJson=sanitizedJson(root.__slgRenpyCompatibilityReport);render(root.__slgRenpyCompatibilityReport)}}
 function render(report){if(typeof document===`undefined`)return;const safe=sanitize(report),host=document.querySelector(`#root>div`)||document.querySelector(`#root`);if(!host)return;let panel=document.getElementById(`slg-renpy-compatibility-report`);if(!panel){panel=document.createElement(`section`);panel.id=`slg-renpy-compatibility-report`;panel.className=`workshop-renpy-compatibility-report`;panel.style.cssText=`margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,#2563eb 30%,transparent);border-radius:12px;background:color-mix(in srgb,#2563eb 6%,transparent)`;host.append(panel)}panel.hidden=false;panel.replaceChildren();const title=document.createElement(`h3`);title.textContent=`Ren'Py 兼容性预检`;const list=document.createElement(`dl`);const add=(label,value)=>{const row=document.createElement(`div`),dt=document.createElement(`dt`),dd=document.createElement(`dd`);dt.textContent=label;dd.textContent=typeof value===`string`?value:JSON.stringify(value);row.append(dt,dd);list.append(row)};add(`支持等级`,safe.supportLevel);add(`激活策略`,safe.activationStrategy);add(`脚本格式/槽位`,report?.rpyc?`${text(report.rpyc.container)} / ${Number(report.rpyc.preferredSlot)||0}`:`未识别`);add(`模板路径`,safe.templatePath||`未识别`);add(`RPA 版本/数量`,`${safe.rpaCount}`);add(`Split 数量`,`${safe.splitCount}`);add(`语言桶`,safe.languageBuckets.join(`, `)||`无`);add(`菜单类型`,safe.menuType);add(`字体覆盖`,safe.font?`${safe.font.coveredCount}/${safe.font.requiredCount}`:`未返回`);add(`唯一文本/总出现/碰撞`,`${safe.uniqueTextCount} / ${safe.occurrenceCount} / ${safe.collisionCount}`);add(`阻断原因`,safe.issues.map(i=>i.code).join(`, `)||`无`);const exportButton=document.createElement(`button`);exportButton.type=`button`;exportButton.textContent=`导出兼容性 JSON`;exportButton.onclick=()=>{const blob=new Blob([sanitizedJson(safe)],{type:`application/json`}),url=URL.createObjectURL(blob),a=document.createElement(`a`);a.href=url;a.download=`renpy-compatibility-report.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),0)};panel.append(title,list,exportButton)}
-root.__slgSanitizeRenpyCompatibilityReport=sanitize;root.__slgRenpyCompatibilitySanitizedJson=sanitizedJson;root.__slgAccumulateRenpyCompatibility=accumulate;root.__slgRenderRenpyCompatibilityReport=report=>{const safe=sanitize(report);root.__slgRenpyCompatibilityReport=safe;root.__slgRenpyCompatibilityReportJson=sanitizedJson(safe);render(safe);return safe};if(root.__slgRenpyCompatibilityReport)root.__slgRenderRenpyCompatibilityReport(root.__slgRenpyCompatibilityReport)})()
+root.__slgSanitizeRenpyCompatibilityReport=sanitize;root.__slgRenpyCompatibilitySanitizedJson=sanitizedJson;root.__slgAccumulateRenpyCompatibility=accumulate;root.__slgRenderRenpyCompatibilityReport=report=>{const safe=sanitize(report);root.__slgRenpyCompatibilityReport=safe;root.__slgRenpyCompatibilityReportJson=sanitizedJson(safe);render(safe);return safe};if(root.__slgRenpyCompatibilityReport&&typeof root.__slgRenderRenpyCompatibilityReport==="function"){try{root.__slgRenderRenpyCompatibilityReport(root.__slgRenpyCompatibilityReport)}catch{}}})()
 '''
 
+
+def _install_compatibility_compact_runtime():
+    global compatibility_report_runtime
+    compatibility_compact_runtime = r'''const MAX_COMPATIBILITY_RECORDS=50000,MAX_COMPATIBILITY_CONTEXTS=3;function compatibilityContext(value){if(typeof value==="string")return value;const item=value||{};return [text(item.speaker),text(item.identifier),text(item.kind),text(item.sourcePath)].join("\u0000")}function appendCompatibilityRecords(records){let groups=root.__slgCompatibilityRecordMap instanceof Map?root.__slgCompatibilityRecordMap:new Map,existing=Array.isArray(root.__slgRenpyCompatibilityRecords)?root.__slgRenpyCompatibilityRecords:[],list=[];if(!(root.__slgCompatibilityRecordMap instanceof Map)){groups=new Map;for(const prior of existing){const old=text(prior?.text??prior?.exactOld);if(!old)continue;let group=groups.get(old);if(!group)groups.set(old,group={text:old,occurrenceCount:0,contexts:new Map});group.occurrenceCount+=Math.max(1,Number(prior?.occurrenceCount)||1);for(const context of Array.isArray(prior?.contexts)&&prior.contexts.length?prior.contexts:[prior]){const label=compatibilityContext(context);if(label&&!group.contexts.has(label)&&group.contexts.size<MAX_COMPATIBILITY_CONTEXTS)group.contexts.set(label,label)}}list=Array.from(groups.values())}let dropped=0;for(const raw of records||[]){const old=text(raw?.text??raw?.exactOld);if(!old)continue;let group=groups.get(old);if(!group){if(groups.size>=MAX_COMPATIBILITY_RECORDS){dropped+=Math.max(1,Number(raw?.occurrenceCount)||1);continue}group={text:old,occurrenceCount:0,contexts:new Map};groups.set(old,group)}group.occurrenceCount+=Math.max(1,Number(raw?.occurrenceCount)||1);for(const context of Array.isArray(raw?.contexts)&&raw.contexts.length?raw.contexts:[raw]){const label=compatibilityContext(context);if(label&&!group.contexts.has(label)&&group.contexts.size<MAX_COMPATIBILITY_CONTEXTS)group.contexts.set(label,label)}}root.__slgCompatibilityRecordMap=groups;root.__slgRenpyCompatibilityRecords=Array.from(groups.values()).map(group=>({text:group.text,occurrenceCount:group.occurrenceCount,contexts:Array.from(group.contexts.keys()).slice(0,MAX_COMPATIBILITY_CONTEXTS)}));root.__slgRenpyCompatibilityDroppedCount=(Number(root.__slgRenpyCompatibilityDroppedCount)||0)+dropped;root.__slgRenpyCompatibilityDiagnosticsTruncated=Number(root.__slgRenpyCompatibilityDroppedCount)>0;return root.__slgRenpyCompatibilityRecords}function accumulate(records){root.__slgAppendCompatibilityRecords?.(records);const groups=root.__slgCompatibilityRecordMap instanceof Map?root.__slgCompatibilityRecordMap:new Map,unique=groups.size;let occurrences=0,collision=0;for(const group of groups.values()){occurrences+=Math.max(1,Number(group.occurrenceCount)||1);if(group.contexts?.size>1)collision++}root.__slgRenpyCompatibilityRecords=Array.from(groups.values()).map(group=>({text:group.text,occurrenceCount:group.occurrenceCount,contexts:Array.from(group.contexts.keys()).slice(0,MAX_COMPATIBILITY_CONTEXTS)}));const current=root.__slgRenpyCompatibilityReport;if(current){root.__slgRenpyCompatibilityReport=Object.assign({},current,{uniqueTextCount:unique,occurrenceCount:occurrences,collisionCount:collision,diagnosticsTruncated:root.__slgRenpyCompatibilityDiagnosticsTruncated===true});root.__slgRenpyCompatibilityReportJson=sanitizedJson(root.__slgRenpyCompatibilityReport);render(root.__slgRenpyCompatibilityReport)}}root.__slgAppendCompatibilityRecords=appendCompatibilityRecords;root.__slgCompatibilityRecordMap=root.__slgCompatibilityRecordMap instanceof Map?root.__slgCompatibilityRecordMap:new Map;'''
+    compatibility_report_runtime, _compatibility_replacements = re.subn(
+        r"function accumulate\(records\)\{.*?\}\nfunction render",
+        lambda _match: compatibility_compact_runtime + "\nfunction render",
+        compatibility_report_runtime,
+        count=1,
+    )
+    if _compatibility_replacements != 1:
+        raise ValueError("Compatibility compact accumulator signature not found")
+
+_install_compatibility_compact_runtime()
 
 dialogue_id_runtime = r'''
 (function(){
@@ -1875,6 +2565,14 @@ render();
 '''
 
 
+def terminate_top_level_iife(block: str) -> str:
+    """Keep concatenated runtime IIFEs from being parsed as chained calls."""
+    stripped = block.rstrip()
+    if stripped.endswith("})()"):
+        return stripped + ";" + block[len(stripped):]
+    return block
+
+
 def patch_assets(js: str, css: str) -> tuple[str, str]:
     verify_canonical_base_text(js, css)
     patched = patch_scan_flow(js)
@@ -1890,15 +2588,21 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_candidate_filter(patched)
     patched = patch_translation_quality(patched)
     patched = patch_cache_memory(patched)
-    patched += compatibility_report_runtime
-    patched += dialogue_id_runtime
+    patched = patch_translation_diagnostics(patched)
+    patched += ";" + terminate_top_level_iife(compatibility_report_runtime)
+    patched += ";" + terminate_top_level_iife(dialogue_id_runtime)
     runtime = patch_saves_runtime(WORKSHOP_RUNTIME)
+    nav_label_source = 'const button=textNode("button","workshop-touch",label);'
+    nav_label_fixed = 'const button=textNode("button","workshop-touch","");'
+    if runtime.count(nav_label_source) != 1:
+        raise ValueError("bottom navigation button label signature is not unique")
+    runtime = runtime.replace(nav_label_source, nav_label_fixed, 1)
     runtime = runtime.replace(
         "当前只检查了基础 APK",
         "已合并读取基础 APK 与全部 split 资源",
         1,
     )
-    return patched + enhance_runtime(runtime), css + "\n" + WORKSHOP_CSS
+    return patched + terminate_top_level_iife(enhance_runtime(runtime)), css + "\n" + WORKSHOP_CSS + "\n" + WORKSHOP_MOTION_CSS
 
 
 def main() -> None:

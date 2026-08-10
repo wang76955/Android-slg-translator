@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -274,6 +275,30 @@ class WorkshopPatchContractTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_patch_terminates_top_level_iifes_before_next_runtime_block(self):
+        """Generated runtime blocks must not be parsed as chained function calls."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        chained = re.findall(r"\}\)\(\)\s*(?:\(function\b|\(\(\)\s*=>)", js)
+        self.assertEqual([], chained, "top-level IIFEs are concatenated without a terminator")
+
+    def test_appended_iifes_start_with_a_statement_separator(self):
+        """Every appended diagnostic IIFE must be separated from the preceding expression."""
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        for token in ("const fixedFields=", "const ID_RE="):
+            token_start = js.index(token)
+            start = js.rfind("(function(){", 0, token_start)
+            self.assertGreaterEqual(start, 0, f"missing IIFE for {token!r}")
+            self.assertTrue(
+                js[:start].rstrip().endswith(";"),
+                f"missing separator before {token!r}",
+            )
+
     def test_extract_js_function_ignores_braces_inside_strings_and_templates(self):
         source = 'function target(){const a="}";const b=`x${1}`;if(true){return `{ok}`}}\nfunction next(){}'
         block = extract_js_function(source, "function target()")
@@ -389,6 +414,47 @@ class WorkshopPatchContractTest(unittest.TestCase):
         for obsolete_keyword in ("text", "string", "dialogue", "script"):
             self.assertNotIn(obsolete_keyword, renpy_branch)
 
+    def test_scan_watchdog_allows_large_apk_menu_injection(self):
+        module = self.load_patch()
+        timeout_match = re.search(
+            r"scanTimeoutMs=window\.__slgScanTimeoutMs\?\?=(\d+)",
+            module.SCAN_FLOW,
+        )
+        self.assertIsNotNone(timeout_match, "scan watchdog must have an explicit baseline")
+        self.assertGreaterEqual(
+            int(timeout_match.group(1)),
+            180000,
+            "large Ren'Py APK menu injection must not fail before native work can settle",
+        )
+
+    def test_candidate_filter_rejects_app_generated_translation_artifacts(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("var qo=new Set(")
+        end = js.index("function rs(e,t,n,r)", start)
+        runtime = js[start:end]
+        contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const generated = [
+  {name:`assets/x-game/x-tl/x-None/x-slgtranslator-translations.rpyc`,fileType:`rpyc`},
+  {name:`assets/x-game/x-tl/x-None/x-slgtranslator-abcdef.rpyc`,fileType:`rpyc`},
+  {name:`assets/x-game/x-tl/x-None/x-game-owned.rpyc`,fileType:`rpyc`},
+  {name:`assets/x-game/x-ch1ep1.rpyc`,fileType:`rpyc`}
+];
+const result=Jo(generated,`all`,`zh`);
+check(result.length===2,`only the story and game-owned None bucket may remain: `+result.length);
+check(result.some(e=>e.name.endsWith(`/x-game-owned.rpyc`)),`game-owned None bucket must remain`);
+check(result.some(e=>e.name.endsWith(`/x-ch1ep1.rpyc`)),`story script must remain`);
+check(result.every(e=>!e.name.includes(`/x-slgtranslator-`)),`app-generated translation artifacts must be excluded`);
+'''
+        result = subprocess.run(
+            ["node", "-e", runtime + contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_translation_bucket_files_seed_supplementary_corpus(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
@@ -454,7 +520,7 @@ check(globalThis.__slgHasHistory('other.pkg')===false,'other game still no histo
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_build_files_filter_keeps_translation_buckets_except_slgtranslated(self):
+    def test_build_files_filter_excludes_existing_translation_buckets(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -463,7 +529,7 @@ check(globalThis.__slgHasHistory('other.pkg')===false,'other game still no histo
         self.assertIn("a.filter", js)
         build_fragment = js[js.index("files:(()=>{const _f="):js.index("files:(()=>{const _f=") + 260]
         self.assertIn("x-slgtranslated", build_fragment)
-        self.assertNotIn("includes(`/x-tl/`)", build_fragment)
+        self.assertIn("includes(`/x-tl/`)", build_fragment)
 
     def test_output_path_keeps_translation_bucket_source_prefix(self):
         module = self.load_patch()
@@ -969,7 +1035,7 @@ assertNativeClose(`settings overlay`,()=>!settingsOpen&&settingsShell.hidden,()=
         )
         self.assertIn("withTimeout=(", js)
         self.assertIn("window.clearTimeout(timer)", js)
-        self.assertIn("window.__slgScanTimeoutMs??=65000", js)
+        self.assertIn("window.__slgScanTimeoutMs??=180000", js)
         self.assertIn("withTimeout(()=>selectionEpoch===window.__slgSelectionEpoch?", js)
         self.assertNotIn("withTimeout(E.listApkEntries", js)
         helper = "\n".join(
@@ -1381,13 +1447,22 @@ check(!!shell&&shell.className==="workshop-task-shell","shell mounts before Reac
         detail_runtime = extract_js_function(js, "function detailToggle(raw,live=false)")
         action_runtime = extract_js_function(js, "function actionButton(label,handler,secondary)")
         render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        motion_runtime = extract_js_function(
+            js, "function workshopMotionForTransition(previous,next,reduced)"
+        )
+        mount_runtime = extract_js_function(
+            js, "function mountWorkshopRegions(state,payload)"
+        )
+        progress_runtime = extract_js_function(
+            js, "function updateWorkshopProgress(payload)"
+        )
         state_runtime = extract_js_function(js, "function setWorkshopState(state,payload={})")
         retry_runtime = extract_js_function(js, "function retryTask(payload)")
         # The base bundle has unrelated export-link anchor.click handlers. The
         # safety gate intentionally covers the complete extracted workshop
         # runtime above, so the exclusion is by function ownership, not by
         # narrowing the check to source/start/install variable names.
-        workshop_runtime = "".join((trigger_runtime, topbar_runtime, file_row_runtime, detail_runtime, action_runtime, render_runtime, state_runtime, retry_runtime))
+        workshop_runtime = "".join((trigger_runtime, topbar_runtime, file_row_runtime, detail_runtime, action_runtime, render_runtime, motion_runtime, mount_runtime, progress_runtime, state_runtime, retry_runtime))
         self.assertNotRegex(workshop_runtime, r"\.\s*click\s*\(")
         behavior_contract = r'''
 function check(condition,label){if(!condition)throw new Error(label)}
@@ -1398,7 +1473,8 @@ window.setTimeout=callback=>{callback();return 1};
 const SESSION_KEY="slg-workshop-session-v1";
 const localStorage={data:{},getItem(key){return this.data[key]??null},setItem(key,value){this.data[key]=String(value)},removeItem(key){delete this.data[key]}};
 globalThis.localStorage=localStorage;
-let dispatched=0,refreshes=0,detailsOpen=false,lastSnapshot="";
+        let dispatched=0,refreshes=0,detailsOpen=false,lastSnapshot="";
+        let taskRegions=null,lastWorkshopState="",workshopMotionTimer=0;
 const reactStart={textContent:`\u5f00\u59cb\u7ffb\u8bd1`,disabled:false,isConnected:true,dispatchEvent(event){dispatched+=1;this.lastEvent=event}};
 const startButton=reactStart,sourceButton={textContent:`\u9009\u62e9 APK`},installButton=null;
 function findButton(label){return label===`\u5f00\u59cb\u7ffb\u8bd1`?reactStart:null}
@@ -1423,9 +1499,17 @@ check(renderedText.includes(`\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3`),`ENOSPC has 
 check(renderedText.includes(`ENOSPC|No space left on device`),`ENOSPC keeps raw details`);
 const retry=collectButtons(body).find(button=>button.textContent===`\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5`);
 check(retry,`ENOSPC renders retry action`);
-retry.onclick();
-check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh`);
-'''
+        retry.onclick();
+        check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh`);
+        setWorkshopState(`failed`,{reason:`font`,fileName:`Game.apk`,code:`font_preflight_total_size_limit`,raw:`font_preflight_total_size_limit`});
+        const fontText=collectText(shell.rendered[1]);
+        check(fontText.includes(`\u5b57\u4f53\u8d44\u6e90\u8fc7\u5927`)&&!fontText.includes(`\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3`),`font budget is not rendered as storage failure`);
+        setWorkshopState(`failed`,{reason:`memory`,fileName:`Game.apk`,code:`renpy_memory_budget_exceeded`,raw:`renpy_memory_budget_exceeded`});
+        check(collectText(shell.rendered[1]).includes(`\u5185\u5b58\u4e0d\u8db3`),`memory budget has a dedicated title`);
+        setWorkshopState(`failed`,{reason:`unknown`,fileName:`Game.apk`,code:`unexpected_failure`,raw:`unexpected_failure`});
+        const unknownText=collectText(shell.rendered[1]);
+        check(unknownText.includes(`\u5904\u7406\u5931\u8d25`)&&!unknownText.includes(`\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3`),`unknown failures do not claim storage exhaustion`);
+    '''
         result = subprocess.run(
             ["node", "-e", workshop_runtime + behavior_contract],
             capture_output=True, text=True, encoding="utf-8", check=False,
@@ -1466,11 +1550,12 @@ check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh
         # ENOSPC is recoverable: the user sees a concise localized message,
         # while the raw diagnostic remains behind the details disclosure.
         self.assertIn('ENOSPC|No space left', js)
-        self.assertIn('return{state:"failed",reason:"space",raw:failed.textContent}', js)
+        self.assertIn('reason:_failureKind(_raw),code:_failureCode(_raw)', js)
+        self.assertNotIn('return{state:"failed",reason:"space",raw:failed.textContent}', js)
         self.assertIn('\u624b\u673a\u7a7a\u95f4\u4e0d\u8db3', js)
         self.assertIn('\u8bf7\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5', js)
-        self.assertIn('detailToggle(payload.raw||"ENOSPC|No space left")', js)
-        self.assertIn('actionButton("\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5",()=>retryTask({fileName:payload.fileName,raw:""}))', js)
+        self.assertIn('detailToggle(payload.raw||payload.code||"ENOSPC|No space left")', js)
+        self.assertIn('actionButton("\u91ca\u653e\u7a7a\u95f4\u540e\u91cd\u8bd5",()=>retryTask({reason:"space",fileName:payload.fileName,raw:""}))', js)
 
         # Keep React-managed controls mounted and avoid direct click shortcuts;
         # the shell may only dispatch events to those existing nodes.
@@ -1486,8 +1571,38 @@ check(dispatched===2&&refreshes===1,`retry handler bridges and schedules refresh
         # from causing duplicate shell mounts or state flicker.
         compact_js = ''.join(js.split())
         self.assertIn('newMutationObserver(schedule)', compact_js)
-        self.assertIn('clearTimeout(debounceTimer);debounceTimer=setTimeout(mount,120)', compact_js)
+        self.assertIn('clearTimeout(debounceTimer);if(observerFrame)return;constflush=()=>{observerFrame=0;debounceTimer=window.setTimeout(mount,120)};observerFrame=typeofwindow!=="undefined"&&typeofwindow.requestAnimationFrame==="function"?window.requestAnimationFrame(flush):window.setTimeout(flush,16)', compact_js)
         self.assertIn('observer.observe(document.querySelector("#root")||document.documentElement', compact_js)
+
+    def test_failure_classifier_preserves_specific_native_codes(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        classifier = extract_js_function(js, "function classifyWorkshopFailure(message)")
+        code_reader = extract_js_function(js, "function workshopFailureCode(message)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function run(message){return classifyWorkshopFailure(message)}
+check(run(`ENOSPC: No space left on device`)==="space",`disk exhaustion classification`);
+check(run(`font_preflight_total_size_limit`)==="font",`font budget classification`);
+check(run(`renpy_font_missing_glyphs`)==="font",`font glyph classification`);
+check(run(`renpy_memory_budget_exceeded`)==="memory",`RenPy memory classification`);
+check(run(`OutOfMemoryError: Java heap space`)==="memory",`heap classification`);
+check(run(`translation_validation_failed: placeholder`)==="compile",`validation classification`);
+check(run(`renpy_limit_total_script_inflated`)==="compile",`resource classification`);
+check(run(`failed to fetch`)==="network",`network classification`);
+check(run(`unexpected failure`)==="unknown",`unknown classification`);
+check(workshopFailureCode(`font_preflight_total_size_limit: 128MB`)==="font_preflight_total_size_limit",`font code is retained`);
+'''
+        result = subprocess.run(
+            ["node", "-e", classifier + "\n" + code_reader + "\n" + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_settings_support_provider_model_and_custom_endpoint(self):
         module = self.load_patch()
@@ -2663,6 +2778,66 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_extract_only_preflight_blocks_start_translation_action(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        trigger_runtime = extract_js_function(js, "function triggerReactButton(button)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.localStorage={store:{},getItem(key){return this.store[key]??null},setItem(key,value){this.store[key]=String(value)},removeItem(key){delete this.store[key]}};
+const SESSION_KEY='slg-workshop-session-v1';
+let sessionRestoredAt=0;
+window.__slgSelectionError=null;
+window.__slgSelectionEpoch=1;
+window.__slgScanWatchdog={epoch:1,timerFired:false,settled:true};
+window.__slgRenpyCompatibilityReport={supportLevel:'EXTRACT_ONLY',issues:[{code:'renpy_python2_writer_unavailable'}]};
+window.__slgRenpyCompatibilityGate='extract_only';
+window.__slgRenpyCompatibilityBlocked=true;
+function sourceText(){return '已选择：游戏.apk\n发现 112 个可翻译文件'}
+function readProgressLog(){return{raw:'文件检查已完成。',latest:'文件检查已完成。'}}
+const document={querySelectorAll(){return[]}};
+const snapshot=readTaskSnapshot();
+check(snapshot.state==='failed','extract-only scan cannot become ready');
+check(snapshot.reason==='compatibility','extract-only reason is explicit');
+
+function textNode(tag,cls,text){return{tag,cls,text:text||'',children:[],append(...children){this.children.push(...children)}}}
+function fileRow(){return textNode('div','file-row','file')}
+function detailToggle(raw){return textNode('div','details',raw)}
+function actionButton(label,handler,secondary=false){return{tag:'button',label,handler,secondary,children:[]}}
+function recoveryBanner(){return textNode('section','banner','banner')}
+function openSettings(){}
+function openSourceChooser(){}
+const body=renderStateBody('failed',snapshot);
+const labels=[];function collect(node){if(!node)return;if(node.tag==='button')labels.push(node.label);for(const child of node.children||[])collect(child)}
+collect(body);
+check(labels.includes('重新选择 APK'),'extract-only renders a recovery action');
+check(!labels.includes('开始翻译'),'extract-only never renders start translation');
+
+let dispatched=0;
+globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
+const reactStart={textContent:'开始翻译',disabled:false,dispatchEvent(){dispatched+=1}};
+let startButton=reactStart;
+function findButton(){return reactStart}
+function setWorkshopState(){throw new Error('blocked start must not mutate state through a fake click')}
+triggerReactButton(startButton);
+check(dispatched===0,'blocked start must not dispatch the React click');
+check(localStorage.getItem(SESSION_KEY)===null,'blocked start must not persist a translating session');
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + render_runtime + trigger_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def _legacy_test_long_running_phases_are_not_reported_as_directory_scanning(self):
         module = self.load_patch()
         js, css = module.patch_assets(
@@ -2743,7 +2918,7 @@ if(result.state!==`empty`||result.count!==`0`||result.fileName!==`\u8ba1\u7b97\u
         self.assertIn('window.__slgSelectionMeta?.uri||n', js)
         self.assertIn('No such file|Failed to build patched APK', js)
 
-        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
+        self.assertIn('detailsOpen=false,scanStartedAt=0,scanTimer=0,scanInitialTimer=0,workshopFocusFrame=0,workshopDetailFrame=0,sessionRestoredAt=0,sessionLastBeat=0,manualIdleBeforeOverlay=false,restoringSession=false,galleryShell=null,galleryOpen=false,galleryPatches=[],galleryLoading=false,galleryError=\'\';', js)
         self.assertIn('body.dataset.open=String(detailsOpen)', js)
         self.assertIn('body.scrollTop=body.scrollHeight', js)
         compact_css = ''.join(css.split())
@@ -2906,11 +3081,31 @@ check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.incl
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
         )
         gallery_runtime = extract_js_function(js, "function renderGallery()")
+        delete_runtime = (
+            extract_js_function(js, "function deletePatch(patch)")
+            if "function deletePatch(patch)" in js
+            else ""
+        )
+        load_runtime = extract_js_function(js, "async function loadPatches()")
         self.assertRegex(
             gallery_runtime,
             r'const save=actionButton\("\\u[0-9a-f]{4}\\u[0-9a-f]{4}\\u[0-9a-f]{4}\\u[0-9a-f]{4}[^" ]*",\(\)=>savePatchedApk\(patch\.path\)\)',
         )
         self.assertIn('save.className="workshop-patch-save"', gallery_runtime)
+        for token in (
+            "function deletePatch(patch)",
+            "deletePatchedApk({path})",
+            "workshop-patch-delete",
+            'aria-label","\\u5220\\u9664\\u5b89\\u88c5\\u5305',
+            'title","\\u5220\\u9664\\u5b89\\u88c5\\u5305',
+            'aria-live","polite"',
+            'aria-busy","',
+            "galleryDeleting",
+            "galleryListEpoch",
+            "安装包",
+        ):
+            self.assertIn(token, js)
+        self.assertNotIn("我的补丁", gallery_runtime)
         for token in (
             "function openGallery()",
             "function closeGallery(",
@@ -2926,12 +3121,68 @@ check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.incl
             "const host=galleryOpen&&galleryShell?galleryShell:shell;",
             "if(galleryOpen)loadPatches()",
             "\\u4fdd\\u5b58\\u5230\\u4e0b\\u8f7d",
-            "\\u6211\\u7684\\u8865\\u4e01",
+            "\\u5b89\\u88c5\\u5305",
         ):
             self.assertIn(token, js)
         compact_css = "".join(css.split())
-        for token in (".workshop-gallery-shell", ".workshop-patch-row", ".workshop-patch-save"):
+        for token in (
+            ".workshop-gallery-shell",
+            ".workshop-patch-row",
+            ".workshop-patch-save",
+            ".workshop-patch-delete",
+        ):
             self.assertIn(token, compact_css)
+
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+let galleryPatches=[{name:`Keep.apk`,path:`/patches/keep.apk`}],galleryLoading=false,galleryError=``;
+let galleryDeleting=new Set(),galleryDeleteRequests=new Map(),galleryListEpoch=0,galleryFocusPath=``;
+let renderCount=0;function renderGallery(){renderCount+=1}
+let confirmValue=false;window.confirm=()=>confirmValue;
+const calls={delete:[],list:[]};let deleteResolve,deleteReject;const listResolvers=[];
+window.Capacitor={Plugins:{FileManager:{
+  deletePatchedApk:({path})=>{calls.delete.push(path);return new Promise((resolve,reject)=>{deleteResolve=resolve;deleteReject=reject})},
+  listPatchedApks:()=>{calls.list.push(true);return new Promise((resolve,reject)=>listResolvers.push({resolve,reject}))},
+}}};
+{delete_runtime}
+{load_runtime}
+async function main(){
+  const patch={name:`Keep.apk`,path:`/patches/keep.apk`};
+  confirmValue=false;
+  await deletePatch(patch);
+  check(calls.delete.length===0,`cancel does not call native delete`);
+
+  confirmValue=true;
+  const first=deletePatch(patch);const second=deletePatch(patch);
+  check(first===second&&calls.delete.length===1,`duplicate clicks share one native request`);
+  check(galleryDeleting.has(patch.path),`deleting path is tracked while request is pending`);
+  deleteResolve();
+  await Promise.resolve();
+  listResolvers[0].resolve({patches:[]});
+  await first;
+  check(calls.list.length===1&&galleryPatches.length===0,`successful delete reloads the gallery: list=${calls.list.length}, patches=${galleryPatches.length}`);
+  check(!galleryDeleting.has(patch.path),`deleting path is cleared after success`);
+
+  galleryPatches=[patch];
+  window.Capacitor.Plugins.FileManager.deletePatchedApk=()=>Promise.reject(new Error(`delete failed`));
+  await deletePatch(patch);
+  check(galleryPatches.length===1&&galleryPatches[0]===patch,`delete failure keeps the item`);
+  check(galleryError.includes(`delete failed`),`delete failure is rendered as retryable error`);
+
+  galleryPatches=[patch];galleryError=``;
+  const refresh=loadPatches();
+  listResolvers[1].reject(new Error(`refresh failed`));
+  await refresh;
+  check(galleryPatches.length===1&&galleryPatches[0]===patch,`refresh failure preserves the prior list`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1});
+'''.replace("{delete_runtime}", delete_runtime).replace("{load_runtime}", load_runtime)
+        result = subprocess.run(
+            ["node", "-e", behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
         topbar_start = js.index("function renderTopbar(state)")
         topbar_end = js.index("function fileRow(", topbar_start)
@@ -3115,6 +3366,7 @@ console.log('ok');
         pipeline_parser = extract_js_function(js, "function Ne(e,t=``,n)").replace(
             "function Ne(", "function parseRpyc(", 1
         )
+        pipeline_records_helper = extract_js_function(js, "function rpycContentFromRecords")
         pipeline_controller = extract_js_function(js, "Ce=async()=>")
         pipeline_parallel = extract_js_function(js, "async function runFileTasksParallel")
         values = [
@@ -3188,7 +3440,10 @@ async function Lo(args) {
 const protocolInput = protocol;
 const E = {
   createDirectory: async () => ({}),
-  readRenpyTexts: async () => ({content: protocolInput, fileType: "rpyc", renpyRecords: []}),
+  readRenpyTexts: async () => ({
+    fileType: "rpyc",
+    renpyRecords: expected.map(text => ({text}))
+  }),
   compileTranslationsIntoApk: async args => {
     compileRequests.push(args);
     return {compiled: args.items.length};
@@ -3216,7 +3471,7 @@ async function main() {
   console.log("ok");
 }
 main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
-""" % (pipeline_parser, pipeline_controller, pipeline_parallel, values_json, "", "")
+""" % (pipeline_parser, pipeline_controller, pipeline_parallel, values_json, pipeline_records_helper, "")
         result = subprocess.run(
             ["node", "-e", pipeline_harness.replace("__BT__", chr(96))],
             capture_output=True, text=True, encoding="utf-8", check=False,
@@ -3511,7 +3766,7 @@ function check(condition,label){if(!condition)throw new Error(label)}
 const document={querySelector(){return{children:[],removeAttribute(){},textContent:""}}};
 function releaseModalHistory(){}
 let refreshes=0;function refresh(){refreshes+=1}
-let manualIdle=true,manualIdleBeforeOverlay=true,galleryOpen=true,settingsOpen=true,lastSnapshot="x";
+ let manualIdle=true,manualIdleBeforeOverlay=true,galleryOpen=true,settingsOpen=true,lastSnapshot="x",galleryListEpoch=0,galleryPrevNav="首页";
 const galleryShell={hidden:false};const settingsShell={hidden:false};const shell={hidden:false};
 closeSettings();
 check(manualIdle===true,"closing settings restores the pre-overlay idle state");
@@ -3611,6 +3866,630 @@ check(!_rpycSkip.test('x-options'), 'x-options must not be skipped');
             compact_css,
         )
         self.assertIn("animation:workshopRise", compact_css)
+
+    def test_progress_updates_use_stable_task_dom(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("function updateWorkshopProgress(payload)", js)
+        state_runtime = extract_js_function(
+            js, "function setWorkshopState(state,payload={})"
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+let renders=0,progressUpdates=0;
+        const shell={dataset:{workshopState:"idle",workshopTask:"idle"},classList:{remove(){},add(){}},setAttribute(){},replaceChildren(){renders++}};
+        const runtimeRoot={setAttribute(){},classList:{remove(){},add(){}}};
+        let taskRegions=null,lastWorkshopState="";
+        function workshopMotionReduced(){return false}
+        function renderTopbar(){return {}}
+function renderStateBody(){return {}}
+function mountWorkshopRegions(){taskRegions={shell};renders++}
+function updateWorkshopProgress(){progressUpdates++}
+setWorkshopState("translating",{current:1,total:4});
+setWorkshopState("translating",{current:2,total:4});
+check(renders===1,"same-state progress must not rebuild the task shell");
+check(progressUpdates===1,"same-state progress must update local progress nodes");
+'''
+        result = subprocess.run(
+            ["node", "-e", state_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_workshop_state_transition_has_one_shot_motion_mapping(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("function workshopMotionForTransition", js)
+        self.assertIn("workshop-state-enter", css)
+        self.assertIn("workshop-state-exit", css)
+        transition_runtime = extract_js_function(
+            js, "function workshopMotionForTransition(previous,next,reduced)"
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+check(workshopMotionForTransition("translating","translating",false)==="none","same state has no motion");
+check(workshopMotionForTransition("ready","translating",false)==="fade-through","state change uses fade-through");
+check(workshopMotionForTransition("ready","translating",true)==="instant","reduced motion is immediate");
+check(workshopMotionForTransition("idle","scanning",false)==="rise","idle to scanning has a single rise");
+'''
+        result = subprocess.run(
+            ["node", "-e", transition_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_all_visible_states_have_accessible_motion_and_recovery_contract(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        for state in (
+            "idle",
+            "scanning",
+            "empty",
+            "ready",
+            "translating",
+            "patching",
+            "completed",
+            "failed",
+        ):
+            self.assertIn(f'workshop-state-{state}', js)
+            self.assertIn(
+                f'.workshop-task-shell[data-workshop-state="{state}"]',
+                compact_css,
+            )
+        self.assertIn('setAttribute("aria-live","polite")', js)
+        self.assertIn('setAttribute("aria-atomic","true")', js)
+        self.assertIn("prefers-reduced-motion:reduce", compact_css)
+
+    def test_task_status_region_remains_in_accessibility_tree(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        mount_runtime = extract_js_function(js, "function mountWorkshopRegions(state,payload)")
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function textNode(tag,cls,text){return{tag,cls,textContent:text??"",hidden:false,attrs:{},children:[],setAttribute(name,value){this.attrs[name]=value},append(...nodes){this.children.push(...nodes)}}}
+let taskRegions=null;
+const shell={replaceChildren(...nodes){this.children=nodes}};
+function renderTopbar(){return textNode("header","top","")}
+function renderStateBody(){return textNode("section","body","")}
+globalThis.__slgTaskRegions=null;
+'''+mount_runtime+r'''
+mountWorkshopRegions("ready",{});
+check(taskRegions&&taskRegions.live,"task status region is mounted");
+check(taskRegions.live.hidden!==true,"task status region remains available to assistive technology");
+check(taskRegions.live.attrs.role==="status"&&taskRegions.live.attrs["aria-live"]==="polite","task status region has live semantics");
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_manual_task_back_stays_idle_during_active_snapshot_refresh(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        topbar_runtime = extract_js_function(js, "function renderTopbar(state)")
+        refresh_runtime = extract_js_function(js, "function refresh()")
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function textNode(tag,cls,text){return{tag,cls,text,children:[],attrs:{},type:"",setAttribute(name,value){this.attrs[name]=value},append(...nodes){this.children.push(...nodes)}}}
+let manualIdle=false,retrying=false,settingsOpen=false,lastSnapshot="",sessionLastBeat=Date.now();
+let transitions=[];
+const shell={dataset:{},setAttribute(){},classList:{remove(){},add(){}},replaceChildren(){}};
+function setWorkshopState(state,payload){transitions.push([state,payload])}
+function readTaskSnapshot(){return{state:"translating",fileName:"Game.apk",current:1,total:2}}
+function snapshotKey(){return"active"}
+'''+topbar_runtime+r'''
+const topbar=renderTopbar("translating");
+topbar.children[0].onclick();
+check(manualIdle===true,"task back enters manual idle mode");
+check(transitions[0][0]==="idle"&&transitions[0][1].fromBack===true,"task back renders idle state");
+transitions=[];
+'''+refresh_runtime+r'''
+refresh();
+check(transitions.length===0,"observer refresh cannot immediately restore an active task after manual back");
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_row_error_exposes_an_executable_retry_button(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        row_runtime = "\n".join(
+            (
+                extract_js_function(js, "function setWorkshopRowError(row,message,retry)"),
+                extract_js_function(js, "function retryWorkshopRow(row)"),
+            )
+        )
+        behavior = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+function textNode(tag,cls,text){return{tag,cls,textContent:text??"",children:[],dataset:{},setAttribute(){},append(...nodes){for(const node of nodes){node.parent=this;this.children.push(node)}},remove(){this.removed=true}}}
+function classList(){return{values:new Set,add(...names){names.forEach(name=>this.values.add(name))},remove(...names){names.forEach(name=>this.values.delete(name))},toggle(name,value){value?this.values.add(name):this.values.delete(name)}}}
+const row={children:[],dataset:{},classList:classList(),append(...nodes){for(const node of nodes){node.parent=this;this.children.push(node)}},querySelector(selector){return this.children.find(node=>selector===".workshop-row-retry"&&node.cls==="workshop-row-retry")||null}}
+let attempts=0;
+'''+row_runtime+r'''
+setWorkshopRowError(row,"share failed",()=>{attempts+=1});
+const retry=row.children.find(node=>node.cls==="workshop-row-retry");
+check(retry&&typeof retry.onclick==="function","row error renders retry button");
+retry.onclick();
+check(attempts===1,"retry button invokes the stored operation");
+setWorkshopRowError(row,"",null);
+check(!row.children.some(node=>node.cls==="workshop-row-retry"),"clearing row error removes retry button");
+'''
+        result = subprocess.run(
+            ["node", "-e", behavior],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_restore_failure_preserves_row_error_and_retry(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        start = js.index("restore.onclick=async()=>")
+        end = js.index(";del.onclick=", start)
+        restore_runtime = js[start:end]
+        self.assertIn("setWorkshopRowPending(row,true)", restore_runtime)
+        self.assertIn(
+            'setWorkshopRowError(row,e&&e.message||String(e),restore.onclick)',
+            restore_runtime,
+        )
+        self.assertNotIn(
+            'setWorkshopRowError(row,"",null);restore.disabled=false;restore.textContent="恢复"',
+            restore_runtime,
+        )
+
+    def test_refresh_preserves_visible_gallery_and_installed_rows(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        gallery_runtime = extract_js_function(js, "function renderGallery()")
+        installed_runtime = extract_js_function(js, "function renderInstalledApps()")
+        self.assertIn("galleryLoading&&galleryPatches.length", gallery_runtime)
+        self.assertIn("galleryError&&galleryPatches.length", gallery_runtime)
+        self.assertIn("installedLoading&&installedApps.length", installed_runtime)
+        self.assertIn("installedError&&installedApps.length", installed_runtime)
+
+    def test_material_navigation_uses_edge_to_edge_bar_and_active_indicator(self):
+        module = self.load_patch()
+        _, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertIn(
+            ".workshop-bottom-nav{position:fixed;z-index:30;left:0;right:0;bottom:0",
+            compact_css,
+        )
+        self.assertIn("border-radius:0;background:var(--workshop-surface)", compact_css)
+        self.assertIn(
+            ".workshop-bottom-navbutton[aria-current=\"page\"]::before",
+            compact_css,
+        )
+        self.assertIn("backdrop-filter:none", compact_css)
+
+    def test_bottom_navigation_buttons_render_each_label_once(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        nav_start = js.index('const nav=document.createElement("nav");')
+        nav_end = js.index("app.append(nav);", nav_start)
+        nav_runtime = js[nav_start:nav_end]
+        self.assertIn(
+            'const button=textNode("button","workshop-touch","");',
+            nav_runtime,
+        )
+        self.assertIn(
+            'const name=textNode("span","workshop-nav-label",label);',
+            nav_runtime,
+        )
+        self.assertNotIn(
+            'const button=textNode("button","workshop-touch",label);',
+            nav_runtime,
+        )
+
+    def test_idle_home_uses_compact_three_column_journey(self):
+        module = self.load_patch()
+        _, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertIn(
+            ".workshop-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))",
+            compact_css,
+        )
+        self.assertRegex(
+            compact_css,
+            r"\.workshop-steps(?:li|\\s+li)\{display:grid;grid-template-columns:1fr;grid-template-rows:autoautoauto",
+        )
+
+    def test_release_manifest_version_is_108(self):
+        source = (ROOT.parent / "native-fast-scan" / "build_fast_scanner.py").read_text(
+            "utf-8"
+        )
+        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionCode", "8")', source)
+        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.8")', source)
+
+    def test_disabled_start_does_not_persist_translation_session(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        trigger_runtime = extract_js_function(js, "function triggerReactButton(button)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+window.__slgLocalSelected=false;
+window.__slgRenpyCompatibilityBlocked=false;
+window.__slgRenpyCompatibilityReport=null;
+window.__slgRenpyCompatibilityGate="";
+const SESSION_KEY="slg-workshop-session-v1";
+const localStorage={data:{[SESSION_KEY]:JSON.stringify({uri:"file://picked.apk",translating:false})},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)},removeItem(k){delete this.data[k]}};
+globalThis.localStorage=localStorage;
+let manualIdle=false,lastSnapshot="",states=[];
+const startButton={textContent:"开始翻译",disabled:true};
+const installButton=null;
+function findButton(){return startButton}
+function readTaskSnapshot(){return{state:"ready",count:"3"}}
+function setWorkshopState(state,payload){states.push([state,payload])}
+function MouseEvent(){}
+triggerReactButton(startButton);
+const session=JSON.parse(localStorage.getItem(SESSION_KEY));
+check(session.translating===false,"disabled start must not persist a translating session");
+check(states.length===1&&states[0][1].apiRequired===true,"disabled start still exposes the API-key state");
+'''
+        result = subprocess.run(
+            ["node", "-e", trigger_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_text_reads_react_children_without_full_root_clone(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        source_runtime = extract_js_function(js, "function sourceText()")
+        self.assertNotIn("cloneNode(true)", source_runtime)
+        self.assertIn("runtimeRoot", source_runtime)
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const makeChild=(name,text)=>({textContent:text,classList:{contains(value){return value===name}}});
+const runtimeRoot={children:[makeChild("workshop-task-shell","ignored"),makeChild("react-content","已选择：Game.apk\n发现 2 个可翻译文件"),makeChild("workshop-bottom-nav","ignored")]}
+const document={querySelector(){throw new Error("sourceText should use the mounted runtime root")}};
+check(sourceText()==="已选择：Game.apk\n发现 2 个可翻译文件","sourceText keeps only React-managed content");
+'''
+        result = subprocess.run(
+            ["node", "-e", source_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_row_level_operations_expose_pending_error_and_retry_states(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        for token in (
+            "workshop-row-enter",
+            "workshop-row-leave",
+            "workshop-row-pending",
+            "workshop-row-error",
+        ):
+            self.assertIn(token, compact_css)
+        for token in (
+            "setWorkshopRowPending",
+            "setWorkshopRowError",
+            "retryWorkshopRow",
+        ):
+            self.assertIn(token, js)
+
+    def test_save_refresh_uses_stable_keyed_rows_without_clearing_the_list(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        saves_start = js.index("async function refreshSaves(){")
+        saves_end = js.index("exportBtn.onclick=", saves_start)
+        refresh = js[saves_start:saves_end]
+        self.assertIn("workshopSaveRows", refresh)
+        self.assertIn("data-save-path", refresh)
+        self.assertIn("append", refresh)
+        self.assertNotIn("savesList.replaceChildren()", refresh)
+        self.assertNotIn("savesList.append(row)", refresh)
+
+    def test_gallery_refresh_uses_stable_keyed_rows_without_reentering_unchanged_rows(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        gallery_start = js.index("function renderGallery(){")
+        gallery_end = js.index("async function loadPatches(){", gallery_start)
+        renderer = js[gallery_start:gallery_end]
+        self.assertIn("workshopGalleryRows", renderer)
+        self.assertIn("dataset.patchPath", renderer)
+        self.assertIn("previousGalleryRows", renderer)
+        self.assertIn("workshopGalleryRows.set", renderer)
+        self.assertIn("if(!previous)", renderer)
+
+    def test_state_transition_marks_previous_body_for_exit_before_replacement(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        state_runtime = extract_js_function(
+            js, "function setWorkshopState(state,payload={})"
+        )
+        exit_marker = state_runtime.index("workshop-state-exit")
+        replacement = state_runtime.index("replaceWith(nextBody)")
+        self.assertLess(
+            exit_marker,
+            replacement,
+            "the old body must receive an exit class before the new body replaces it",
+        )
+        self.assertIn("previousBody", state_runtime)
+
+    def test_observer_schedule_coalesces_through_animation_frame(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        schedule_runtime = extract_js_function(js, "function schedule()")
+        self.assertIn("observerFrame", schedule_runtime)
+        self.assertIn("requestAnimationFrame", schedule_runtime)
+        self.assertNotIn("debounceTimer=setTimeout(mount,120)", schedule_runtime)
+
+    def test_runtime_teardown_releases_observer_timers_and_global_listeners(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("globalThis.__slgWorkshopRuntimeTeardown?.()", js)
+        self.assertIn("observer.disconnect()", js)
+        self.assertIn("cancelAnimationFrame", js)
+        self.assertIn("clearTimeout(debounceTimer)", js)
+        self.assertIn("clearTimeout(scanInitialTimer)", js)
+        self.assertIn("workshopFocusFrame=0", js)
+        self.assertIn("workshopDetailFrame=0", js)
+        self.assertIn("globalThis.__slgWorkshopMotionTimer=0", js)
+        self.assertIn("globalThis.__slgWorkshopOverlayTimer=0", js)
+        self.assertIn("globalThis.__slgWakeLock=null", js)
+        self.assertIn("delete globalThis.__slgTaskRegions", js)
+        self.assertIn(
+            'removeEventListener("popstate",handleWorkshopPopState)',
+            js,
+        )
+        self.assertIn(
+            'removeEventListener("click",workshopClickHandler',
+            js,
+        )
+
+    def test_row_pending_state_is_cleared_after_save_operations_settle(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        self.assertIn("setWorkshopRowPending(row,true)", js)
+        self.assertIn("setWorkshopRowPending(row,false)", js)
+        self.assertIn("setWorkshopRowError(row", js)
+        self.assertIn("function waitWorkshopRowExit", js)
+        self.assertIn("await waitWorkshopRowExit", js)
+
+    def test_overlay_close_uses_finite_exit_motion(self):
+        module = self.load_patch()
+        js, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertIn("workshopOverlayIn", compact_css)
+        self.assertIn("workshopOverlayOut", compact_css)
+        self.assertIn("animateWorkshopOverlayOut", js)
+        self.assertIn("workshop-overlay-closing", js)
+        self.assertIn("overlayExitEpoch", js)
+
+    def test_selection_session_does_not_inherit_translating_across_apk_identity(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        session_runtime = extract_js_expression(js, "persistSelectionSession=") + ";"
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+const localStorage={data:{},getItem(k){return this.data[k]??null},setItem(k,v){this.data[k]=String(v)}};
+globalThis.localStorage=localStorage;
+localStorage.data["slg-workshop-session-v1"]=JSON.stringify({
+  uri:"file://old.apk",packageName:"old.pkg",versionCode:"1",translating:true
+});
+persistSelectionSession({uri:"file://new.apk",packageName:"new.pkg",versionCode:"2",source:"file"});
+let next=JSON.parse(localStorage.data["slg-workshop-session-v1"]);
+check(next.translating===false,"a different APK must start without an interrupted session");
+localStorage.data["slg-workshop-session-v1"]=JSON.stringify({
+  uri:"file://old.apk",packageName:"old.pkg",versionCode:"1",translating:true
+});
+persistSelectionSession({uri:"file://old.apk",packageName:"old.pkg",versionCode:"1",source:"file"});
+next=JSON.parse(localStorage.data["slg-workshop-session-v1"]);
+check(next.translating===true,"the same APK may retain its interrupted session");
+'''
+        result = subprocess.run(
+            ["node", "-e", session_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_settings_overlay_keeps_full_screen_layer_out_of_gpu_animation(self):
+        module = self.load_patch()
+        _, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertNotIn(
+            ".workshop-settings-shell{animation:workshopSettingsIn",
+            compact_css,
+            "the full-screen settings layer must not trigger an opacity compositing animation",
+        )
+        self.assertNotIn(
+            ".workshop-settings-shell.workshop-overlay-closing{animation:workshopSettingsOut",
+            compact_css,
+            "the full-screen settings layer must not trigger an opacity compositing exit animation",
+        )
+        self.assertRegex(
+            compact_css,
+            r"\.workshop-settings-card\{[^}]*animation:none",
+        )
+
+    def test_settings_close_hides_immediately_without_overlay_exit_timer(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        close_settings = extract_js_function(js, "function closeSettings(")
+        self.assertNotIn(
+            "animateWorkshopOverlayOut(settingsShell",
+            close_settings,
+            "settings has no visible exit animation and must not wait on the generic overlay timer",
+        )
+        self.assertIn(
+            'if(typeof cancelOverlayExit==="function")cancelOverlayExit(settingsShell)',
+            close_settings,
+        )
+        self.assertIn("if(settingsShell)settingsShell.hidden=true", close_settings)
+        self.assertIn("if(shell)shell.hidden=false", close_settings)
+
+    def test_share_backup_row_exposes_pending_and_retry_error_state(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        share_start = js.index("share.onclick=async()=>")
+        share_end = js.index("};del.onclick=", share_start)
+        self.assertIn(
+            "setWorkshopRowPending(row,true)",
+            js[share_start:share_end],
+        )
+        self.assertIn(
+            'setWorkshopRowError(row,e&&e.message||String(e),share.onclick)',
+            js,
+        )
+
+    def test_reduced_motion_disables_continuous_progress_effects(self):
+        module = self.load_patch()
+        _, css = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        compact_css = "".join(css.split())
+        self.assertIn(
+            "@media(prefers-reduced-motion:reduce){.workshop-runtime*",
+            compact_css,
+        )
+        self.assertIn("animation:none!important", compact_css)
+        self.assertIn("transition:none!important", compact_css)
+        self.assertIn("transform:none!important", compact_css)
+        self.assertNotIn("workshopShimmer1.8slinearinfinite", compact_css)
+
+    def test_progress_snapshot_key_uses_local_updates_without_shell_rebuild(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_runtime = extract_js_function(js, "function snapshotKey(s)")
+        refresh_runtime = extract_js_function(js, "function refresh()")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+let current=1,updates=0,states=0,lastSnapshot="",manualIdle=false,retrying=false,settingsOpen=false,sessionLastBeat=Date.now();
+const shell={};
+function readTaskSnapshot(){return{state:"translating",fileName:"Game.apk",current,total:4}}
+function updateWorkshopProgress(){updates+=1}
+function setWorkshopState(){states+=1}
+refresh();
+current=2;
+refresh();
+check(states===1,"high-frequency progress must not re-enter the full state renderer");
+check(updates===1,"high-frequency progress must use the local update path");
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + refresh_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_same_workshop_state_does_not_request_wake_lock_again(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        state_runtime = extract_js_function(
+            js, "function setWorkshopState(state,payload={})"
+        )
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+let taskRegions=null,lastWorkshopState="",workshopMotionTimer=0,wakeRequests=0;
+const shell={dataset:{workshopState:"idle",workshopTask:"idle"},classList:{remove(){},add(){}},setAttribute(){},replaceChildren(){}};
+const runtimeRoot={classList:{remove(){},add(){}},setAttribute(){}};
+Object.defineProperty(globalThis,"navigator",{configurable:true,value:{wakeLock:{request(){wakeRequests+=1;return Promise.resolve({release(){return Promise.resolve()}})}}}});
+function workshopMotionReduced(){return false}
+function workshopMotionForTransition(){return "none"}
+function renderTopbar(){return {}}
+function renderStateBody(){return {}}
+function mountWorkshopRegions(){taskRegions={shell}}
+function updateWorkshopProgress(){}
+function startScanClock(){} function stopScanClock(){}
+setWorkshopState("translating",{current:1,total:4});
+setWorkshopState("translating",{current:2,total:4});
+check(wakeRequests===1,"same-state progress must not request a second wake lock");
+'''
+        result = subprocess.run(
+            ["node", "-e", state_runtime + behavior_contract],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def _legacy_test_translation_progress_emits_starting_batch_before_request(self):
         module = self.load_patch()
