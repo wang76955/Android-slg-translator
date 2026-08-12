@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Local agent and tool state
+.omx/
+.superpowers/
+.tools/
+
+# Build and compiled artifacts
+*.apk
+*.idsig
+*.rpyc
+*.rpymc
+*.hprof
+*.keystore
+apk-work/**/generated/
+apk-work/**/build/
+apk-work/**/extracted/
+apk-work/**/qa/tmp/
+apk-work/**/release-inspect/
+apk-work/**/dexdump/
+artifacts/device-backups/
+
+# Temporary files and diagnostics
+*.tmp
+*.partial
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local configuration
+.env
