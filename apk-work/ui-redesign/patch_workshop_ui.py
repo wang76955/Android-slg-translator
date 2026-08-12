@@ -556,12 +556,12 @@ def patch_scan_flow(js: str) -> str:
     )
     patched = patched.replace(
         "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgSelectionError=null,",
-        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgRenpyCompatibilityPreflightDone=false,window.__slgRenpyCompatibilityReport=null,window.__slgRenpyCompatibilityRecords=[],window.__slgRenpyCompatibilityBlocked=false,window.__slgSelectionError=null,",
+        "scanSelectedApk=async(e,selectionEpoch)=>{window.__slgFontPreflightDone=false,window.__slgFontPreflightBlocked=false,window.__slgFontPreflightReport=null,window.__slgRenpyCompatibilityPreflightDone=false,window.__slgRenpyCompatibilityReport=null,window.__slgRenpyCompatibilityRecords=[],window.__slgRenpyCompatibilityBlocked=false,window.__slgEngineCapabilities=null,window.__slgEngineWorkflow=`UNSUPPORTED`,window.__slgEngineAdapterId=``,window.__slgProjectFingerprint=``,window.__slgRecordSchemaVersion=1,window.__slgSelectionError=null,",
         1,
     )
     patched = patched.replace(
         "window.__slgRenpyLanguages=t.renpyLanguages||[],window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgTranslatorLang=''",
-        "window.__slgRenpyLanguages=t.renpyLanguages||[],window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgRenpyCompatibilityReport=t.compatibilityReport||null,window.__slgRenpyCompatibilityGate=t.compatibilityGate||`blocked`,window.__slgTranslatorLang=''",
+        "window.__slgRenpyLanguages=t.renpyLanguages||[],window.__slgRenpyMenuType=t.renpyMenuType||`none`,window.__slgRenpyCompatibilityReport=t.compatibilityReport||null,window.__slgRenpyCompatibilityGate=t.compatibilityGate||`blocked`,window.__slgEngineAdapterId=String(t.adapterId||`renpy`),window.__slgProjectFingerprint=String(t.projectFingerprint||``),window.__slgRecordSchemaVersion=Number(t.recordSchemaVersion||1),window.__slgEngineCapabilities=globalThis.__slgResolveEngineCapabilities?globalThis.__slgResolveEngineCapabilities(t):null,window.__slgEngineWorkflow=window.__slgEngineCapabilities?.workflow||String(t.workflow||`UNSUPPORTED`),window.__slgRenpyCompatibilityBlocked=globalThis.__slgUpdateCompatibilityBlocked?globalThis.__slgUpdateCompatibilityBlocked(window.__slgEngineCapabilities):window.__slgRenpyCompatibilityBlocked,window.__slgTranslatorLang=''",
         1,
     )
     patched = patched.replace(
@@ -1037,16 +1037,12 @@ function classifyWorkshopFailure(message){const raw=String(message??``);if(/font
     if runtime.count(read_task_anchor) != 1:
         raise ValueError("Task snapshot signature not found")
     runtime = runtime.replace(read_task_anchor, failure_helpers + read_task_anchor, 1)
-    runtime = runtime.replace(
-        'function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog=',
-        'function readTaskSnapshot(){const _failureCode=typeof workshopFailureCode==="function"?workshopFailureCode:()=>"";const _failureKind=typeof classifyWorkshopFailure==="function"?classifyWorkshopFailure:()=>"unknown";const selectionError=window.__slgSelectionError;if(selectionError){const _raw=selectionError.message||String(selectionError);return{state:"failed",reason:"scan",code:_failureCode(_raw),fileName:selectionError.fileName||"",raw:_raw}}const compatibilityReport=window.__slgRenpyCompatibilityReport;const compatibilityBlocked=window.__slgRenpyCompatibilityBlocked===true||!!(compatibilityReport&&(compatibilityReport.supportLevel===`UNSUPPORTED`||compatibilityReport.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`));if(compatibilityBlocked)return{state:`failed`,reason:`compatibility`,code:(compatibilityReport?.issues||[]).map(issue=>issue?.code).find(Boolean)||`renpy_compatibility_blocked`,fileName:window.__slgSelectionMeta?.name||window.__slgSelectionMeta?.label||``,raw:(compatibilityReport?.issues||[]).map(issue=>issue?.code).filter(Boolean).join(`, `)||`RenPy compatibility preflight blocked patch writing`,compatibilityReport};const watchdog=',
-        1,
-    )
-    runtime = runtime.replace(
-        r'function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){',
-        r'function triggerReactButton(button){const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){const compatibilityReport=window.__slgRenpyCompatibilityReport;const compatibilityBlocked=window.__slgRenpyCompatibilityBlocked===true||!!(compatibilityReport&&(compatibilityReport.supportLevel===`UNSUPPORTED`||compatibilityReport.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`));if(compatibilityBlocked)return}manualIdle=false;if(isStart){',
-        1,
-    )
+    read_task_old = 'function readTaskSnapshot(){const selectionError=window.__slgSelectionError;if(selectionError)return{state:"failed",reason:"scan",fileName:selectionError.fileName||"",raw:selectionError.message};const watchdog='
+    read_task_new = 'function readTaskSnapshot(){const _failureCode=typeof workshopFailureCode==="function"?workshopFailureCode:()=>"";const _failureKind=typeof classifyWorkshopFailure==="function"?classifyWorkshopFailure:()=>"unknown";const selectionError=window.__slgSelectionError;if(selectionError){const _raw=selectionError.message||String(selectionError);return{state:"failed",reason:"scan",code:_failureCode(_raw),fileName:selectionError.fileName||"",raw:_raw}}const compatibilityReport=window.__slgRenpyCompatibilityReport;const _supplied=window.__slgEngineCapabilities||compatibilityReport?.capabilities;const _hasCapabilityContext=!!(_supplied||(compatibilityReport&&(compatibilityReport.supportLevel||window.__slgRenpyCompatibilityGate)));const _caps=_hasCapabilityContext?(_supplied&&typeof _supplied==="object"?_supplied:(compatibilityReport.supportLevel===`SAFE`||compatibilityReport.supportLevel===`WARNING`||compatibilityReport.supportLevel===`EXTRACT_ONLY`?{canTranslate:true}:{canTranslate:false})):null;const compatibilityBlocked=_hasCapabilityContext&&(_caps.canTranslate!==true||compatibilityReport?.supportLevel===`UNSUPPORTED`||window.__slgRenpyCompatibilityGate===`blocked`);if(_hasCapabilityContext)window.__slgRenpyCompatibilityBlocked=compatibilityBlocked;if(compatibilityBlocked)return{state:`failed`,reason:`compatibility`,code:(compatibilityReport?.issues||[]).map(issue=>issue?.code).find(Boolean)||`renpy_compatibility_blocked`,fileName:window.__slgSelectionMeta?.name||window.__slgSelectionMeta?.label||``,raw:(compatibilityReport?.issues||[]).map(issue=>issue?.code).filter(Boolean).join(`, `)||`RenPy compatibility preflight blocked patch writing`,compatibilityReport};const watchdog='
+    runtime = runtime.replace(read_task_old, read_task_new, 1)
+    trigger_old = r'function triggerReactButton(button){manualIdle=false;const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1");if(isStart){'
+    trigger_new = r'function triggerReactButton(button){const isStart=button===startButton||button?.textContent?.includes("\u5f00\u59cb\u7ffb\u8bd1")||button?.textContent?.includes("翻译并导出");if(isStart){const compatibilityReport=window.__slgRenpyCompatibilityReport;const _supplied=window.__slgEngineCapabilities||compatibilityReport?.capabilities;const _hasCapabilityContext=!!(_supplied||(compatibilityReport&&(compatibilityReport.supportLevel||window.__slgRenpyCompatibilityGate)));const _caps=_hasCapabilityContext?(_supplied&&typeof _supplied==="object"?_supplied:(compatibilityReport.supportLevel===`SAFE`||compatibilityReport.supportLevel===`WARNING`||compatibilityReport.supportLevel===`EXTRACT_ONLY`?{canTranslate:true}:{canTranslate:false})):null;const compatibilityBlocked=_hasCapabilityContext&&(_caps.canTranslate!==true||compatibilityReport?.supportLevel===`UNSUPPORTED`||window.__slgRenpyCompatibilityGate===`blocked`);if(_hasCapabilityContext)window.__slgRenpyCompatibilityBlocked=compatibilityBlocked;if(compatibilityBlocked)return}manualIdle=false;if(isStart){'
+    runtime = runtime.replace(trigger_old, trigger_new, 1)
     persist_start_old = 'if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}'
     persist_start_new = 'if(isStart){try{const raw=localStorage.getItem(SESSION_KEY);if(raw){const ss=JSON.parse(raw);ss.translating=true;ss.savedAt=Date.now();localStorage.setItem(SESSION_KEY,JSON.stringify(ss))}}catch{}}'
     if runtime.count(persist_start_old) != 1:
@@ -1328,10 +1324,11 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
 
     # --- patched APK visibility & signature-conflict handling ---
     snap_old = 'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text))return{state:"completed",fileName,count,translated,raw:log.raw,latest:log.latest,installAvailable:!!installButton?.isConnected};'
-    snap_new = (r'if(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text)){const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
+    snap_new = (r'if((/\u6c49\u5316\u751f\u6548/.test(text)||/\u5b89\u88c5\u6210\u529f/.test(text))||(/\u7ffb\u8bd1\u5b8c\u6210/.test(text)&&/\u5199\u5165\u8865\u4e01|\u8865\u4e01 APK \u5df2\u751f\u6210|\u5df2\u751f\u6210\u8865\u4e01/.test(text))){const stage=/\u6c49\u5316\u751f\u6548|\u5b89\u88c5\u6210\u529f/.test(text)?`installed`:`generated`;'
+                'const patchedApkPath=(text.match(/\/[^\s]*patched-signed\.apk/)||[])[0]||"";'
                 'const currentInstall=findButton("' + "\u5b89\u88c5\u8865\u4e01\u7248" + '");if(currentInstall)installButton=currentInstall;'
                 'const installAvailable=!!currentInstall?.isConnected;'
-                'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable}}')
+                'return{state:"completed",stage,fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable}}')
     if runtime.count(snap_old) != 1:
         raise ValueError("Completed snapshot signature not found")
     runtime = runtime.replace(snap_old, snap_new, 1)
@@ -1349,6 +1346,37 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
         raise ValueError("Completed branch signature not found")
     runtime = runtime.replace(branch_old, branch_new, 1)
 
+    # --- two-segment validation card (install success / localization effect) ---
+    validation_anchor = 'if(actions.children.length)body.append(actions);return body}'
+    validation_new = (
+        'if(actions.children.length)body.append(actions);'
+        'const _vsrc=globalThis.__slgEngineCapabilities||globalThis.__slgRenpyCompatibilityReport||{};'
+        'const _vcaps=globalThis.__slgResolveEngineCapabilities?globalThis.__slgResolveEngineCapabilities(_vsrc):_vsrc;'
+        'if(_vcaps.canValidateRuntime===true&&(payload.stage===`installed`||payload.installed!==undefined||globalThis.__slgValidation)){'
+        'const _v=globalThis.__slgValidation||{};'
+        'const _eff=_v.textAppears===true?{key:`active`,text:"' + "生效" + '"}:'
+        '_v.textAppears===false?{key:`mismatch`,text:"' + "未生效" + '",hint:"' + "未检测到目标语言文本，请检查补丁是否编入译文" + '"}:'
+        '{key:`pending`,text:"' + "待确认" + '"};'
+        'const _panel=textNode("section","workshop-summary-list");'
+        'if(payload.installed!==undefined){'
+        'const _a=textNode("li","workshop-summary-row");'
+        '_a.append(textNode("span","","' + "安装" + '"),textNode("span","",(payload.installed===false?"' + "安装失败" + '":"' + "安装成功" + '")+(payload.installed===false?" [✗]":" [✓]")));'
+        '_panel.append(_a);}'
+        'const _b=textNode("li","workshop-summary-row");'
+        '_b.append(textNode("span","","' + "汉化生效" + '"),textNode("span","",_eff.text));'
+        '_panel.append(_b);'
+        'if(_eff.key===`pending`){'
+        '_panel.append(textNode("p","workshop-state-copy","' + "启动游戏并确认文本是否出现" + '"));'
+        '_panel.append(actionButton("' + "已生效" + '",()=>{globalThis.__slgValidation=Object.assign({},globalThis.__slgValidation,{textAppears:true});refresh()},true));'
+        '_panel.append(actionButton("' + "未生效" + '",()=>{globalThis.__slgValidation=Object.assign({},globalThis.__slgValidation,{textAppears:false});refresh()},true));'
+        '}else if(_eff.key===`mismatch`){_panel.append(textNode("p","workshop-state-copy",_eff.hint));}'
+        'card.append(_panel);}'
+        'return body}'
+    )
+    if runtime.count(validation_anchor) != 1:
+        raise ValueError("Completed validation anchor not found")
+    runtime = runtime.replace(validation_anchor, validation_new, 1)
+
     helpers_anchor = 'function mount(){const _prefs=readSettingsPrefs();'
     helpers_new = (
         'function clickReact(label){const b=findButton(label);if(b){b.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));return true}return false}'
@@ -1365,8 +1393,8 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
 
 
     # --- translation language guidance + task mode selector ---
-    snap_guid_old = 'return{state:"completed",fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable}}'
-    snap_guid_new = ('return{state:"completed",fileName,count,translated,patchedApkPath,'
+    snap_guid_old = 'return{state:"completed",stage,fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable}}'
+    snap_guid_new = ('return{state:"completed",stage,fileName,count,translated,patchedApkPath,'
                      'activationMode:window.__slgActivationMode||\'always_on\',translatorLanguage:window.__slgTranslatorLang||\'\','
                      'compiledPath:window.__slgCompiledPath||\'\',renpyLang:window.__slgRenpyLang||\'\','
                      'renpyMenuType:window.__slgRenpyMenuType||\'\','
@@ -1397,6 +1425,16 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
     if runtime.count(mode_anchor) != 1:
         raise ValueError("Ready mode selector signature not found")
     runtime = runtime.replace(mode_anchor, mode_new, 1)
+    runtime = runtime.replace(
+        'card.append(textNode("p","workshop-state-copy","可以开始了"));',
+        'const _readyCaps=window.__slgResolveEngineCapabilities?window.__slgResolveEngineCapabilities(window.__slgEngineCapabilities||window.__slgRenpyCompatibilityReport||{}):window.__slgEngineCapabilities||{};const _exportOnly=_readyCaps.canWritePatch===false&&_readyCaps.canTranslate===true;card.append(textNode("p","workshop-state-copy",_exportOnly?"可以开始翻译并导出":"可以开始了"));',
+        1,
+    )
+    runtime = runtime.replace(
+        'body.append(card,actionButton("开始翻译",()=>triggerReactButton(startButton)));',
+        'const _readyActionLabel=_exportOnly?"翻译并导出":"开始翻译";body.append(card,actionButton(_readyActionLabel,()=>triggerReactButton(startButton)));',
+        1,
+    )
 
     runtime = runtime.replace(
         "card.append(textNode(\"p\",\"workshop-settings-status\",\"提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。\"));",
@@ -1637,9 +1675,13 @@ def patch_local_engine(js: str) -> str:
         "if(!n||ae.length===0||(!te&&!oe&&!((window.__slgLocalSelected||"
         "Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).some(_s=>_s.value===\"local\")))))return;"
     )
-    if js.count(old_gate) != 1:
+    local_gate_prefix = "if(!n||ae.length===0||!te&&!oe&&!((window.__slgLocalSelected||"
+    if js.count(old_gate) == 1:
+        js = js.replace(old_gate, new_gate, 1)
+    elif js.count(local_gate_prefix) == 1:
+        pass
+    else:
         raise ValueError("Local engine controller gate anchor not found")
-    js = js.replace(old_gate, new_gate, 1)
 
     return js
 
@@ -1735,7 +1777,7 @@ async function Lo(e){'''
     # directory before translating so a cleared cache cannot break patch builds.
     old_start = "Ce=async()=>{if(!n||ae.length===0||!te&&!oe)return;"
     new_start = (
-        "Ce=async()=>{globalThis.__slgTrimTranslationDiagnostics?.({reset:true});globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();if(!n||ae.length===0||!te&&!oe)return;"
+        "Ce=async()=>{globalThis.__slgTrimTranslationDiagnostics?.({reset:true});globalThis.__slgResetTranslationCollisionReport?.();globalThis.__slgResetTranslationCoverage?.();const _capReport=window.__slgRenpyCompatibilityReport;const _capSupplied=window.__slgEngineCapabilities||_capReport?.capabilities;const _hasCapabilityContext=!!(_capSupplied||(_capReport&&(_capReport.supportLevel||window.__slgRenpyCompatibilityGate)));const _caps=_hasCapabilityContext?(globalThis.__slgResolveEngineCapabilities?globalThis.__slgResolveEngineCapabilities({compatibilityReport:_capReport,capabilities:_capSupplied,adapterId:window.__slgEngineAdapterId,workflow:window.__slgEngineWorkflow}):_capSupplied||{}):null;if(_hasCapabilityContext){window.__slgEngineCapabilities=_caps;window.__slgEngineWorkflow=_caps.workflow;window.__slgRenpyCompatibilityBlocked=globalThis.__slgUpdateCompatibilityBlocked?globalThis.__slgUpdateCompatibilityBlocked(_caps):_caps.canTranslate!==true;if(!_caps.canTranslate){ce(!1);return}}if(!n||ae.length===0||!te&&!oe&&!((window.__slgLocalSelected||Array.from(globalThis.document?.querySelectorAll?.(\"select\")||[]).some(_s=>_s.value===\"local\"))))return;"
         "if(window.__slgSelectionMeta?.source===`installed`&&window.__slgSelectionMeta?.packageName){try{"
         "let _r=await E.selectInstalledApp({packageName:window.__slgSelectionMeta.packageName});"
         "if(_r?.uri){window.__slgSelectionMeta=mergeSelectionMetadata(window.__slgSelectionMeta,_r),persistSelectionSession(window.__slgSelectionMeta)}}"
@@ -1759,7 +1801,7 @@ async function Lo(e){'''
         "if(window.__slgRenpyMenuType===`renpy`&&!window.__slgRenpyCompatibilityPreflightDone){"
         "let _cr=window.__slgRenpyCompatibilityReport;"
         "if(!_cr){window.__slgRenpyCompatibilityBlocked=true;O(`Ren'Py 兼容性预检失败：扫描器没有返回兼容性报告，已阻断模型调用。`,`error`);ce(!1);return}"
-        "window.__slgRenpyCompatibilityReport=_cr;window.__slgRenpyCompatibilityBlocked=_cr.supportLevel===`UNSUPPORTED`||_cr.supportLevel===`EXTRACT_ONLY`||window.__slgRenpyCompatibilityGate===`blocked`||window.__slgRenpyCompatibilityGate===`extract_only`;"
+        "window.__slgRenpyCompatibilityReport=_cr;window.__slgEngineCapabilities=globalThis.__slgResolveEngineCapabilities?globalThis.__slgResolveEngineCapabilities({compatibilityReport:_cr,capabilities:window.__slgEngineCapabilities,adapterId:window.__slgEngineAdapterId,workflow:window.__slgEngineWorkflow}):window.__slgEngineCapabilities||null;window.__slgEngineWorkflow=window.__slgEngineCapabilities?.workflow||window.__slgEngineWorkflow||`UNSUPPORTED`;window.__slgRenpyCompatibilityBlocked=globalThis.__slgUpdateCompatibilityBlocked?globalThis.__slgUpdateCompatibilityBlocked(window.__slgEngineCapabilities):!window.__slgEngineCapabilities?.canTranslate;"
         "if(typeof globalThis.__slgRenderRenpyCompatibilityReport===\"function\"){try{globalThis.__slgRenderRenpyCompatibilityReport(_cr)}catch{}}"
         "if(window.__slgRenpyCompatibilityBlocked){O(`Ren'Py 兼容性预检失败：${(_cr.issues||[]).map(_i=>_i.code).slice(0,3).join(`,`)||`unsupported`}`,`error`);ce(!1);return}"
         "window.__slgRenpyCompatibilityPreflightDone=true}"
@@ -1874,6 +1916,22 @@ async function Lo(e){'''
     build_gate_compiled = build_gate_compiled.replace(
         'return N},2);if(!N&&(a.length>0||oe)){(!N&&a.length)&&await E.compileTranslationsIntoApk(',
         'return N},2);if(!N&&(a.length>0||oe)){window.__slgCompileFailed=false;(!N&&a.length)&&await E.compileTranslationsIntoApk(',
+        1,
+    )
+    writer_gate = (
+        'const _buildReport=window.__slgRenpyCompatibilityReport;'
+        'const _buildSupplied=window.__slgEngineCapabilities||_buildReport?.capabilities;'
+        'const _writerHasCapabilityContext=!!(_buildSupplied||(_buildReport&&(_buildReport.supportLevel||window.__slgRenpyCompatibilityGate)));'
+        'const _buildCaps=_writerHasCapabilityContext?(globalThis.__slgResolveEngineCapabilities?'
+        'globalThis.__slgResolveEngineCapabilities({compatibilityReport:_buildReport,capabilities:_buildSupplied,adapterId:window.__slgEngineAdapterId,workflow:window.__slgEngineWorkflow}):_buildSupplied||{}):null;'
+        'if(_writerHasCapabilityContext&&_buildCaps.canWritePatch!==true){window.__slgTranslationAwaitingExport=true;'
+        'O(`翻译已完成：当前引擎没有经过验证的 APK writer。`,`info`);return N}'
+    )
+    if build_gate_compiled.count('globalThis.__slgTrimTranslationDiagnostics?.();') != 1:
+        raise ValueError("Writer gate insertion signature not found")
+    build_gate_compiled = build_gate_compiled.replace(
+        'globalThis.__slgTrimTranslationDiagnostics?.();',
+        'globalThis.__slgTrimTranslationDiagnostics?.();' + writer_gate,
         1,
     )
     build_gate_compiled = build_gate_compiled.replace(
@@ -2565,6 +2623,47 @@ render();
 '''
 
 
+engine_capability_runtime = r'''
+(function(){
+const root=typeof window!==`undefined`?window:globalThis;
+function resolveEngineCapabilities(value){
+  const input=value&&typeof value===`object`?value:{};
+  const report=input.compatibilityReport||((`canTranslate` in input||`canWritePatch` in input)?{}:input)||{};
+  const supplied=input.capabilities||report.capabilities||((`canTranslate` in input||`canWritePatch` in input)?input:null);
+  if(supplied&&typeof supplied===`object`){
+    return{
+      adapterId:String(input.adapterId||supplied.adapterId||`renpy`),
+      workflow:String(input.workflow||supplied.workflow||`UNSUPPORTED`),
+      canDetect:supplied.canDetect!==false,
+      canExtractStructured:supplied.canExtractStructured===true,
+      canTranslate:supplied.canTranslate===true,
+      canWritePatch:supplied.canWritePatch===true,
+      canActivate:supplied.canActivate===true,
+      canValidateRuntime:supplied.canValidateRuntime===true
+    }
+  }
+  const level=String(report.supportLevel||``);
+  if(level===`SAFE`||level===`WARNING`)
+    return{adapterId:`renpy`,workflow:`PATCHABLE_VERIFIED`,canDetect:true,canExtractStructured:true,canTranslate:true,canWritePatch:true,canActivate:true,canValidateRuntime:false};
+  if(level===`EXTRACT_ONLY`)
+    return{adapterId:`renpy`,workflow:`TRANSLATABLE_NO_PATCH`,canDetect:true,canExtractStructured:true,canTranslate:true,canWritePatch:false,canActivate:false,canValidateRuntime:false};
+  return{adapterId:`renpy`,workflow:`UNSUPPORTED`,canDetect:false,canExtractStructured:false,canTranslate:false,canWritePatch:false,canActivate:false,canValidateRuntime:false};
+}
+function updateCompatibilityBlocked(caps){
+  const value=caps&&typeof caps===`object`?caps:resolveEngineCapabilities(root.__slgEngineCapabilities||root.__slgRenpyCompatibilityReport||{});
+  const report=root.__slgRenpyCompatibilityReport||{};
+  root.__slgRenpyCompatibilityBlocked=value.canTranslate!==true||report.supportLevel===`UNSUPPORTED`||root.__slgRenpyCompatibilityGate===`blocked`;
+  root.__slgEngineWorkflow=value.workflow;
+  return root.__slgRenpyCompatibilityBlocked;
+}
+root.resolveEngineCapabilities=resolveEngineCapabilities;
+root.updateCompatibilityBlocked=updateCompatibilityBlocked;
+root.__slgResolveEngineCapabilities=resolveEngineCapabilities;
+root.__slgUpdateCompatibilityBlocked=updateCompatibilityBlocked;
+})()
+'''
+
+
 def terminate_top_level_iife(block: str) -> str:
     """Keep concatenated runtime IIFEs from being parsed as chained calls."""
     stripped = block.rstrip()
@@ -2590,6 +2689,7 @@ def patch_assets(js: str, css: str) -> tuple[str, str]:
     patched = patch_cache_memory(patched)
     patched = patch_translation_diagnostics(patched)
     patched += ";" + terminate_top_level_iife(compatibility_report_runtime)
+    patched += ";" + terminate_top_level_iife(engine_capability_runtime)
     patched += ";" + terminate_top_level_iife(dialogue_id_runtime)
     runtime = patch_saves_runtime(WORKSHOP_RUNTIME)
     nav_label_source = 'const button=textNode("button","workshop-touch",label);'

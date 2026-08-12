@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import re
 import subprocess
@@ -8,8 +9,23 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parent
-BASE_JS = ROOT.parent / "extracted" / "assets" / "public" / "assets" / "index-CJtfdHOF.js"
-BASE_CSS = ROOT.parent / "extracted" / "assets" / "public" / "assets" / "index-C044IUg3.css"
+CANONICAL_JS_SHA256 = "d3b0f42a6656e347e5933e17835b8b687f1dc2f5546c1aa15b8fb2048ebe1f85"
+CANONICAL_CSS_SHA256 = "fad58dc778c5b4fa0ac263f5aebcba268c6fb32e9d8b39ae980805b49d5fb18f"
+
+
+def canonical_asset_path(name: str, digest: str) -> Path:
+    candidates = (
+        ROOT.parent / "extracted" / "assets" / "public" / "assets" / name,
+        ROOT.parents[1] / "_trash" / "uncertain" / "extracted" / "assets" / "public" / "assets" / name,
+    )
+    for candidate in candidates:
+        if candidate.is_file() and hashlib.sha256(candidate.read_bytes()).hexdigest() == digest:
+            return candidate
+    raise AssertionError(f"canonical asset not found: {name}")
+
+
+BASE_JS = canonical_asset_path("index-CJtfdHOF.js", CANONICAL_JS_SHA256)
+BASE_CSS = canonical_asset_path("index-C044IUg3.css", CANONICAL_CSS_SHA256)
 
 
 def extract_js_function(source: str, signature: str) -> str:
@@ -2778,7 +2794,7 @@ check(opened===1&&retried===1,`recovery actions are wired`);
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_extract_only_preflight_blocks_start_translation_action(self):
+    def test_extract_only_preflight_allows_translation_export_action(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
             BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
@@ -2798,12 +2814,13 @@ window.__slgScanWatchdog={epoch:1,timerFired:false,settled:true};
 window.__slgRenpyCompatibilityReport={supportLevel:'EXTRACT_ONLY',issues:[{code:'renpy_python2_writer_unavailable'}]};
 window.__slgRenpyCompatibilityGate='extract_only';
 window.__slgRenpyCompatibilityBlocked=true;
+window.__slgEngineCapabilities={canExtractStructured:true,canTranslate:true,canWritePatch:false,canActivate:false};
+window.__slgEngineWorkflow='TRANSLATABLE_NO_PATCH';
 function sourceText(){return '已选择：游戏.apk\n发现 112 个可翻译文件'}
 function readProgressLog(){return{raw:'文件检查已完成。',latest:'文件检查已完成。'}}
 const document={querySelectorAll(){return[]}};
 const snapshot=readTaskSnapshot();
-check(snapshot.state==='failed','extract-only scan cannot become ready');
-check(snapshot.reason==='compatibility','extract-only reason is explicit');
+check(snapshot.state==='ready','extract-only scan must become ready');
 
 function textNode(tag,cls,text){return{tag,cls,text:text||'',children:[],append(...children){this.children.push(...children)}}}
 function fileRow(){return textNode('div','file-row','file')}
@@ -2812,21 +2829,20 @@ function actionButton(label,handler,secondary=false){return{tag:'button',label,h
 function recoveryBanner(){return textNode('section','banner','banner')}
 function openSettings(){}
 function openSourceChooser(){}
-const body=renderStateBody('failed',snapshot);
+const body=renderStateBody('ready',snapshot);
 const labels=[];function collect(node){if(!node)return;if(node.tag==='button')labels.push(node.label);for(const child of node.children||[])collect(child)}
 collect(body);
-check(labels.includes('重新选择 APK'),'extract-only renders a recovery action');
-check(!labels.includes('开始翻译'),'extract-only never renders start translation');
+check(labels.includes('翻译并导出'),'extract-only renders the translation export action');
+check(!labels.includes('重新选择 APK'),'extract-only must not ask to reselect the APK');
 
 let dispatched=0;
 globalThis.MouseEvent=class{constructor(type,options){this.type=type;this.options=options}};
-const reactStart={textContent:'开始翻译',disabled:false,dispatchEvent(){dispatched+=1}};
-let startButton=reactStart;
+const reactStart={textContent:'翻译并导出',disabled:false,dispatchEvent(){dispatched+=1}};
+let startButton=reactStart,installButton=null;
 function findButton(){return reactStart}
-function setWorkshopState(){throw new Error('blocked start must not mutate state through a fake click')}
+function setWorkshopState(){throw new Error('start dispatch must remain owned by React')}
 triggerReactButton(startButton);
-check(dispatched===0,'blocked start must not dispatch the React click');
-check(localStorage.getItem(SESSION_KEY)===null,'blocked start must not persist a translating session');
+check(dispatched===1,'translation export action must dispatch the React start');
 '''
         result = subprocess.run(
             ["node", "-e", snapshot_runtime + render_runtime + trigger_runtime + behavior_contract],
@@ -3071,6 +3087,97 @@ check(custom.includes(`\u81ea\u5b9a\u4e49\u8bed\u8a00\u7cfb\u7edf`)&&custom.incl
 '''
         result = subprocess.run(
             ["node", "-e", snapshot_runtime + render_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_read_task_snapshot_distinguishes_install_from_generate(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        snapshot_runtime = extract_js_function(js, "function readTaskSnapshot()")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.localStorage={getItem(){return null},removeItem(){},setItem(){}};
+let _source=`翻译完成\n已写入补丁 APK`;
+function sourceText(){return _source}
+function readProgressLog(){return{raw:`done`,latest:`done`}}
+const document={querySelectorAll(){return[]}};
+const installButton=null;
+function findButton(){return null}
+let snap=readTaskSnapshot();
+check(snap.state===`completed`&&snap.stage===`generated`,`translation-complete maps to generated stage: state=${snap.state} stage=${snap.stage}`);
+_source=`安装成功\n汉化生效`;
+snap=readTaskSnapshot();
+check(snap.state===`completed`&&snap.stage===`installed`,`install-success maps to installed stage: state=${snap.state} stage=${snap.stage}`);
+_source=`汉化生效`;
+snap=readTaskSnapshot();
+check(snap.state===`completed`&&snap.stage===`installed`,`localization-effect alone maps to installed stage: state=${snap.state} stage=${snap.stage}`);
+_source=`翻译完成`;
+snap=readTaskSnapshot();
+check(snap.state!==`completed`,`translation-complete without patch-written marker is not completed yet: state=${snap.state}`);
+'''
+        result = subprocess.run(
+            ["node", "-e", snapshot_runtime + behavior_contract],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_completed_state_splits_install_and_effect(self):
+        module = self.load_patch()
+        js, _ = module.patch_assets(
+            BASE_JS.read_text("utf-8"), BASE_CSS.read_text("utf-8")
+        )
+        render_runtime = extract_js_function(js, "function renderStateBody(state,payload)")
+        behavior_contract = r'''
+function check(condition,label){if(!condition)throw new Error(label)}
+globalThis.window=globalThis;
+globalThis.localStorage={getItem(){return null},removeItem(){},setItem(){}};
+const SESSION_KEY=`slg-workshop-session-v1`;
+let sessionRestoredAt=0,installButton=null;
+function textNode(tag,cls,text){return{tag,cls,text:text||``,children:[],dataset:{},style:{},setAttribute(){},append(...children){this.children.push(...children)}}}
+function actionButton(label,handler,secondary=false){return{tag:`button`,label,handler,secondary,children:[]}}
+function detailToggle(raw){return textNode(`div`,`details`,raw)}
+function fileRow(){return textNode(`div`,`file-row`,`file`)}
+function recoveryBanner(){return textNode(`section`,`banner`,`banner`)}
+function savePatchedApk(){} function triggerReactButton(){} function openSourceChooser(){} function openSettings(){} function retryTask(){} function clickReact(){}
+const startButton=null;
+function findButton(){return null}
+function completedText(payload){const body=renderStateBody(`completed`,{fileName:`Game.apk`,count:`12`,translated:`34`,raw:`done`,latest:``,installAvailable:false,...payload});const texts=[];function collect(node){if(node&&(node.text!==undefined||node.label!==undefined))texts.push(String(node.text!==undefined?node.text:node.label));for(const child of node?.children||[])collect(child)}collect(body);return texts.join(`\n`)}
+
+globalThis.__slgEngineCapabilities={canValidateRuntime:true};
+const generated=completedText({stage:`generated`});
+check(generated.includes(`补丁 APK 已生成`),`generated card keeps patch-generated copy`);
+check(!generated.includes(`汉化生效`)&&!generated.includes(`已生效`)&&!generated.includes(`未生效`),`generated card hides validation segments: ${generated}`);
+
+const installed=completedText({stage:`installed`,installed:true});
+check(installed.includes(`安装成功`)&&installed.includes(`[✓]`),`installed card shows install success: ${installed}`);
+check(installed.includes(`汉化生效\n待确认`),`installed card shows effect pending confirm: ${installed}`);
+check(installed.includes(`启动游戏并确认文本是否出现`)&&installed.includes(`已生效`)&&installed.includes(`未生效`),`pending shows launch guidance and confirm buttons: ${installed}`);
+
+const failed=completedText({stage:`installed`,installed:false});
+check(failed.includes(`安装失败`)&&failed.includes(`[✗]`),`failed install renders install-failed marker: ${failed}`);
+
+globalThis.__slgValidation={textAppears:true};
+const active=completedText({stage:`installed`,installed:true});
+check(active.includes(`汉化生效\n生效`),`confirming effect active renders effect row: ${active}`);
+check(!active.includes(`待确认`)&&!active.includes(`启动游戏`)&&!active.includes(`已生效`)&&!active.includes(`未生效`),`active effect hides pending confirm: ${active}`);
+
+globalThis.__slgValidation={textAppears:false};
+const mismatch=completedText({stage:`installed`,installed:true});
+check(mismatch.includes(`汉化生效\n未生效`),`failed effect renders effect row: ${mismatch}`);
+check(mismatch.includes(`未检测到目标语言文本`),`failed effect shows diagnostic copy: ${mismatch}`);
+
+globalThis.__slgValidation=null;
+globalThis.__slgEngineCapabilities={canValidateRuntime:false};
+const noValidate=completedText({stage:`installed`,installed:true});
+check(noValidate.includes(`补丁 APK 已生成`),`no-validate card still shows patch-generated copy`);
+check(!noValidate.includes(`汉化生效`)&&!noValidate.includes(`已生效`)&&!noValidate.includes(`未生效`)&&!noValidate.includes(`启动游戏`),`no-validate card hides validation steps entirely: ${noValidate}`);
+'''
+        result = subprocess.run(
+            ["node", "-e", render_runtime + behavior_contract],
             capture_output=True, text=True, encoding="utf-8", check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
