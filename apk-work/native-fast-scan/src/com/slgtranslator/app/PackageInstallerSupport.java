@@ -40,8 +40,27 @@ public final class PackageInstallerSupport {
         }
     }
 
+    /** Static evidence the caller precomputes before installation. */
+    public static final class StaticEvidence {
+        public final boolean allValid;
+
+        public StaticEvidence(boolean allValid) {
+            this.allValid = allValid;
+        }
+
+        public static StaticEvidence missing() {
+            return new StaticEvidence(false);
+        }
+    }
+
     /** Writes base first and every split into one PackageInstaller.Session. */
     public static void installApkSet(Context context, InstalledApkSet apkSet, PluginCall call) {
+        installApkSet(context, apkSet, call, StaticEvidence.missing());
+    }
+
+    /** Writes base first and every split into one PackageInstaller.Session. */
+    public static void installApkSet(Context context, InstalledApkSet apkSet, PluginCall call,
+            StaticEvidence evidence) {
         int sessionId = -1;
         PackageInstaller installer = null;
         PackageInstaller.Session session = null;
@@ -91,6 +110,7 @@ public final class PackageInstallerSupport {
                     JSObject result = new JSObject()
                             .put("sessionId", receivedSession)
                             .put("installed", status == PackageInstaller.STATUS_SUCCESS)
+                            .put("staticAsserts", evidence != null && evidence.allValid)
                             .put("status", status)
                             .put("splitCount", apkSet.splitApks.size());
                     if (status == PackageInstaller.STATUS_SUCCESS) {

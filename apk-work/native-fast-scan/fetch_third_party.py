@@ -50,6 +50,13 @@ ROOT_DEPS = [
     ("org.jetbrains.kotlin", "kotlin-stdlib", "2.0.21"),
     ("androidx.lifecycle", "lifecycle-common", "2.0.0"),
     ("dev.ffmpegkit-maintained", "llama-android", "0.1.1"),
+    # Structured-text backend parsers (Apache-2.0). commons-csv >= 1.11.0
+    # hard-requires commons-io 2.x at class load, and commons-io 2.x is not
+    # reachable from any configured mirror; 1.10.0 is the newest version
+    # whose runtime deps (commons-lang3 3.12.0) are fully available.
+    ("com.google.code.gson", "gson", "2.13.2"),
+    ("org.apache.commons", "commons-csv", "1.10.0"),
+    ("org.apache.commons", "commons-lang3", "3.12.0"),
 ]
 
 # Group prefixes whose POMs are followed transitively.
@@ -142,7 +149,8 @@ def walk_pom(group: str, artifact: str, version: str,
         return
     seen.add(key)
     packaging = "aar" if group != "javax.inject" and artifact not in (
-        "firebase-encoders", "firebase-annotations", "okhttp", "okio"
+        "firebase-encoders", "firebase-annotations", "okhttp", "okio",
+        "gson", "commons-csv", "commons-lang3",
     ) else "jar"
     if artifact == "kotlin-stdlib" or artifact == "lifecycle-common":
         packaging = "jar"
@@ -206,14 +214,25 @@ def verify_pins() -> bool:
     if not pin_path.exists():
         return False
     ok = True
+    pinned: dict[str, str] = {}
     for line in pin_path.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if len(parts) != 3:
             continue
-        digest, _, name = parts
-        path = OUT / name
-        if not path.exists() or sha256_of(path) != digest:
-            print(f"  CHECKSUM MISMATCH: {name}")
+        pinned[parts[2]] = parts[0]
+    # The pin file must cover every artifact on disk: a jar that arrived
+    # after the last write must trigger a rewrite instead of silently
+    # staying unpinned.
+    for path in sorted(OUT.iterdir()):
+        if path.suffix not in (".aar", ".jar", ".pom"):
+            continue
+        expected = pinned.get(path.name)
+        if expected is None:
+            print(f"  NOT PINNED: {path.name}")
+            ok = False
+            continue
+        if not path.exists() or sha256_of(path) != expected:
+            print(f"  CHECKSUM MISMATCH: {path.name}")
             ok = False
     return ok
 

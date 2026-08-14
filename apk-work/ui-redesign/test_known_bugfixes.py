@@ -287,7 +287,9 @@ globalThis.window={Capacitor:{Plugins:{FileManager:{
         self.assertIn("return await Promise.all(ne),wo(!0),{translations:d,successCount:d.size", js)
         self.assertIn("_mode===`full`&&(vo={},cacheIndex={},_dirty={},bo=!0,await wo(!0))", js)
         self.assertIn("bo=!0,wo(!0);t+=l.length", js)
-        self.assertIn("return N},(window.__slgLocalSelected?2:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){", js)
+        # 本地引擎走原生桥(RESOURCE_LOCK 串行化),React 侧本地并发为 1。
+        # 节流/强制写缓存语义未变,仅并发常量 2 -> 1。
+        self.assertIn("return N},(window.__slgLocalSelected?1:6));if(!N)await wo(!0);if(!N&&(a.length>0||oe)){", js)
 
 
 if __name__ == "__main__":

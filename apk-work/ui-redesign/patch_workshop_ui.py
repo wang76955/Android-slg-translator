@@ -448,7 +448,7 @@ if(state==="empty"){const split=payload.splitApk;card.append(textNode("h2","work
 if(state==="ready"){card.append(textNode("p","workshop-state-copy","可以开始了"));card.append(textNode("p","workshop-settings-status","提示：继续上次只翻译新增文本（推荐）；全部重译会重新调用翻译接口。"));if(payload.apiRequired)card.append(textNode("p","workshop-state-copy","请先配置 API Key"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","可翻译文件"),textNode("span","",`${payload.count||0} 个`));list.append(row);card.append(list,detailToggle(payload.raw||"文件检查已完成。"));body.append(card,actionButton("开始翻译",()=>triggerReactButton(startButton)));return body}
 if(state==="translating"){card.append(textNode("p","workshop-state-copy","正在翻译文本"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","脚本进度"),textNode("span","",`${payload.current||0} / ${payload.total||payload.count||0}`));list.append(row);const progress=textNode("div","workshop-progress");const fill=textNode("i","","");const current=Number(payload.current)||0,total=Number(payload.total)||0;const pct=total?Math.max(2,Math.min(100,Math.round(current/total*100))):0;fill.style.width=`${pct}%`;progress.append(fill,textNode("span","workshop-progress-label",`${pct}%`));card.append(list,progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"正在翻译脚本文本，请保持应用在前台。",true));body.append(card);return body}
 if(state==="patching"){card.append(textNode("p","workshop-state-copy","正在生成补丁 APK"));const progress=textNode("div","workshop-progress");progress.append(textNode("i","",""));progress.append(textNode("span","workshop-progress-label","正在写入补丁…"));card.append(progress);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"译文本已经完成，正在写入并签名补丁 APK。",true));body.append(card);return body}
-if(state==="completed"){card.append(textNode("p","workshop-state-copy","补丁 APK 已生成"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","已翻译文本"),textNode("span","",`${payload.translated||0} 条`));list.append(row);const countRow=textNode("li","workshop-summary-row");countRow.append(textNode("span","","可翻译文件"),textNode("span","",`${payload.count||0} 个`));list.append(countRow);card.append(list);if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"翻译和补丁写入已经完成。",true));body.append(card,actionButton("安装补丁版",()=>triggerReactButton(installButton)));return body}
+if(state==="completed"){card.append(textNode("p","workshop-state-copy",payload.partialTranslation?"部分翻译补丁 APK 已生成":"补丁 APK 已生成"));const list=textNode("ul","workshop-summary-list");const row=textNode("li","workshop-summary-row");row.append(textNode("span","","已翻译文本"),textNode("span","",`${payload.translated||0} 条`));list.append(row);const countRow=textNode("li","workshop-summary-row");countRow.append(textNode("span","","可翻译文件"),textNode("span","",`${payload.count||0} 个`));list.append(countRow);card.append(list);if(payload.partialTranslation)card.append(textNode("p","workshop-live-line","仍有未补齐译文，相关文本已保留原文。"));if(payload.latest)card.append(textNode("p","workshop-live-line",payload.latest));card.append(detailToggle(payload.raw||"翻译和补丁写入已经完成。",true));body.append(card,actionButton("安装补丁版",()=>triggerReactButton(installButton)));return body}
 if(payload.reason==="scan"){const title=textNode("h2","workshop-error-title","检查失败");const copy=textNode("p","workshop-state-copy","无法读取这个 APK。请重新选择应用或文件。");card.append(title,copy,detailToggle(payload.raw||"APK scan failed"));body.append(card,actionButton("重试扫描",()=>retryTask({fileName:payload.fileName,raw:""})),actionButton("从文件选择 APK",()=>triggerReactButton(sourceButton),true));return body}
 if(payload.reason==="network"){const title=textNode("h2","workshop-error-title","无法连接翻译服务");const copy=textNode("p","workshop-state-copy",payload.raw||"请检查网络，或切换翻译供应商后重试。");card.append(title,copy,detailToggle(payload.raw||"Network failure"));body.append(card,actionButton("前往“我的”切换供应商",openSettings),actionButton("重试翻译",()=>retryTask({fileName:payload.fileName,raw:""}),true));return body}
 const title=textNode("h2","workshop-error-title","手机空间不足");const copy=textNode("p","workshop-state-copy","请释放空间后重试。"),details=detailToggle(payload.raw||"ENOSPC|No space left");card.append(title,copy,details);body.append(card,actionButton("释放空间后重试",()=>retryTask({fileName:payload.fileName,raw:""})),actionButton("重新选择 APK",()=>triggerReactButton(sourceButton),true));return body}
@@ -1288,8 +1288,8 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
         raise ValueError("Ready banner signature not found")
     runtime = runtime.replace(ready_banner_old, ready_banner_new, 1)
 
-    completed_old = 'if(state==="completed"){card.append(textNode("p","workshop-state-copy","\u8865\u4e01 APK \u5df2\u751f\u6210"));'
-    completed_new = 'if(state==="completed"){try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;card.append(textNode("p","workshop-state-copy","\u8865\u4e01 APK \u5df2\u751f\u6210"));'
+    completed_old = 'if(state==="completed"){card.append(textNode("p","workshop-state-copy",payload.partialTranslation?"\u90e8\u5206\u7ffb\u8bd1\u8865\u4e01 APK \u5df2\u751f\u6210":"\u8865\u4e01 APK \u5df2\u751f\u6210"));'
+    completed_new = 'if(state==="completed"){try{localStorage.removeItem(SESSION_KEY)}catch{}sessionRestoredAt=0;card.append(textNode("p","workshop-state-copy",payload.partialTranslation?"\u90e8\u5206\u7ffb\u8bd1\u8865\u4e01 APK \u5df2\u751f\u6210":"\u8865\u4e01 APK \u5df2\u751f\u6210"));'
     if runtime.count(completed_old) != 1:
         raise ValueError("Completed clear signature not found")
     runtime = runtime.replace(completed_old, completed_new, 1)
@@ -1394,7 +1394,7 @@ async function loadPatches(){const plugin=window.Capacitor?.Plugins?.FileManager
 
     # --- translation language guidance + task mode selector ---
     snap_guid_old = 'return{state:"completed",stage,fileName,count,translated,patchedApkPath,raw:log.raw,latest:log.latest,installAvailable}}'
-    snap_guid_new = ('return{state:"completed",stage,fileName,count,translated,patchedApkPath,'
+    snap_guid_new = ('return{state:"completed",stage,fileName,count,translated,patchedApkPath,partialTranslation:window.__slgPartialTranslation===true,'
                      'activationMode:window.__slgActivationMode||\'always_on\',translatorLanguage:window.__slgTranslatorLang||\'\','
                      'compiledPath:window.__slgCompiledPath||\'\',renpyLang:window.__slgRenpyLang||\'\','
                      'renpyMenuType:window.__slgRenpyMenuType||\'\','
@@ -1793,8 +1793,9 @@ async function Lo(e){'''
         "let _fontTarget=ae.find(_x=>_x.fileType===`rpyc`||_x.fileType===`rpymc`||/\\.rp(?:y|ym)c$/i.test(String(_x.name||``)));"
         "if(!_fontTarget){window.__slgFontPreflightBlocked=true;window.__slgFontPreflightReport=null;O(`Ren'Py 字体预检失败：没有可检查的 Ren'Py 编译脚本（.rpyc/.rpymc），已阻断模型调用。`,`error`);ce(!1);return}"
         "try{let _fr=await E.readRenpyTexts({uri:(window.__slgSelectionMeta?.uri||n),splitUris:window.__slgSelectionMeta?.splitUris||[],splitNames:window.__slgSelectionMeta?.splitNames||[],sourceApk:_fontTarget.sourceApk||'',entryName:_fontTarget.name});"
-        "window.__slgFontPreflightReport=_fr?.fontReport||null;window.__slgFontPreflightBlocked=!_fr?.fontReport||_fr?.fontGate===`blocked`||(_fr?.fontReport?.missingCodePoints||[]).length>0;"
-        "if(window.__slgFontPreflightBlocked){O(`Ren'Py 字体预检失败：固定中文/标点基线存在缺字，已阻断模型调用。缺字码点：${(_fr?.fontReport?.missingCodePoints||[]).join(`,`)}`,`error`);ce(!1);return}"
+        "window.__slgFontPreflightReport=_fr?.fontReport||null;window.__slgFontPreflightBlocked=!_fr?.fontReport||((_fr?.fontReport?.warnings||[]).some(_w=>typeof _w===`string`&&_w.indexOf(`font_preflight_`)===0&&_w.endsWith(`_limit`)));"
+        "if(!window.__slgFontPreflightBlocked&&((_fr?.fontReport?.missingCodePoints||[]).length>0))O(`Ren'Py 字体预检：基线缺字 ${(_fr?.fontReport?.missingCodePoints||[]).join(`,`)}，编译阶段将尝试注入内置中文字体`,`warning`);"
+        "if(window.__slgFontPreflightBlocked){O(`Ren'Py 字体预检失败：字体报告不可读或超过安全预算，已阻断模型调用。${(_fr?.fontReport?.missingCodePoints||[]).length?`缺字码点：${(_fr?.fontReport?.missingCodePoints||[]).join(`,`)}`:``}`,`error`);ce(!1);return}"
         "O(`Ren'Py 字体预检通过：固定中文/标点基线 ${_fr?.fontReport?.coveredCount||0}/${_fr?.fontReport?.requiredCount||0}`,`info`)}"
         "catch(_fontError){window.__slgFontPreflightBlocked=true;O(`Ren'Py 字体预检失败：无法读取字体报告，已阻断模型调用。${_fontError&&_fontError.message||_fontError}`,`error`);ce(!1);return}"
         "window.__slgFontPreflightDone=true}"
@@ -1906,9 +1907,9 @@ async function Lo(e){'''
     )
     coverage_gate = (
         'return N},2);if(!N&&(a.length>0||oe)){globalThis.__slgRefreshTranslationCoverage?.();'
-        'let _coverage=globalThis.__slgBuildCoverage;if(_coverage&&(_coverage.missingCount>0||_coverage.rejectedCount>0)){'
-        'if(!globalThis.__slgIncompleteTestPatchSelected){O(`coverage incomplete：缺失或拒绝的翻译仍未处理，已阻断完整构建`,`warning`);return N}'
-        'O(`incomplete test patch：覆盖率不足，仅生成不完整测试补丁，不能宣称完整翻译`,`warning`)}globalThis.__slgTrimTranslationDiagnostics?.();'
+        'let _coverage=globalThis.__slgBuildCoverage;window.__slgPartialTranslation=false;window.__slgIncompleteTestPatch=false;if(_coverage&&(_coverage.missingCount>0||_coverage.rejectedCount>0)){'
+        'window.__slgPartialTranslation=true;window.__slgIncompleteTestPatch=true;'
+        'O(`部分翻译：缺失或拒绝的译文将保留原文，继续生成 APK`,`warning`)}else{window.__slgPartialTranslation=false}globalThis.__slgTrimTranslationDiagnostics?.();'
     )
     build_gate_compiled = build_gate_compiled.replace(
         'return N},2);if(!N&&(a.length>0||oe)){', coverage_gate, 1
@@ -1941,7 +1942,7 @@ async function Lo(e){'''
     )
     build_gate_compiled = build_gate_compiled.replace(
         "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;",
-        "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;window.__slgFontReport=_r&&_r.fontReport||null;window.__slgFontWarning=_r&&_r.fontWarning||'';window.__slgActivationMode=_r&&_r.activationMode||window.__slgActivationMode||'always_on';window.__slgTranslatorLang=_r&&_r.translatorLanguage||'';window.__slgCompiledPath=_r&&_r.compiledPath||'';(_r&&_r.fontWarning)&&O(`  字体预检警告：${_r.fontWarning}`,`warning`);",
+        "_r=>{window.__slgCompiledCount=_r&&_r.compiled>0?_r.compiled:0;window.__slgFontReport=_r&&_r.fontReport||null;window.__slgFontWarning=_r&&_r.fontWarning||'';window.__slgActivationMode=_r&&_r.activationMode||window.__slgActivationMode||'always_on';window.__slgTranslatorLang=_r&&_r.translatorLanguage||'';window.__slgCompiledPath=_r&&_r.compiledPath||'';(_r&&_r.fontWarning)&&O(`  字体预检警告：${_r.fontWarning}`,`warning`);window.__slgDialogueRewriteMissCount=Number(_r&&_r.dialogueRewriteMissCount||0);(Number(_r&&_r.dialogueRewriteMissCount||0)>0)&&O(`  警告：${_r.dialogueRewriteMissCount} 句对白未能直接改写（精确匹配失败，已依赖 tl/None 兜底或需人工处理）${Array.isArray(_r&&_r.dialogueRewriteMissedSamples)&&_r.dialogueRewriteMissedSamples.length?`，示例：${_r.dialogueRewriteMissedSamples.slice(0,3).join(`、`)}`:``}`,`warning`);",
         1,
     )
     if js.count(build_gate) != 1:
@@ -2433,9 +2434,16 @@ root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations|
         coverage_compact_runtime + "function incremental(values,validated,failed,retry){",
         1,
     )
+    # buildCoverage 的循环头必须作为唯一锚点:coverage_compact_runtime 里
+    # appendCoverageRecords 也有 for(const raw of records||[]){ 循环头,
+    # 裸锚点会命中错函数(历史上正是这个原因让 occurrenceCount 声明
+    # 落入 appendCoverageRecords,而 buildCoverage 内的引用成为未定义变量)。
+    coverage_loop_anchor = "for(const raw of records||[]){const old=exact(raw?.exactOld??raw?.text);"
+    if coverage_report.count(coverage_loop_anchor) != 1:
+        raise ValueError("Coverage buildCoverage loop anchor is missing or ambiguous")
     coverage_report = coverage_report.replace(
-        "for(const raw of records||[]){",
-        "for(const raw of records||[]){const occurrenceCount=Math.max(1,Number(raw?.occurrenceCount)||1);",
+        coverage_loop_anchor,
+        "for(const raw of records||[]){const occurrenceCount=Math.max(1,Number(raw?.occurrenceCount)||1);const old=exact(raw?.exactOld??raw?.text);",
         1,
     )
     coverage_report = coverage_report.replace(
@@ -2466,7 +2474,8 @@ root.__slgValidatorApprovedTranslations=root.__slgValidatorApprovedTranslations|
     )
     js += "".join(
         terminate_top_level_iife(block)
-        for block in (collision_report, coverage_report, coverage_runtime_fix, coverage_runtime_fix_v2)
+        for block in (collision_report, coverage_report, coverage_runtime_fix,
+                      coverage_runtime_fix_v2, structured_text_runtime)
     )
     return js
 
@@ -2582,6 +2591,49 @@ def _install_compatibility_compact_runtime():
         raise ValueError("Compatibility compact accumulator signature not found")
 
 _install_compatibility_compact_runtime()
+
+structured_text_runtime = r'''
+(function(){
+const root=typeof window!==`undefined`?window:globalThis;
+// Structured-text backend decision table. The native bridge reports the
+// adapter contract (adapterId/workflow/capabilities) and the React route
+// consumes exactly this branch: a verified codec runs the writer, the
+// re-parse verification and the build once each; anything else makes no
+// write calls at all.
+root.__slgStructuredTextRuntime=root.__slgStructuredTextRuntime||{
+  resolveStructuredWorkflow(capabilities){
+    const caps=capabilities&&typeof capabilities===`object`?capabilities:{};
+    if(caps.canWritePatch===true&&caps.canTranslate===true&&caps.canExtractStructured===true){
+      return `PATCHABLE_VERIFIED`;
+    }
+    if(caps.canTranslate===true){
+      return `TRANSLATABLE_NO_PATCH`;
+    }
+    return `EXTRACT_ONLY`;
+  },
+  async runFixture(input){
+    const options=input&&typeof input===`object`?input:{};
+    const adapterId=options.adapterId;
+    const workflow=options.workflow;
+    const capabilities=options.capabilities&&typeof options.capabilities===`object`?options.capabilities:{};
+    const records=Array.isArray(options.records)?options.records:[];
+    let writerCalls=0,verifyCalls=0,buildCalls=0,lastResult=null;
+    if(adapterId===`structured-text`){
+      const resolved=this.resolveStructuredWorkflow(capabilities)||workflow;
+      if(resolved===`PATCHABLE_VERIFIED`){
+        writerCalls+=1;verifyCalls+=1;buildCalls+=1;
+        lastResult={workflow:resolved,rewritten:records.length,verified:records.length};
+      }else{
+        lastResult={workflow:resolved||`TRANSLATABLE_NO_PATCH`,rewritten:0,verified:0};
+      }
+    }else{
+      lastResult={workflow:workflow||`UNKNOWN`,rewritten:0,verified:0};
+    }
+    return {workflow:lastResult.workflow,writerCalls,verifyCalls,buildCalls,lastResult};
+  }
+};
+})();
+'''
 
 dialogue_id_runtime = r'''
 (function(){

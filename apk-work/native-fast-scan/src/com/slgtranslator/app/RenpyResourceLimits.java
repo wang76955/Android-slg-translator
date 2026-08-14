@@ -6,6 +6,8 @@ public final class RenpyResourceLimits {
     public static final long MAX_SINGLE_SCRIPT_COMPRESSED = 64L * 1024 * 1024;
     public static final long MAX_SINGLE_SCRIPT_INFLATED = 256L * 1024 * 1024;
     public static final long MAX_TOTAL_SCRIPT_INFLATED = 1024L * 1024 * 1024;
+    public static final long MAX_SINGLE_SCRIPT_WORKING_SET = 96L * 1024 * 1024;
+    public static final long MAX_TOTAL_SCRIPT_WORKING_SET = 384L * 1024 * 1024;
     public static final int MAX_RPA_ENTRIES = 200_000;
     public static final int MAX_TEXT_RECORDS = 1_000_000;
     public static final int MAX_TEXT_LENGTH = 1_000_000;
@@ -50,6 +52,26 @@ public final class RenpyResourceLimits {
         if (total > MAX_TOTAL_SCRIPT_INFLATED) {
             throw new LimitException("renpy_limit_inflated",
                     "total inflated Ren'Py scripts exceed the scan limit");
+        }
+    }
+
+    public static void checkWorkingSet(long inflated) throws LimitException {
+        if (inflated < 0) {
+            throw invalidRange("working-set length is negative");
+        }
+        if (inflated > MAX_SINGLE_SCRIPT_WORKING_SET) {
+            throw new LimitException("renpy_memory_budget_exceeded",
+                    "single Ren'Py script exceeds the parser working-set budget");
+        }
+    }
+
+    public static void checkTotalWorkingSet(long total) throws LimitException {
+        if (total < 0) {
+            throw invalidRange("total working-set length is negative");
+        }
+        if (total > MAX_TOTAL_SCRIPT_WORKING_SET) {
+            throw new LimitException("renpy_memory_budget_exceeded",
+                    "Ren'Py scripts exceed the scan working-set budget");
         }
     }
 

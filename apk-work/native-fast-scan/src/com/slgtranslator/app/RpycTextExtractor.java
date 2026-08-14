@@ -106,6 +106,14 @@ public final class RpycTextExtractor {
      */
     public static List<RenpyTextRecord> extractRecords(
             byte[] rpyc, String sourcePath, boolean onlyOld) throws java.io.IOException {
+        if (rpyc != null && rpyc.length > 8 * 1024 * 1024) {
+            RpycSlotSource source = RpycSlotSource.fromBytes(null, rpyc, sourcePath);
+            try {
+                return RpycStreamingExtractor.extractRecords(source, sourcePath, onlyOld);
+            } finally {
+                source.close();
+            }
+        }
         ExtractState state = new ExtractState(sourcePath, onlyOld);
         byte[] pickle = readSlot(rpyc, 2);
         if (pickle == null) {
@@ -128,7 +136,8 @@ public final class RpycTextExtractor {
             } else if (code == 0x4b || code == 0x4d || code == 0x4a) {
                 // BININT1 / BININT2 / BININT
                 state.consumeInteger(integerPayload(pickle, op));
-            } else if (code == 0x8c || code == 0x58) { // SHORT_BINUNICODE / BINUNICODE
+            } else if (code == 0x8c || code == 0x58 || code == 0x8d) {
+                // SHORT_BINUNICODE / BINUNICODE / BINUNICODE8
                 String s = LanguageMenuSupport.stringPayload(pickle, ops, i);
                 state.consumeString(s);
             } else if (code == 0x68 || code == 0x6a) { // BINGET / LONG_BINGET
@@ -152,7 +161,11 @@ public final class RpycTextExtractor {
                 }
                 memoTrack++;
             } else if (code == 0x75 || code == 0x65 || code == 0x61 || code == 0x73
-                    || code == 0x62 || code == 0x31) { // SETITEMS/APPENDS/APPEND/SETITEM/BUILD/POP_MARK
+                    || code == 0x62 || code == 0x31 || code == 0x4e) {
+                // SETITEMS/APPENDS/APPEND/SETITEM/BUILD/POP_MARK/NONE close the
+                // current field; a None value (e.g. who=None narration) must not
+                // leave lastKey pointing at the previous key or the following
+                // string is misread as its value.
                 state.lastKey = null;
                 if (code == 0x62) {
                     state.pyCodeObject = false;
@@ -181,7 +194,7 @@ public final class RpycTextExtractor {
         }
     }
 
-    private static final class ExtractState {
+    static final class ExtractState {
         final List<RenpyTextRecord> records = new ArrayList<>();
         final List<String> choices = new ArrayList<>();
         final Map<String, Integer> occurrences = new HashMap<>();
@@ -251,7 +264,12 @@ public final class RpycTextExtractor {
                 }
                 lastKey = null;
             } else if (lastKey != null && TEXT_KEYS.contains(lastKey)) {
-                if (isUserText(value)) {
+                // Translation old keys are registry keys, not just user-visible
+                // prose. Single-token labels such as "Change" must survive the
+                // old-only scan even though the normal corpus heuristic rejects
+                // identifier-like strings.
+                if ((onlyOld && "old".equals(lastKey) && !value.isEmpty())
+                        || isUserText(value)) {
                     String speaker = "what".equals(lastKey) ? pendingSpeaker : "";
                     String identifier = "what".equals(lastKey)
                             && isDialogueAstType(currentAstType)
@@ -589,6 +607,7 @@ public final class RpycTextExtractor {
             return false;
         }
         boolean hasLetter = false;
+        boolean hasNonAsciiLetter = false;
         boolean allDigits = true;
         boolean hasSpaceOrPunct = false;
         for (int i = 0; i < s.length(); i++) {
@@ -596,6 +615,9 @@ public final class RpycTextExtractor {
             if (Character.isLetter(c)) {
                 hasLetter = true;
                 allDigits = false;
+                if (c > 0x7f) {
+                    hasNonAsciiLetter = true;
+                }
             } else if (Character.isDigit(c)) {
                 // digits are fine
             } else {
@@ -625,7 +647,7 @@ public final class RpycTextExtractor {
             }
         }
         // Pure single-token identifiers (variable names, style names, keywords).
-        if (!hasSpaceOrPunct && s.length() <= 40) {
+        if (!hasSpaceOrPunct && !hasNonAsciiLetter && s.length() <= 40) {
             boolean identifier = true;
             for (int i = 0; i < s.length(); i++) {
                 char c = s.charAt(i);
@@ -939,9 +961,12 @@ public final class RpycTextExtractor {
                     throw new IOException("Ren'Py zlib data is invalid");
                 }
             }
-            if (inflater.getRemaining() != 0) {
-                throw new IOException("Ren'Py zlib data has trailing bytes");
-            }
+            // Some old Ren'Py RPC2 writers include alignment bytes (or a
+            // second unused zlib member) inside the table's slot length.
+            // Ren'Py's reference reader, like Python's zlib.decompress,
+            // accepts the first complete stream and ignores that remainder.
+            // Rejecting it here made otherwise readable legacy scripts fail
+            // on real games such as 异世界天堂0.6.
             return out.toByteArray();
         } finally {
             inflater.end();

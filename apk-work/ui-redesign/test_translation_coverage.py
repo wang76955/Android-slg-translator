@@ -320,8 +320,8 @@ process.stdout.write(JSON.stringify({{initial,after,reset}}));
         self.assertEqual(result["reset"]["uniqueSourceCount"], 0)
         self.assertEqual(result["reset"]["occurrenceCount"], 0)
 
-    def test_task10_generated_ui_build_branch_blocks_incomplete_and_warns_incomplete_patch(self):
-        """Run the exact generated build gate, including both coverage branches."""
+    def test_task10_generated_ui_build_branch_continues_as_partial_when_coverage_is_incomplete(self):
+        """Missing or rejected entries must preserve the original text but not block APK construction."""
         if not (BASE_JS.exists() and BASE_CSS.exists()):
             self.skipTest("canonical workshop assets not present")
         patcher = load_patch_workshop_ui()
@@ -337,14 +337,13 @@ const start = js.indexOf(marker);
 const end = js.indexOf('}},we=async', start);
 if (start < 0 || end < 0) throw new Error('generated build gate missing');
 const branch = js.slice(start, end);
-if (!branch.includes('missingCount>0||_coverage.rejectedCount>0') || !branch.includes('incomplete test patch')) throw new Error('wrong build branch extracted');
-async function run(selected) {{
+if (!branch.includes('missingCount>0||_coverage.rejectedCount>0') || !branch.includes('部分翻译')) throw new Error('wrong build branch extracted');
+async function run() {{
   const logs=[]; let compileCalls=0, buildCalls=0;
   let N='', a=[{{path:'game/tl.rpy',content:'translated'}}], oe=false, r=false, o='', s='', c=false, l=false;
   let n='source.apk', m='output', y='zh', g='en', f='', i='source.apk';
   const window=globalThis;
-  window.__slgIncompleteTestPatchSelected=selected;
-  window.__slgBuildCoverage={{missingCount:1,rejectedCount:selected?0:1}};
+  window.__slgBuildCoverage={{missingCount:1,rejectedCount:1}};
   window.__slgRefreshTranslationCoverage=()=>{{}};
   const O=(message)=>logs.push(String(message));
   const ue=()=>{{}};
@@ -359,18 +358,15 @@ async function run(selected) {{
   const runBranch=new Function('N','a','oe','r','o','s','c','l','n','m','y','g','f','i','O','ue','Me','is','ce','fe','E','window',`return (async()=>{{${{branch}}}})()`);
   let branchResult;
   try {{ branchResult=await runBranch(N,a,oe,r,o,s,c,l,n,m,y,g,f,i,O,ue,Me,is,ce,fe,E,window); }} catch (error) {{ logs.push('ERROR:'+error.message); }}
-  return {{selected,compileCalls,buildCalls,logs,branchResult}};
+  return {{partial:window.__slgPartialTranslation===true,compileCalls,buildCalls,logs,branchResult}};
 }}
-Promise.all([run(false),run(true)]).then(value=>process.stdout.write(JSON.stringify(value)));
+run().then(value=>process.stdout.write(JSON.stringify(value)));
 """
             result = json.loads(run_node(script))
-        blocked, incomplete = result
-        self.assertEqual(blocked["compileCalls"], 0)
-        self.assertEqual(blocked["buildCalls"], 0)
-        self.assertTrue(any("coverage incomplete" in message for message in blocked["logs"]))
-        self.assertEqual(incomplete["compileCalls"], 1)
-        self.assertEqual(incomplete["buildCalls"], 1)
-        self.assertTrue(any("incomplete test patch" in message for message in incomplete["logs"]))
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["compileCalls"], 1)
+        self.assertEqual(result["buildCalls"], 1)
+        self.assertTrue(any("部分翻译" in message for message in result["logs"]))
 
     def test_task10_generated_ui_export_sanitizes_values_and_secrets(self):
         """Execute the generated report and its real export button handler."""
@@ -447,8 +443,8 @@ process.stdout.write(JSON.stringify({{records:globalThis.__slgCoverageRecords,un
         self.assertEqual(result["entries"], [])
         self.assertFalse(result["incomplete"])
 
-    def test_task10_incremental_cache_hit_cannot_bypass_generated_coverage_gate(self):
-        """Compose generated incremental selection, coverage, and build gate."""
+    def test_task10_incremental_cache_hit_marks_partial_and_continues_generated_build(self):
+        """Cached coverage gaps must be visible but must not prevent a partial APK build."""
         if not (BASE_JS.exists() and BASE_CSS.exists()):
             self.skipTest("canonical workshop assets not present")
         patcher = load_patch_workshop_ui()
@@ -464,6 +460,7 @@ const firstEnd=js.indexOf('}})()',start)+4; const secondStart=js.indexOf('\\n(fu
 const secondEnd=js.indexOf('}})()',secondStart)+4; const thirdStart=js.indexOf('\\n(function(){{',secondEnd)+1;
 const thirdEnd=js.indexOf('}})()',thirdStart)+4; if(start<0||thirdEnd<=thirdStart)throw new Error('coverage IIFEs missing');
 globalThis.window=globalThis; eval(js.slice(start,firstEnd)); eval(js.slice(secondStart,secondEnd)); eval(js.slice(thirdStart,thirdEnd));
+globalThis.t=[];
 const diff=globalThis.__slgTranslationCoverageIncrementalDiff(['Hello','Missing','New'],new Map([['Hello','你好']]),['Rejected'],[]);
 globalThis.__slgCoverageRecords=[{{text:'Hello',sourcePath:'game/a.rpyc'}},{{text:'Missing',sourcePath:'game/b.rpyc'}},{{text:'Rejected',sourcePath:'game/b.rpyc'}}];
 globalThis.__slgValidatorApprovedTranslations=new Map([['Hello','你好']]);
@@ -471,14 +468,14 @@ globalThis.__slgRejectedTranslations=new Set(['Rejected']);
 globalThis.__slgRefreshTranslationCoverage();
 const coverage=globalThis.__slgBuildCoverage;
 let compileCalls=0,buildCalls=0,logs=[]; let N='',a=[{{path:'game/tl.rpy',content:'translated'}}],oe=false,r=false,o='',s='',c=false,l=false,n='source.apk',m='output',y='zh',g='en',f='',i='source.apk';
-window.__slgIncompleteTestPatchSelected=false; const O=message=>logs.push(String(message)); const ue=()=>{{}}; const Me=value=>String(value||'translated.apk'); const is=value=>String(value||'');
+const O=message=>logs.push(String(message)); const ue=()=>{{}}; const Me=value=>String(value||'translated.apk'); const is=value=>String(value||'');
 const E={{compileTranslationsIntoApk:async()=>{{compileCalls++;return {{compiled:1}}}},buildPatchedApk:async()=>{{buildCalls++;return {{uri:'file:///patched.apk',path:'patched.apk',signed:true,signatureVerified:true}}}}}};
 const marker2='if(!N&&(a.length>0||oe)){{globalThis.__slgRefreshTranslationCoverage?.()'; const branchStart=js.indexOf(marker2); const branchEnd=js.indexOf('}},we=async',branchStart); if(branchStart<0||branchEnd<0)throw new Error('generated gate missing');
 const branch=js.slice(branchStart,branchEnd);
 const ce=()=>{{}}; const fe=()=>{{}};
 const runBranch=new Function('N','a','oe','r','o','s','c','l','n','m','y','g','f','i','O','ue','Me','is','ce','fe','E','window',`return (async()=>{{${{branch}}}})()`);
 await runBranch(N,a,oe,r,o,s,c,l,n,m,y,g,f,i,O,ue,Me,is,ce,fe,E,window);
-process.stdout.write(JSON.stringify({{diff,coverage,compileCalls,buildCalls,logs}}));
+process.stdout.write(JSON.stringify({{diff,coverage,partial:window.__slgPartialTranslation===true,compileCalls,buildCalls,logs}}));
 }}
 main().catch(error=>{{process.stderr.write(error.stack||String(error));process.exit(1)}});
 """
@@ -486,9 +483,10 @@ main().catch(error=>{{process.stderr.write(error.stack||String(error));process.e
         self.assertEqual(result["diff"], ["Missing", "New", "Rejected"])
         self.assertEqual(result["coverage"]["missingCount"], 1)
         self.assertEqual(result["coverage"]["rejectedCount"], 1)
-        self.assertEqual(result["compileCalls"], 0)
-        self.assertEqual(result["buildCalls"], 0)
-        self.assertTrue(any("coverage incomplete" in message for message in result["logs"]))
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["compileCalls"], 1)
+        self.assertEqual(result["buildCalls"], 1)
+        self.assertTrue(any("部分翻译" in message for message in result["logs"]))
 
     def test_task10_scanner_keeps_exact_old_occurrences_for_coverage(self):
         source = (FAST_SCAN / "src/com/slgtranslator/app/FastApkScanner.java").read_text("utf-8")

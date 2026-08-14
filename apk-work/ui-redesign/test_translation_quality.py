@@ -465,6 +465,166 @@ public final class Task9LintGateHarness {
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
 
+    def test_mlkit_echo_fallback_matrix(self):
+        harness = r'''
+package com.slgtranslator.app;
+
+public final class MlkitEchoFallbackHarness {
+  private static void eq(String expected, String actual, String label) {
+    if (expected == null ? actual != null : !expected.equals(actual)) {
+      throw new AssertionError(label + " expected=" + expected + " actual=" + actual);
+    }
+  }
+  public static void main(String[] args) {
+    eq("操！", MlKitTranslator.echoFallback("fuck！"), "fuck-bang");
+    eq("操。", MlKitTranslator.echoFallback("fuck。"), "fuck-dot");
+    eq("操", MlKitTranslator.echoFallback("fuck"), "fuck-bare");
+    eq("{b}操！{/b}", MlKitTranslator.echoFallback("{b}fuck！{/b}"), "fuck-tag");
+    eq("嗯哼。", MlKitTranslator.echoFallback("ehem。"), "ehem");
+    eq("琪亚拉？", MlKitTranslator.echoFallback("chiara？"), "chiara");
+    eq("吉利！", MlKitTranslator.echoFallback("gillie！"), "gillie");
+    eq("呀！", MlKitTranslator.echoFallback("eep！"), "eep");
+    eq("呃啊！", MlKitTranslator.echoFallback("aaaaaaagh！"), "aagh");
+    eq("啊！", MlKitTranslator.echoFallback("aaaaaaah！"), "aah");
+    eq("什——", MlKitTranslator.echoFallback("wha-"), "wha");
+    eq("砰", MlKitTranslator.echoFallback("thwock"), "thwock");
+    eq("{i}砰{/i}", MlKitTranslator.echoFallback("{i}thwock{/i}"), "thwock-i");
+    eq("{i}塞玛·托米·阿尔·萨马塞拉姆？{/i}",
+        MlKitTranslator.echoFallback("{i}Sema Tomi Al Saamaselam？{/i}"), "sema");
+    eq("{i}伊沙妮·阿格拉迪·阿尔·瓦希·萨马科{/i}",
+        MlKitTranslator.echoFallback("{i}Ishani A\u2019Gradi Al Vashi Samako{/i}"), "ishani-curly");
+    eq("{i}伊沙妮·阿格拉迪·阿尔·瓦希·萨马科{/i}",
+        MlKitTranslator.echoFallback("{i}Ishani A\u02bcGradi Al Vashi Samako{/i}"), "ishani-02bc");
+    eq("什……什么？", MlKitTranslator.echoFallback("w什么？"), "w-shenme");
+    eq("嘿，艾什特尔。", MlKitTranslator.echoFallback("嘿，eshtel。"), "hey-eshtel");
+    eq("好嘞。", MlKitTranslator.echoFallback("alrighty。"), "alrighty");
+    eq("拜拜！", MlKitTranslator.echoFallback("byeeeeeee！"), "byeeee");
+    eq("什么鬼？", MlKitTranslator.echoFallback("dafuq？"), "dafuq");
+    eq("德鲁萨里。", MlKitTranslator.echoFallback("druthari。"), "druthari");
+    eq("萨里亚？", MlKitTranslator.echoFallback("saarya？"), "saarya");
+    eq("嗯！", MlKitTranslator.echoFallback("mmh！"), "mmh");
+    eq("伊维·克莱门茨。", MlKitTranslator.echoFallback("Evie Clements."), "evie");
+    eq("{b}——呢！{/b}", MlKitTranslator.echoFallback("{b}-ne！{/b}"), "ne-fragment");
+    eq("——认真的！", MlKitTranslator.echoFallback("-serious！"), "serious-fragment");
+    eq("（哔——）", MlKitTranslator.echoFallback("（beeeeeeeeeeeeeep）"), "beep");
+    eq("（扑棱扑棱扑棱扑棱扑棱扑棱）", MlKitTranslator.echoFallback("（flapflapflapflapflapflap）"), "flap");
+    eq("（嗡——）", MlKitTranslator.echoFallback("（whrrrrrrrrrrrrrrr）"), "whrr");
+    eq("{b}他妈的！{/b}", MlKitTranslator.echoFallback("{b}fucking！{/b}"), "fucking");
+    eq("{fi}所以你能不能就……{/fi}", MlKitTranslator.echoFallback("{fi}So can you just...{/fi}"), "so-can");
+    eq("{fi}你知道的……{/fi}", MlKitTranslator.echoFallback("{fi}y'know...{/fi}"), "yknow");
+    eq("{fi}也是最危险的{/fi}.", MlKitTranslator.echoFallback("{fi}are also the most dangerous{/fi}."), "most-dangerous");
+    eq("{fi=[50]-[1.5]-[750]}闯入者{/fi}.", MlKitTranslator.echoFallback("{fi=[50]-[1.5]-[750]}Interloper{/fi}."), "interloper");
+    eq("{i}[playername]——赛·哈拉内·德马。{/i}",
+        MlKitTranslator.echoFallback("{i}[playername]-Sai Halane Dema。{/i}"), "playername-incantation");
+    eq("{i}阿尔·米沙伊？{/i}", MlKitTranslator.echoFallback("{i}Al Mishai？{/i}"), "al-mishai");
+    eq("{i}阿尔·萨马塞-拉姆？{/i}", MlKitTranslator.echoFallback("{i}Al saamase-lam？{/i}"), "saamase");
+    eq("{i}阿鲁莱·纳·阿迈·阿尔·阿卢卡{/i}", MlKitTranslator.echoFallback("{i}Alule Na Amai Al Aluka{/i}"), "alule");
+    eq("{i}埃萨·阿莱·塔亚·纳·韦莱，阿尔·维亚·莫拉赛{/i}",
+        MlKitTranslator.echoFallback("{i}Etha Alai Thaya Na Vele，Al Veia Moratsai{/i}"), "etha");
+    eq("{i}伊亚·瓦伊·贝莱伦德。{/i}", MlKitTranslator.echoFallback("{i}Ia Vai Belelende。{/i}"), "ia-vai");
+    eq("{i}吉加·马迪·阿沙加里·阿尔·哈谢什。{/i}",
+        MlKitTranslator.echoFallback("{i}Jiga Madi Ashagari Al Hashesh。{/i}"), "jiga");
+    eq("{i}凯耶·阿瓦里·德马？{/i}", MlKitTranslator.echoFallback("{i}Kai'e A'Wari Dema？{/i}"), "kaie");
+    eq("{i}查·吉加，罗加赛·阿尔·维亚希·阿莱·索利。{/i}",
+        MlKitTranslator.echoFallback("{i}Cha Jiga，Rogasai Al Veiasshi Alai Soli。{/i}"), "cha-jiga");
+    eq("{i}伊加——伊亚·德马！{/i}", MlKitTranslator.echoFallback("{i}Igaaaaaa ia dema！{/i}"), "igaaaaaa");
+    eq("{i}伊沙尼？{/i}", MlKitTranslator.echoFallback("{i}ishani？{/i}"), "ishani-name");
+    eq("{i}嘎？{/}", MlKitTranslator.echoFallback("{i}Bawk?{/}"), "bawk");
+    eq("{i}琪亚拉开始唱歌。", MlKitTranslator.echoFallback("{i}Chiara begins to sing."), "chiara-sings-malformed");
+    eq("{i}你到家之后……{i}", MlKitTranslator.echoFallback("{i}After you get home...{i}"), "after-home-malformed");
+    eq("她差点{b}{i}杀掉{/b}{/i}的那个人？", MlKitTranslator.echoFallback("The person she tried to {b}{i}KILL{/b}{/i}?"), "kill-sentence");
+    eq("你{b}{i}他妈{/b}{/i}的在这干什么？", MlKitTranslator.echoFallback("The fuck are {b}{i}YOU{/b}{/i} doing here?"), "fuck-sentence");
+    eq("还记得这条裙子吗？", MlKitTranslator.echoFallback("Remember this dress?"), "remember-dress");
+    eq("涩图？", MlKitTranslator.echoFallback("Titty Pics？"), "titty");
+    eq("给我给我给我！", MlKitTranslator.echoFallback("Gimme Gimme Gimme！"), "gimme");
+    eq("不不不不不。", MlKitTranslator.echoFallback("NOPE NOPE NOPE NOPE NOPE。"), "nope");
+    eq("嘎嘎嘎！", MlKitTranslator.echoFallback("Bawk Bawk Bawk！"), "bawk-bawk");
+    eq("哦——天哪！", MlKitTranslator.echoFallback("Ooohhhhhh myyyyyyyy！"), "oh-my");
+    eq("喂？", MlKitTranslator.echoFallback("helloooo？"), "helloooo");
+    eq("太棒了。", MlKitTranslator.echoFallback("greaaaaaat。"), "great");
+    eq("有趣。", MlKitTranslator.echoFallback("iiiiinteresting。"), "interesting");
+    eq("冷静。", MlKitTranslator.echoFallback("caaaaalm。"), "calm");
+    eq("加奈子！", MlKitTranslator.echoFallback("kanakoooooooo！"), "kanako");
+    eq("嘘！", MlKitTranslator.echoFallback("shh！"), "shh");
+    eq("D.O.T.？", MlKitTranslator.echoFallback("d.o.t.？"), "dot");
+    eq("哟，你个小捣蛋。", MlKitTranslator.echoFallback("Aye，Ya Cheeky Brat。"), "aye");
+    eq("在干嘛呢？", MlKitTranslator.echoFallback("whatcha doin'？"), "whatcha");
+    eq("妈的，[playername].", MlKitTranslator.echoFallback("goddammit， [playername]."), "goddammit");
+    eq("哦[playername]!", MlKitTranslator.echoFallback("ohhh [playername]!"), "ohhh-playername");
+    eq("鲁弗斯——[playername].", MlKitTranslator.echoFallback("rufus-[playername]."), "rufus");
+    eq("{i}梅——梅莱·伊加！{/i}", MlKitTranslator.echoFallback("{i}M-Mele Iga！{/i}"), "m-mele");
+    eq("{i}塞马萨·吉尔[playername].{/i}", MlKitTranslator.echoFallback("{i}Semasa Giel [playername].{/i}"), "semasa");
+    eq("{i}罗加萨·马杰·塞拉金·纳·罗米亚·德马。{/i}",
+        MlKitTranslator.echoFallback("{i}Rogasa Majie Therakiin Na Romiya Dema。{/i}"), "rogasa");
+    eq("{i}萨姆3·萨姆4。{/i}", MlKitTranslator.echoFallback("{i}Sam 3，Sam 4。{/i}"), "sam34");
+    eq("{i}南——南达拉！{/i}", MlKitTranslator.echoFallback("{i}n-nandara！{/i}"), "nandara");
+    eq("Q", MlKitTranslator.echoFallback("q"), "q");
+    eq("啊哈哈！", MlKitTranslator.echoFallback("ahahahahaha！"), "ahaha");
+    eq("啊哈哈！", MlKitTranslator.echoFallback("ahahahahahahaaaaa！"), "ahaha-long");
+    eq("哈哈哈！", MlKitTranslator.echoFallback("bahahahaha！"), "baha");
+    eq("哈哈哈", MlKitTranslator.echoFallback("bahahahahahahahahahaaaaaaaaaaaaaaaaaaaaaahhhhhhhhhhhhhh"), "baha-long");
+    eq("啊啊啊！", MlKitTranslator.echoFallback("aaaaaaaiiiiiiiiiiieeeeeee！"), "aie");
+    eq("操——", MlKitTranslator.echoFallback("f-"), "f-dash");
+    eq("嗯哼。", MlKitTranslator.echoFallback("mhm。"), "mhm");
+    eq("哼。", MlKitTranslator.echoFallback("hmph。"), "hmph");
+    if (MlKitTranslator.echoFallback("{fi}{bt=h10-p1.5-s1.0}{color=#d61ebe}come with me and share this with me?{/color}{/bt}{/fi}") != null)
+        throw new AssertionError("real sentence must not fall back");
+    if (MlKitTranslator.echoFallback("Hello world.") != null) throw new AssertionError("sentence must not fall back");
+    if (MlKitTranslator.echoFallback("") != null) throw new AssertionError("empty must not fall back");
+    if (MlKitTranslator.echoFallback(null) != null) throw new AssertionError("null must not fall back");
+    eq("やめて", MlKitTranslator.echoFallback("やめて"), "kana pass-through");
+    RenpyTextValidator.ValidationResult v = RenpyTextValidator.validate("fuck！", "操！");
+    if (!v.valid) throw new AssertionError("fallback must pass lint: " + v.codes);
+    v = RenpyTextValidator.validate("{i}thwock{/i}", "{i}砰{/i}");
+    if (!v.valid) throw new AssertionError("tagged fallback must pass lint: " + v.codes);
+    String swapOld = "{swap=False@Truth@0.5}{sc}False{/sc}{/swap}: She\u2019s always been {swap=your true love@a damn traitor@0.5}{sc}your true love{/sc}{/swap}.";
+    String swapNew = "{swap=False@Truth@0.5}{sc}假象{/sc}{/swap}: 她一直把你当作 {swap=your true love@a damn traitor@0.5}{sc}你的真爱{/sc}{/swap}。";
+    v = RenpyTextValidator.validate(swapOld, swapNew);
+    if (!v.valid) throw new AssertionError("swap/sc tags must validate: " + v.codes);
+    String altOld = "... I wonder if Aoibheann{alt}eeveen{/alt} would know anything about this?";
+    String altNew = "……不知道 Aoibheann{alt}eeveen{/alt} 会不会知道这件事？";
+    v = RenpyTextValidator.validate(altOld, altNew);
+    if (!v.valid) throw new AssertionError("alt tags must validate: " + v.codes);
+    String fiOld = "{fi}{bt=h10-p1.5-s1.0}{color=#d61ebe}come with me and share this with me?{/color}{/bt}{/fi}";
+    String fiNew = "{fi}{bt=h10-p1.5-s1.0}{color=#d61ebe}跟我来，和我一起分享这个吗？{/color}{/bt}{/fi}";
+    v = RenpyTextValidator.validate(fiOld, fiNew);
+    if (!v.valid) throw new AssertionError("fi/bt custom tags must validate: " + v.codes);
+    v = RenpyTextValidator.validate("{i}Chiara begins to sing.", "{i}琪亚拉开始唱歌。");
+    if (!v.valid) throw new AssertionError("malformed-source reproduction must validate: " + v.codes);
+    v = RenpyTextValidator.validate("{i}After you get home...{i}", "{i}你到家之后……{i}");
+    if (!v.valid) throw new AssertionError("malformed-source reproduction must validate: " + v.codes);
+    v = RenpyTextValidator.validate("Plain text.", "{b}broken");
+    if (v.valid || !v.codes.contains("tag_unbalanced"))
+        throw new AssertionError("newly unbalanced translation must still fail: " + v.codes);
+    v = RenpyTextValidator.validate("{b}Hello{/b} [name] %s", "{b}Bonjour{/i} [other] %d");
+    if (v.valid || !v.codes.contains("tag_misnested") || !v.codes.contains("tag_unbalanced"))
+        throw new AssertionError("misnested translation must still fail: " + v.codes);
+    v = RenpyTextValidator.validate("{b}{i}KILL{/b}{/i}", "{b}{i}杀{/b}{/i}");
+    if (!v.valid) throw new AssertionError("misnested-source reproduction must validate: " + v.codes);
+    System.out.println("mlkit-echo-fallback-ok");
+  }
+}
+'''
+        stubs = sorted((FAST_SCAN / "stubs").rglob("*.java"))
+        with tempfile.TemporaryDirectory(prefix="mlkit-echo-fallback-") as directory:
+            directory_path = Path(directory)
+            source = directory_path / "MlkitEchoFallbackHarness.java"
+            classes = directory_path / "classes"
+            source.write_text(harness, encoding="utf-8")
+            classes.mkdir()
+            subprocess.run(
+                [str(JAVAC), "-source", "8", "-target", "8", "-encoding", "UTF-8",
+                 "-d", str(classes), "-classpath", third_party_classpath(),
+                 *map(str, stubs), *map(str, sorted((FAST_SCAN / "src").rglob("*.java"))),
+                 str(source)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            result = subprocess.run(
+                [str(JAVA), "-cp", str(classes) + os.pathsep + third_party_classpath(),
+                 "com.slgtranslator.app.MlkitEchoFallbackHarness"],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+
     def test_task9_full_rejection_matrix_covers_model_and_compile_gates(self):
         harness = r'''
 package com.slgtranslator.app;

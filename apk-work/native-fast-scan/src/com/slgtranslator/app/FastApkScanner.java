@@ -22,6 +22,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -35,7 +36,8 @@ import java.util.zip.ZipFile;
 
 public final class FastApkScanner {
     static final long SCAN_TIMEOUT_MS = 60_000L;
-    static final int MAX_CACHE_ENTRIES = 4;
+    static final int MAX_CACHE_ENTRIES = 2;
+    static final int MAX_CACHED_APK_ENTRIES = 50_000;
     private static final int COPY_BUFFER_SIZE = 1024 * 1024;
     private static final Set<String> RENPY_SCRIPT_EXTENSIONS = Collections.unmodifiableSet(
         new HashSet<>(Arrays.asList("rpym", "rpymc", "rpy", "rpyc"))
@@ -57,6 +59,38 @@ public final class FastApkScanner {
     );
 
     private FastApkScanner() {}
+
+    public static void clearCache() {
+        synchronized (CACHE) {
+            CACHE.clear();
+        }
+    }
+
+    public static JSObject cacheStats() {
+        int entries = 0;
+        long cachedApkEntryCount = 0L;
+        synchronized (CACHE) {
+            entries = CACHE.size();
+            for (ScanResult result : CACHE.values()) {
+                if (result != null && result.entries != null) {
+                    cachedApkEntryCount += result.entries.size();
+                }
+            }
+        }
+        return new JSObject()
+                .put("entries", entries)
+                .put("cachedApkEntryCount", cachedApkEntryCount);
+    }
+
+    private static void cacheResult(String key, ScanResult result) {
+        if (key == null || result == null || result.entries == null
+                || result.entries.size() > MAX_CACHED_APK_ENTRIES) {
+            return;
+        }
+        synchronized (CACHE) {
+            CACHE.put(key, result);
+        }
+    }
 
     /**
      * Single scanner entry point for exact-old occurrence coverage.  The UI
@@ -106,6 +140,7 @@ public final class FastApkScanner {
         result.put("missingCodePoints", missing);
         result.put("hasChineseStyleBucket", report.hasChineseStyleBucket);
         result.put("hasEastAsianLineBreakEvidence", report.hasEastAsianLineBreakEvidence);
+        result.put("code", report.failureCode());
         result.put("warnings", warnings);
         return result;
     }
@@ -133,6 +168,7 @@ public final class FastApkScanner {
                 call.reject("Entry not found in APK set: " + entryName);
                 return;
             }
+            String sourceOwner = sourceOwner(apkSet, apk);
             String content = "";
             String fileType = "unknown";
             RenpyFontSupport.FontReport fontReport = null;
@@ -149,11 +185,18 @@ public final class FastApkScanner {
                 String lower = entryName.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".rpyc") || lower.endsWith(".rpymc")) {
                     fontReport = mergeFontReportsForApkSet(context, apkSet);
-                    StringBuilder out = new StringBuilder();
                     boolean translationBucket = lower.contains("/x-tl/")
                             || lower.contains("/tl/");
-                    List<RenpyTextRecord> records = RpycTextExtractor.extractRecords(
-                            bytes, entryName, translationBucket);
+                    List<RenpyTextRecord> records;
+                    if (bytes.length <= 8 * 1024 * 1024) {
+                        records = RpycTextExtractor.extractRecords(
+                                bytes, entryName, translationBucket);
+                    } else {
+                        try (RpycSlotSource source = RpycSlotSource.fromBytes(context, bytes, entryName)) {
+                            records = RpycStreamingExtractor.extractRecords(
+                                    source, entryName, translationBucket);
+                        }
+                    }
                     RpycCompatibility.Report rpyc = RpycCompatibility.inspect(bytes);
                     compatibilityReport = RenpyPreflight.inspect(context,
                             new RenpyPreflight.SourceSet(
@@ -169,24 +212,12 @@ public final class FastApkScanner {
                                     0));
                     exactOldOccurrences.addAll(records);
                     for (RenpyTextRecord record : records) {
-                        String text = record.text;
-                        // The line protocol splits on newlines, so embedded
-                        // control characters are escaped and unescaped in JS.
-                        // Escape backslashes first so a literal "\n" in the
-                        // original string stays distinguishable from a real
-                        // newline after the JS side unescapes the protocol.
-                        String escaped = text.replace("\\", "\\\\")
-                                .replace("\n", "\\n")
-                                .replace("\r", "\\r")
-                                .replace("\t", "\\t");
-                        out.append("RPYC_STRING\t").append(escaped).append('\n');
-                        renpyRecords.put(renpyRecordJson(record));
+                        renpyRecords.put(renpyRecordJson(record, sourceOwner));
                         String classification = coverageClassification(record);
                         if (classification != null) {
                             coverageClassifications.put(record.sourcePath + "\t" + record.text, classification);
                         }
                     }
-                    content = out.toString();
                     fileType = "rpyc";
                 } else {
                     content = new String(bytes, StandardCharsets.UTF_8);
@@ -225,6 +256,15 @@ public final class FastApkScanner {
                 result.put("compatibilityReport", compatibilityReportJson(compatibilityReport));
                 result.put("compatibilityGate", compatibilityGate(compatibilityReport));
             }
+            EngineCapabilities caps = compatibilityReport == null
+                    ? RenpyEngineAdapter.INSTANCE.capabilities(null)
+                    : RenpyEngineAdapter.INSTANCE.capabilities(compatibilityReport);
+            result.put("adapterId", "renpy");
+            result.put("workflow", caps.workflow.name());
+            result.put("capabilities", capabilitiesJson(caps));
+            result.put("projectFingerprint", projectFingerprintForApkSet(context, apkSet));
+            result.put("recordSchemaVersion", 1);
+            result.put("translationGate", caps.canTranslate ? "clear" : "blocked");
             call.resolve(result);
         } catch (Exception e) {
             String message = e.getMessage();
@@ -232,21 +272,135 @@ public final class FastApkScanner {
         }
     }
 
-    private static JSObject renpyRecordJson(RenpyTextRecord record) {
+    /**
+     * Structured-text entry reader: detects a first-release codec for the
+     * entry, extracts its records and reports the structured-text adapter
+     * contract (workflow {@code PATCHABLE_VERIFIED} only when a codec
+     * accepted the content).
+     */
+    public static void readStructuredTexts(Context context, PluginCall call) {
+        String apkUri = call.getString("apkUri");
+        if (apkUri == null || apkUri.isEmpty()) {
+            apkUri = call.getString("uri");
+        }
+        String entryName = call.getString("entryName");
+        if (apkUri == null || entryName == null || apkUri.isEmpty() || entryName.isEmpty()) {
+            call.reject("apkUri and entryName required");
+            return;
+        }
+        try {
+            RenpyResourceLimits.checkPath(entryName.replace("!/", "/"));
+            InstalledApkSet apkSet = installedApkSet(Uri.parse(apkUri), call);
+            File apk = findApkForEntry(apkSet, entryName, call.getString("sourceApk"));
+            if (apk == null) {
+                call.reject("Entry not found in APK set: " + entryName);
+                return;
+            }
+            String sourceOwner = sourceOwner(apkSet, apk);
+            StructuredTextAdapter adapter = StructuredTextWriter.defaultAdapter();
+            JSArray recordsJson = new JSArray();
+            try (ZipFile zip = new ZipFile(apk)) {
+                byte[] bytes = readEntryData(zip, entryName, Long.MAX_VALUE);
+                if (bytes == null) {
+                    call.reject("Entry not found: " + entryName);
+                    return;
+                }
+                StructuredTextAdapter.AssetCodec codec = adapter.codecFor(entryName, bytes);
+                if (codec == null) {
+                    JSObject unsupported = new JSObject()
+                            .put("adapterId", StructuredTextAdapter.ADAPTER_ID)
+                            .put("workflow", "TRANSLATABLE_NO_PATCH")
+                            .put("capabilities", new JSObject()
+                                    .put("canDetect", true)
+                                    .put("canExtractStructured", false)
+                                    .put("canTranslate", false)
+                                    .put("canWritePatch", false)
+                                    .put("canActivate", false))
+                            .put("translationGate", "blocked")
+                            .put("reasonCode", "structured_extraction_unavailable");
+                    call.resolve(unsupported);
+                    return;
+                }
+                List<StructuredTextRecord> records = codec.extract(
+                        sourceOwner, entryName, bytes);
+                for (StructuredTextRecord record : records) {
+                    recordsJson.put(new JSObject()
+                            .put("recordId", record.recordId)
+                            .put("sourceOwner", record.sourceOwner)
+                            .put("sourcePath", record.sourcePath)
+                            .put("format", record.format)
+                            .put("keyPath", record.keyPath)
+                            .put("sourceText", record.sourceText)
+                            .put("valueType", record.valueType)
+                            .put("index", record.index));
+                }
+            }
+            JSObject result = new JSObject()
+                    .put("adapterId", StructuredTextAdapter.ADAPTER_ID)
+                    .put("workflow", "PATCHABLE_VERIFIED")
+                    .put("capabilities", new JSObject()
+                            .put("canDetect", true)
+                            .put("canExtractStructured", true)
+                            .put("canTranslate", true)
+                            .put("canWritePatch", true)
+                            .put("canActivate", true))
+                    .put("translationGate", "clear")
+                    .put("records", recordsJson)
+                    .put("recordSchemaVersion", 1);
+            call.resolve(result);
+        } catch (Exception e) {
+            String message = e.getMessage();
+            call.reject("Failed to read structured entry: "
+                    + (message == null ? e.toString() : message));
+        }
+    }
+
+    private static JSObject renpyRecordJson(RenpyTextRecord record, String sourceOwner) {
+        String owner = sourceOwner == null || sourceOwner.isEmpty() ? "base" : sourceOwner;
+        String sourcePath = normalizedRecordSourcePath(owner, record.sourcePath);
         JSObject result = new JSObject()
                 .put("text", record.text)
                 .put("kind", record.kind.name())
                 .put("speaker", record.speaker)
                 .put("identifier", record.identifier)
-                .put("sourcePath", record.sourcePath)
+                .put("sourcePath", sourcePath)
                 .put("sourceLine", record.sourceLine)
                 .put("occurrence", record.occurrence)
-                .put("coverageCertain", record.coverageCertain);
+                .put("coverageCertain", record.coverageCertain)
+                .put("recordId", recordId("renpy", owner, record))
+                .put("sourceOwner", owner)
+                .put("resourceType", record.kind.name())
+                .put("sourceKey", record.identifier)
+                .put("recordSchemaVersion", 1);
         String classification = coverageClassification(record);
         if (classification != null) {
             result.put("coverageClassification", classification);
         }
         return result;
+    }
+
+    private static String sourceOwner(InstalledApkSet apkSet, File apk) {
+        if (apkSet == null || apk == null || apk.equals(apkSet.baseApk)) {
+            return "base";
+        }
+        for (int index = 0; index < apkSet.splitApks.size(); index++) {
+            if (apk.equals(apkSet.splitApks.get(index))) {
+                String splitName = apkSet.splitNameAt(index);
+                if (splitName.endsWith(".apk")) {
+                    splitName = splitName.substring(0, splitName.length() - 4);
+                }
+                return "split:" + splitName;
+            }
+        }
+        return "split:unknown";
+    }
+
+    private static String normalizedRecordSourcePath(String sourceOwner, String sourcePath) {
+        String value = sourcePath == null ? "" : sourcePath.replace('\\', '/');
+        if (value.contains("!/")) {
+            return "archive:" + sourceOwner + "!/" + value;
+        }
+        return value;
     }
 
     /**
@@ -294,9 +448,17 @@ public final class FastApkScanner {
 
     private static File findApkForEntry(InstalledApkSet apkSet, String entryName,
                                         String preferredSourceApk) throws IOException {
+        // A single content:// APK is materialized under a stable hash name.
+        // The scan metadata may still carry the DocumentsUI display/source
+        // name, so do not reject that harmless name drift when there are no
+        // split APKs. Split sets remain strict: a stale sourceApk must fail
+        // closed instead of reading a similarly named entry from the wrong
+        // split.
+        boolean allowSingleBaseNameDrift = apkSet.splitApks.isEmpty();
         for (File apk : apkSet.allApks()) {
             if (preferredSourceApk != null && !preferredSourceApk.isEmpty()
-                    && !preferredSourceApk.equals(apk.getName())) {
+                    && !preferredSourceApk.equals(apk.getName())
+                    && !allowSingleBaseNameDrift) {
                 continue;
             }
             try (ZipFile zip = new ZipFile(apk)) {
@@ -305,7 +467,8 @@ public final class FastApkScanner {
                 }
             }
         }
-        if (preferredSourceApk != null && !preferredSourceApk.isEmpty()) {
+        if (preferredSourceApk != null && !preferredSourceApk.isEmpty()
+                && !allowSingleBaseNameDrift) {
             throw new IOException("split metadata sourceApk is not part of the selected set");
         }
         return null;
@@ -371,6 +534,13 @@ public final class FastApkScanner {
         if ((localBase != null && localBase.isFile()) || hasSplitUris(call)) {
             apkSet = installedApkSet(uri, call);
         }
+        if (apkSet != null) {
+            for (File selected : apkSet.allApks()) {
+                TranslationCompiler.assertPristineSource(selected);
+            }
+        } else if (localBase != null && localBase.isFile()) {
+            TranslationCompiler.assertPristineSource(localBase);
+        }
         String cacheKey = sha256(apkSet == null
                 ? uri + "|" + metadata.displayName + "|" + metadata.size + "|" + metadata.lastModified
                 : apkSetCacheKey(apkSet, metadata));
@@ -385,7 +555,7 @@ public final class FastApkScanner {
         if (apkSet != null && !apkSet.splitApks.isEmpty()) {
             ScanResult result = scanApkSet(apkSet, plugin, deadline, context);
             synchronized (CACHE) {
-                CACHE.put(cacheKey, result);
+                cacheResult(cacheKey, result);
             }
             return toResponse(result, SystemClock.elapsedRealtime() - startedAt, false);
         }
@@ -402,7 +572,7 @@ public final class FastApkScanner {
         }
         if (result != null) {
             synchronized (CACHE) {
-                CACHE.put(cacheKey, result);
+                cacheResult(cacheKey, result);
             }
             return toResponse(result, SystemClock.elapsedRealtime() - startedAt, false);
         }
@@ -410,9 +580,9 @@ public final class FastApkScanner {
         File temp = File.createTempFile("slg-apk-scan-", ".apk", context.getCacheDir());
         try {
             copyCompressedApk(resolver, uri, temp, deadline);
-            result = enumerateCentralDirectory(temp, plugin, deadline, context);
+            result = enumerateCentralDirectory(temp, plugin, deadline, context, false);
             synchronized (CACHE) {
-                CACHE.put(cacheKey, result);
+                cacheResult(cacheKey, result);
             }
             return toResponse(result, SystemClock.elapsedRealtime() - startedAt, false);
         } finally {
@@ -493,6 +663,7 @@ public final class FastApkScanner {
     static ScanResult scanApkSet(InstalledApkSet apkSet, Object plugin,
                                  long deadline, Context context) throws Exception {
         List<ApkEntry> merged = new ArrayList<>();
+        List<ApkEntry> mergedIdentity = new ArrayList<>();
         Map<String, ApkEntry> byName = new LinkedHashMap<>();
         ScanResult baseResult = null;
         List<String> languages = new ArrayList<>();
@@ -508,7 +679,8 @@ public final class FastApkScanner {
         for (int index = 0; index < apkSet.allApks().size(); index++) {
             ensureBeforeDeadline(deadline);
             File apk = apkSet.allApks().get(index);
-            ScanResult current = enumerateCentralDirectory(apk, plugin, deadline, context);
+            ScanResult current = enumerateCentralDirectory(
+                    apk, plugin, deadline, context, index > 0);
             if (index == 0) {
                 baseResult = current;
             }
@@ -539,14 +711,18 @@ public final class FastApkScanner {
                     bestTemplateSource = sourceKey;
                 }
             }
+            String owner = index == 0 ? "base" : "split:" + stripApkSuffix(apkSet.splitNameAt(index - 1));
             for (ApkEntry entry : current.entries) {
-                ApkEntry sourced = entry.withSource(apk.getName(), index == 0 ? "base" : "split");
+                ApkEntry sourced = entry.withSource(apk.getName(), index == 0 ? "base" : "split", owner);
                 if (!byName.containsKey(sourced.name)) {
                     byName.put(sourced.name, sourced);
                     merged.add(sourced);
                 } else {
                     byName.get(sourced.name).duplicateSourceApks.add(sourced.sourceApk);
                 }
+            }
+            for (ApkEntry entry : current.identityEntries) {
+                mergedIdentity.add(entry.withSource(apk.getName(), index == 0 ? "base" : "split", owner));
             }
         }
         if (baseResult == null) {
@@ -559,10 +735,12 @@ public final class FastApkScanner {
                     report.supportLevel, report.activationStrategy, report.templatePath,
                     bestCompatibility, rpaCount, apkSet.splitApks.size(), languages,
                     menuType, mergedFont, report.uniqueTextCount,
-                    report.occurrenceCount, report.collisionCount, report.issues);
+                    report.occurrenceCount, report.collisionCount, report.verificationLevel,
+                    report.issues);
         }
         return new ScanResult(merged, baseResult.packageName, languages, menuType,
-                bestCompatibility, report, rpaCount, apkSet.splitApks.size());
+                bestCompatibility, report, rpaCount, apkSet.splitApks.size(),
+                mergedIdentity, apkSet.versionCode >= 0 ? apkSet.versionCode : baseResult.versionCode);
     }
 
     private static boolean isBetterTemplate(String candidatePath, String candidateSource,
@@ -687,7 +865,19 @@ public final class FastApkScanner {
             }
             for (int index = 1; index < all.size(); index++) {
                 File split = all.get(index);
-                Object splitInfo = parser.invoke(context.getPackageManager(), split.getAbsolutePath(), 0);
+                Object splitInfo;
+                try {
+                    splitInfo = parser.invoke(context.getPackageManager(), split.getAbsolutePath(), 0);
+                } catch (Exception parseError) {
+                    if (isSplitArchiveParserLimitation(parseError)) {
+                        // Some Android releases reject a standalone split with
+                        // "Expected base APK". The package manager metadata
+                        // already supplied package/version/splitName; keep
+                        // those checks and continue scanning the split ZIP.
+                        continue;
+                    }
+                    throw parseError;
+                }
                 if (splitInfo == null) {
                     throw new IOException("split metadata manifest is unreadable: " + split.getName());
                 }
@@ -752,7 +942,7 @@ public final class FastApkScanner {
         Context context
     ) throws Exception {
         File descriptorPath = new File("/proc/self/fd/" + descriptor.getFd());
-        return enumerateCentralDirectory(descriptorPath, plugin, deadline, context);
+        return enumerateCentralDirectory(descriptorPath, plugin, deadline, context, false);
     }
 
     private static void copyCompressedApk(
@@ -782,19 +972,22 @@ public final class FastApkScanner {
         File apk,
         Object plugin,
         long deadline,
-        Context context
+        Context context,
+        boolean allowSplitArchiveParserLimit
     ) throws Exception {
         Method likelyText = privateMethod(plugin, "isLikelyTextFile", String.class);
         Method detectType = privateMethod(plugin, "detectFileType", String.class, String.class);
-        Method extractPackage = privateMethod(plugin, "extractPackageNameFromManifest", byte[].class);
         List<ApkEntry> entries = new ArrayList<>();
+        List<ApkEntry> identityEntries = new ArrayList<>();
         String packageName = "";
+        long versionCode = -1L;
         long totalScriptInflated = 0;
         int rpaCount = 0;
         RpycCompatibility.Report compatibility = null;
         int compatibilityPriority = Integer.MAX_VALUE;
         String compatibilityPath = null;
         try (ZipFile zip = new ZipFile(apk)) {
+            TranslationCompiler.assertPristineSource(apk);
             Enumeration<? extends ZipEntry> enumeration = zip.entries();
             while (enumeration.hasMoreElements()) {
                 ensureBeforeDeadline(deadline);
@@ -803,6 +996,9 @@ public final class FastApkScanner {
                     continue;
                 }
                 String name = entry.getName();
+                RenpyResourceLimits.checkPath(name);
+                identityEntries.add(new ApkEntry(
+                        name, entry.getSize(), entry.getCompressedSize(), entry.getCrc(), "identity"));
                 String extension = extensionOf(name);
                 if (isRenPyScriptExtension(extension)) {
                     if (entry.getCompressedSize() >= 0) {
@@ -840,7 +1036,8 @@ public final class FastApkScanner {
                 if ("ttf".equals(extension) || "otf".equals(extension)
                         || "ttc".equals(extension) || "otc".equals(extension)) {
                     RenpyResourceLimits.checkPath(name);
-                    entries.add(new ApkEntry(name, entry.getSize(), entry.getCompressedSize(), "font"));
+                    entries.add(new ApkEntry(name, entry.getSize(), entry.getCompressedSize(),
+                            entry.getCrc(), "font"));
                     continue;
                 }
                 if (!TEXT_EXTENSIONS.contains(extension)) {
@@ -855,15 +1052,16 @@ public final class FastApkScanner {
                     name,
                     entry.getSize(),
                     entry.getCompressedSize(),
+                    entry.getCrc(),
                     fileType
                 ));
             }
 
             ZipEntry manifest = zip.getEntry("AndroidManifest.xml");
             if (manifest != null) {
-                byte[] manifestBytes = readEntry(zip, manifest, deadline);
-                Object extracted = extractPackage.invoke(plugin, manifestBytes);
-                packageName = extracted instanceof String ? (String) extracted : "";
+                readEntry(zip, manifest, deadline);
+                packageName = packageNameFromArchive(context, apk, allowSplitArchiveParserLimit);
+                versionCode = versionCodeFromArchive(context, apk, allowSplitArchiveParserLimit);
             }
             LinkedHashSet<String> languages = new LinkedHashSet<>();
             for (ApkEntry entry : entries) {
@@ -905,8 +1103,91 @@ public final class FastApkScanner {
                             0,
                             0));
             return new ScanResult(entries, packageName, new ArrayList<>(languages), menuType,
-                    compatibility, compatibilityReport, rpaCount, 0);
+                    compatibility, compatibilityReport, rpaCount, 0,
+                    identityEntries, versionCode);
         }
+    }
+
+    /**
+     * Android's package parser is the source of truth for an APK identity.
+     * Manifest bytes are binary XML on real APKs, so string heuristics can
+     * mistake embedded provider/library names for the application package.
+     */
+    private static String packageNameFromArchive(Context context, File apk) throws IOException {
+        return packageNameFromArchive(context, apk, false);
+    }
+
+    private static String packageNameFromArchive(Context context, File apk,
+                                                 boolean allowSplitArchiveParserLimit)
+            throws IOException {
+        if (context == null || apk == null || !apk.isFile()) {
+            return "";
+        }
+        Object packageManager = context.getPackageManager();
+        if (packageManager == null) {
+            return "";
+        }
+        try {
+            Method parser = packageManager.getClass().getMethod(
+                    "getPackageArchiveInfo", String.class, int.class);
+            Object packageInfo = parser.invoke(packageManager, apk.getAbsolutePath(), 0);
+            if (packageInfo == null) {
+                return "";
+            }
+            String packageName = stringField(packageInfo, "packageName");
+            return packageName == null ? "" : packageName.trim();
+        } catch (NoSuchMethodException ignored) {
+            return "";
+        } catch (Exception error) {
+            if (allowSplitArchiveParserLimit && isSplitArchiveParserLimitation(error)) {
+                return "";
+            }
+            String message = error.getMessage() == null ? error.toString() : error.getMessage();
+            throw new IOException("APK package identity parse failed: " + message, error);
+        }
+    }
+
+    private static long versionCodeFromArchive(Context context, File apk,
+                                               boolean allowSplitArchiveParserLimit)
+            throws IOException {
+        if (context == null || apk == null || !apk.isFile()) {
+            return -1L;
+        }
+        Object packageManager = context.getPackageManager();
+        if (packageManager == null) {
+            return -1L;
+        }
+        try {
+            Method parser = packageManager.getClass().getMethod(
+                    "getPackageArchiveInfo", String.class, int.class);
+            Object packageInfo = parser.invoke(packageManager, apk.getAbsolutePath(), 0);
+            return packageInfo == null ? -1L : versionField(packageInfo);
+        } catch (NoSuchMethodException ignored) {
+            return -1L;
+        } catch (Exception error) {
+            if (allowSplitArchiveParserLimit && isSplitArchiveParserLimitation(error)) {
+                return -1L;
+            }
+            String message = error.getMessage() == null ? error.toString() : error.getMessage();
+            throw new IOException("APK version identity parse failed: " + message, error);
+        }
+    }
+
+    private static boolean isSplitArchiveParserLimitation(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase(Locale.ROOT);
+                if (lower.contains("expected base apk")
+                        || lower.contains("found split")
+                        || lower.contains("split apk")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static String normalizeLangCode(String code) {
@@ -1069,6 +1350,17 @@ public final class FastApkScanner {
         return method;
     }
 
+    private static JSObject capabilitiesJson(EngineCapabilities value) {
+        EngineCapabilities safe = value == null
+                ? RenpyEngineAdapter.INSTANCE.capabilities(null) : value;
+        return new JSObject()
+                .put("canDetect", safe.canDetect)
+                .put("canExtractStructured", safe.canExtractStructured)
+                .put("canTranslate", safe.canTranslate)
+                .put("canWritePatch", safe.canWritePatch)
+                .put("canActivate", safe.canActivate);
+    }
+
     private static JSObject toResponse(ScanResult result, long durationMs, boolean cacheHit) throws Exception {
         JSArray entries = new JSArray();
         for (ApkEntry entry : result.entries) {
@@ -1076,9 +1368,11 @@ public final class FastApkScanner {
             value.put("name", entry.name);
             value.put("size", entry.size);
             value.put("compressedSize", entry.compressedSize);
+            value.put("crc", entry.crc);
             value.put("fileType", entry.fileType);
             value.put("sourceApk", entry.sourceApk);
             value.put("apkRole", entry.apkRole);
+            value.put("sourceOwner", entry.sourceOwner);
             JSArray duplicateSources = new JSArray();
             for (String sourceApk : entry.duplicateSourceApks) {
                 duplicateSources.put(sourceApk);
@@ -1091,6 +1385,15 @@ public final class FastApkScanner {
         response.put("totalFiles", entries.length());
         response.put("packageName", result.packageName);
         response.put("splitCount", result.splitCount);
+        response.put("adapterId", "renpy");
+        EngineCapabilities caps = result.compatibilityReport == null
+                ? RenpyEngineAdapter.INSTANCE.capabilities(null)
+                : RenpyEngineAdapter.INSTANCE.capabilities(result.compatibilityReport);
+        response.put("workflow", caps.workflow.name());
+        response.put("capabilities", capabilitiesJson(caps));
+        response.put("projectFingerprint", result.projectFingerprint);
+        response.put("recordSchemaVersion", 1);
+        response.put("translationGate", caps.canTranslate ? "clear" : "blocked");
         JSArray languages = new JSArray();
         for (String language : result.renpyLanguages) {
             languages.put(language);
@@ -1101,16 +1404,20 @@ public final class FastApkScanner {
         response.put("compatibilityGate", compatibilityGate(result.compatibilityReport));
         response.put("compatibilitySupportLevel", result.compatibilityReport == null
                 ? "UNSUPPORTED" : result.compatibilityReport.supportLevel.name());
+        response.put("verificationLevel", result.compatibilityReport == null
+                ? RenpyVerificationEvidence.PENDING_LEVEL
+                : result.compatibilityReport.verificationLevel);
+        response.put("compatibilityDialect", result.compatibility == null
+                ? "UNKNOWN" : result.compatibility.dialect.name());
         if (result.compatibility == null) {
             response.put("supportLevel", "unknown");
             response.put("compatibilityReason", "no_rpyc_template");
             response.put("reasonCode", "no_rpyc_template");
         } else {
-            boolean modern = result.compatibility.generationSupport
-                    == RpycCompatibility.GenerationSupport.MODERN_SUPPORTED;
-            response.put("supportLevel", modern ? "compile" : "extract_only");
+            boolean compilerSupported = result.compatibility.canGenerate();
+            response.put("supportLevel", compilerSupported ? "compile" : "extract_only");
             response.put("compatibilityReason", result.compatibility.reason);
-            response.put("reasonCode", modern ? "" : "legacy_pickle_writer_required");
+            response.put("reasonCode", compilerSupported ? "" : "legacy_pickle_writer_required");
             response.put("rpycContainer", result.compatibility.container);
             response.put("preferredSlot", result.compatibility.preferredSlot);
             response.put("pickleProtocol", result.compatibility.pickleProtocol);
@@ -1153,6 +1460,7 @@ public final class FastApkScanner {
         }
         result.put("supportLevel", report.supportLevel.name());
         result.put("activationStrategy", report.activationStrategy.name());
+        result.put("verificationLevel", report.verificationLevel);
         result.put("templatePath", report.templatePath);
         result.put("menuType", report.menuType);
         result.put("rpaCount", report.rpaCount);
@@ -1172,6 +1480,8 @@ public final class FastApkScanner {
                     .put("usesPy2Builtins", report.rpyc.usesPy2Builtins)
                     .put("generationSupport", report.rpyc.generationSupport == null
                             ? "UNKNOWN_EXTRACT_ONLY" : report.rpyc.generationSupport.name())
+                    .put("dialect", report.rpyc.dialect == null
+                            ? "UNKNOWN" : report.rpyc.dialect.name())
                     .put("reason", report.rpyc.reason));
         } else {
             result.put("rpyc", null);
@@ -1234,13 +1544,115 @@ public final class FastApkScanner {
         return detectedType;
     }
 
-    private static String sha256(String value) throws Exception {
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-        StringBuilder result = new StringBuilder(digest.length * 2);
-        for (byte item : digest) {
-            result.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+    static String recordId(String adapterId, String sourceOwner, RenpyTextRecord record) {
+        if (record == null) {
+            return sha256Hex(safeIdentityPart(adapterId) + "\n"
+                    + safeIdentityPart(sourceOwner) + "\n");
         }
-        return result.toString();
+        return sha256Hex(safeIdentityPart(adapterId) + "\n"
+                + safeIdentityPart(sourceOwner) + "\n"
+                + safeIdentityPart(record.sourcePath) + "\n"
+                + record.kind.name() + "\n"
+                + safeIdentityPart(record.identifier) + "\n"
+                + safeIdentityPart(record.speaker) + "\n"
+                + record.occurrence + "\n"
+                + safeIdentityPart(record.text));
+    }
+
+    static String projectFingerprint(String packageName, long versionCode, int splitCount,
+                                     List<ApkEntry> identityEntries) {
+        List<ApkEntry> sorted = new ArrayList<>();
+        if (identityEntries != null) sorted.addAll(identityEntries);
+        Collections.sort(sorted, new Comparator<ApkEntry>() {
+            @Override
+            public int compare(ApkEntry left, ApkEntry right) {
+                int owner = left.sourceOwner.compareTo(right.sourceOwner);
+                if (owner != 0) return owner;
+                int name = left.name.compareTo(right.name);
+                if (name != 0) return name;
+                int size = Long.compare(left.size, right.size);
+                if (size != 0) return size;
+                int compressed = Long.compare(left.compressedSize, right.compressedSize);
+                if (compressed != 0) return compressed;
+                return Long.compare(left.crc, right.crc);
+            }
+        });
+        StringBuilder value = new StringBuilder()
+                .append(safeIdentityPart(packageName)).append('\n')
+                .append(versionCode).append('\n')
+                .append(splitCount).append('\n');
+        for (ApkEntry entry : sorted) {
+            if (isSignatureEntry(entry.name)) continue;
+            value.append(safeIdentityPart(entry.sourceOwner)).append('\t')
+                    .append(safeIdentityPart(entry.name)).append('\t')
+                    .append(entry.size).append('\t')
+                    .append(entry.compressedSize).append('\t')
+                    .append(entry.crc).append('\n');
+        }
+        return sha256Hex(value.toString());
+    }
+
+    private static String projectFingerprintForApkSet(Context context, InstalledApkSet apkSet)
+            throws Exception {
+        List<ApkEntry> identity = new ArrayList<>();
+        List<File> all = apkSet.allApks();
+        for (int index = 0; index < all.size(); index++) {
+            String owner = index == 0 ? "base"
+                    : "split:" + stripApkSuffix(apkSet.splitNameAt(index - 1));
+            identity.addAll(identityEntriesForApk(all.get(index), owner));
+        }
+        return projectFingerprint(apkSet.packageName, apkSet.versionCode,
+                apkSet.splitApks.size(), identity);
+    }
+
+    private static List<ApkEntry> identityEntriesForApk(File apk, String sourceOwner)
+            throws IOException {
+        List<ApkEntry> result = new ArrayList<>();
+        try (ZipFile zip = new ZipFile(apk)) {
+            Enumeration<? extends ZipEntry> enumeration = zip.entries();
+            while (enumeration.hasMoreElements()) {
+                ZipEntry entry = enumeration.nextElement();
+                if (entry.isDirectory()) continue;
+                String name = entry.getName();
+                RenpyResourceLimits.checkPath(name);
+                result.add(new ApkEntry(name, entry.getSize(), entry.getCompressedSize(),
+                        entry.getCrc(), "identity", apk.getName(),
+                        sourceOwner.startsWith("split:") ? "split" : "base", sourceOwner));
+            }
+        }
+        return result;
+    }
+
+    private static boolean isSignatureEntry(String name) {
+        String normalized = name == null ? "" : name.replace('\\', '/');
+        return normalized.equals("META-INF") || normalized.startsWith("META-INF/");
+    }
+
+    private static String stripApkSuffix(String value) {
+        if (value == null) return "unknown";
+        return value.endsWith(".apk") ? value.substring(0, value.length() - 4) : value;
+    }
+
+    private static String safeIdentityPart(String value) {
+        return value == null ? "" : value.replace('\\', '/');
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte item : digest) {
+                result.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+            }
+            return result.toString();
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private static String sha256(String value) throws Exception {
+        return sha256Hex(value);
     }
 
     private static void ensureBeforeDeadline(long deadline) throws IOException {
@@ -1265,34 +1677,53 @@ public final class FastApkScanner {
         final String name;
         final long size;
         final long compressedSize;
+        final long crc;
         final String fileType;
         final String sourceApk;
         final String apkRole;
+        final String sourceOwner;
         final List<String> duplicateSourceApks;
 
         ApkEntry(String name, long size, long compressedSize, String fileType) {
-            this(name, size, compressedSize, fileType, "base.apk", "base");
+            this(name, size, compressedSize, -1L, fileType, "base.apk", "base", "base");
+        }
+
+        ApkEntry(String name, long size, long compressedSize, long crc, String fileType) {
+            this(name, size, compressedSize, crc, fileType, "base.apk", "base", "base");
         }
 
         ApkEntry(String name, long size, long compressedSize, String fileType,
                  String sourceApk, String apkRole) {
+            this(name, size, compressedSize, -1L, fileType, sourceApk, apkRole,
+                    "split".equals(apkRole) ? "split:unknown" : "base");
+        }
+
+        ApkEntry(String name, long size, long compressedSize, long crc, String fileType,
+                 String sourceApk, String apkRole, String sourceOwner) {
             this.name = name;
             this.size = size;
             this.compressedSize = compressedSize;
+            this.crc = crc;
             this.fileType = fileType;
             this.sourceApk = sourceApk;
             this.apkRole = apkRole;
+            this.sourceOwner = sourceOwner == null || sourceOwner.isEmpty()
+                    ? "base" : sourceOwner;
             this.duplicateSourceApks = new ArrayList<>();
         }
 
-        ApkEntry withSource(String sourceApk, String apkRole) {
-            return new ApkEntry(name, size, compressedSize, fileType, sourceApk, apkRole);
+        ApkEntry withSource(String sourceApk, String apkRole, String sourceOwner) {
+            return new ApkEntry(name, size, compressedSize, crc, fileType,
+                    sourceApk, apkRole, sourceOwner);
         }
     }
 
     private static final class ScanResult {
         final List<ApkEntry> entries;
+        final List<ApkEntry> identityEntries;
         final String packageName;
+        final long versionCode;
+        final String projectFingerprint;
         final List<String> renpyLanguages;
         final String renpyMenuType;
         final RpycCompatibility.Report compatibility;
@@ -1302,9 +1733,15 @@ public final class FastApkScanner {
 
         ScanResult(List<ApkEntry> entries, String packageName, List<String> renpyLanguages,
                    String renpyMenuType, RpycCompatibility.Report compatibility,
-                   RenpyCompatibilityReport compatibilityReport, int rpaCount, int splitCount) {
+                   RenpyCompatibilityReport compatibilityReport, int rpaCount, int splitCount,
+                   List<ApkEntry> identityEntries, long versionCode) {
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
+            this.identityEntries = Collections.unmodifiableList(new ArrayList<>(
+                    identityEntries == null ? Collections.<ApkEntry>emptyList() : identityEntries));
             this.packageName = packageName == null ? "" : packageName;
+            this.versionCode = versionCode;
+            this.projectFingerprint = projectFingerprint(this.packageName, this.versionCode,
+                    splitCount, this.identityEntries);
             this.renpyLanguages = Collections.unmodifiableList(new ArrayList<>(renpyLanguages));
             this.renpyMenuType = renpyMenuType == null ? "none" : renpyMenuType;
             this.compatibility = compatibility;

@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -82,6 +83,92 @@ public final class RpaArchive {
             }
         }
         Collections.sort(result);
+        return result;
+    }
+
+    /** Returns every archive entry, including non-script files, in real coordinates. */
+    public static Map<String, long[]> listEntryLocations(byte[] archiveOrIndex, String archiveName) {
+        return readIndex(archiveOrIndex, archiveName);
+    }
+
+    /** Reads an RPA-2/3 index from a file without loading the data body. */
+    public static Map<String, long[]> readIndexFromFile(RandomAccessFile archive, String archiveName)
+            throws IOException {
+        if (archive == null) {
+            throw new IOException("archive handle is null");
+        }
+        archive.seek(0L);
+        byte[] head = new byte[64];
+        int count = archive.read(head);
+        if (count < 0) {
+            throw new IOException("archive is empty: " + archiveName);
+        }
+        byte[] header = Arrays.copyOf(head, count);
+        if (startsWith(header, RPA3_MAGIC)) {
+            long indexOffset = parseHex(header, 8, 16);
+            long key = parseHex(header, 25, 8);
+            return parseIndexPickle(inflate(readTail(archive, indexOffset)), true, key);
+        }
+        if (startsWith(header, RPA2_MAGIC)) {
+            long indexOffset = parseHex(header, 8, 16);
+            return parseIndexPickle(inflate(readTail(archive, indexOffset)), false, 0L);
+        }
+        throw new IOException("not an RPA-2/3 archive: " + archiveName);
+    }
+
+    /** Reads an RPA-1 index from a separate compressed .rpi file. */
+    public static Map<String, long[]> readIndexFromFile(
+            RandomAccessFile archive,
+            byte[] indexData,
+            String archiveName
+    ) throws IOException {
+        if (archive == null) {
+            throw new IOException("archive handle is null");
+        }
+        if (indexData == null) {
+            throw new IOException("RPA-1 index data is null: " + archiveName);
+        }
+        return parseIndexPickle(inflate(indexData), false, 0L);
+    }
+
+    /** Reads one bounded entry from a file-backed RPA archive. */
+    public static byte[] readEntryFromFile(
+            RandomAccessFile archive,
+            String archiveName,
+            String internalName
+    ) throws IOException {
+        Map<String, long[]> index = readIndexFromFile(archive, archiveName);
+        return readMappedFromFile(archive, index, internalName);
+    }
+
+    /** Reads one bounded entry from an RPA-1 data file using a separate .rpi index. */
+    public static byte[] readEntryFromFile(
+            RandomAccessFile archive,
+            byte[] indexData,
+            String archiveName,
+            String internalName
+    ) throws IOException {
+        Map<String, long[]> index = readIndexFromFile(archive, indexData, archiveName);
+        return readMappedFromFile(archive, index, internalName);
+    }
+
+    private static byte[] readMappedFromFile(
+            RandomAccessFile archive,
+            Map<String, long[]> index,
+            String internalName
+    ) throws IOException {
+        long[] location = index.get(internalName);
+        if (location == null) {
+            throw new IOException("RPA entry not found: " + internalName);
+        }
+        RenpyResourceLimits.checkRange(location[0], location[1], archive.length());
+        RenpyResourceLimits.checkInflated(location[1]);
+        if (location[1] > Integer.MAX_VALUE) {
+            throw new IOException("RPA entry is too large to read into memory: " + internalName);
+        }
+        byte[] result = new byte[(int) location[1]];
+        archive.seek(location[0]);
+        archive.readFully(result);
         return result;
     }
 
@@ -237,6 +324,25 @@ public final class RpaArchive {
         }
         return all.toByteArray();
     }
+
+    private static byte[] readTail(RandomAccessFile archive, long indexOffset) throws IOException {
+        if (indexOffset < 0 || indexOffset > archive.length()) {
+            throw new RenpyResourceLimits.LimitException(
+                    "renpy_invalid_range", "RPA index offset is out of range");
+        }
+        archive.seek(indexOffset);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0L;
+        int count;
+        while ((count = archive.read(buffer)) != -1) {
+            RenpyResourceLimits.checkInterrupted();
+            total += count;
+            RenpyResourceLimits.checkCompressed(total);
+            out.write(buffer, 0, count);
+        }
+        return out.toByteArray();
+    }
     private static byte[] readN(InputStream in, int count) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream(count);
         byte[] buffer = new byte[Math.min(count, 8192)];
@@ -273,7 +379,7 @@ public final class RpaArchive {
     }
 
     private static Map<String, long[]> readIndex(byte[] data, String archiveName) {
-        if (data == null || data.length == 0) {
+        if (data == null || data.length < 2) {
             return Collections.emptyMap();
         }
         boolean zlibIndex = (data[0] & 0xff) == 0x78 && (data[1] & 0xff) == 0x9c;
@@ -377,9 +483,9 @@ public final class RpaArchive {
                         throw new IOException("RPA zlib data is invalid");
                     }
                 }
-                if (inflater.getRemaining() != 0) {
-                    throw new IOException("RPA zlib data has trailing bytes");
-                }
+                // RPA index ranges can contain the same harmless padding as
+                // Ren'Py RPC2 slots.  Keep the first complete zlib stream,
+                // matching the reader behavior used by Ren'Py/Python.
                 return out.toByteArray();
             } catch (java.util.zip.DataFormatException e) {
                 throw new IOException("RPA zlib data is invalid", e);

@@ -8,6 +8,7 @@ public class PackageManager {
     public ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException { return null; }
     public CharSequence getApplicationLabel(ApplicationInfo info) { return null; }
     public PackageInstaller getPackageInstaller() { return null; }
+    public Intent getLaunchIntentForPackage(String packageName) { return null; }
 
     public static class NameNotFoundException extends Exception {}
 }

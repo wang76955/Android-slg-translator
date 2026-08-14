@@ -24,7 +24,8 @@ public final class RenpyTextValidator {
 
     static {
         Set<String> paired = new HashSet<>();
-        Collections.addAll(paired, "b", "i", "font", "a", "color", "size", "outline", "alpha");
+        Collections.addAll(paired, "b", "i", "font", "a", "color", "size", "outline", "alpha",
+                "swap", "alt", "sc", "fi", "bt");
         PAIRED_TAGS = Collections.unmodifiableSet(paired);
         Set<String> selfClosing = new HashSet<>();
         Collections.addAll(selfClosing, "w", "p", "nw", "fast", "clear", "space", "image", "vspace",
@@ -56,10 +57,15 @@ public final class RenpyTextValidator {
 
         TagResult oldTags = parseTags(oldValue);
         TagResult newTags = parseTags(newValue);
-        if (oldTags.unbalanced || newTags.unbalanced || !oldTags.signature.equals(newTags.signature)) {
+        // A faithful reproduction of the original's tag signature is accepted
+        // even when the source game shipped malformed or misnested markup
+        // ({i} without a close, {b}{i}...{/b}{/i}, custom tags, ...): Ren'Py
+        // renders it the same way as the original, so we introduce no new
+        // breakage. Any signature change or newly misnested structure fails.
+        if (!oldTags.signature.equals(newTags.signature)) {
             add(codes, "tag_unbalanced");
         }
-        if (oldTags.misnested || newTags.misnested) {
+        if (newTags.misnested && !oldTags.misnested) {
             add(codes, "tag_misnested");
         }
 

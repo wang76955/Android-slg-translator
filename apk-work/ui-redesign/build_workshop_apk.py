@@ -18,11 +18,14 @@ UNSIGNED_APK = APK_WORK / "slg-workshop-ui-unsigned.apk"
 ALIGNED_APK = APK_WORK / "slg-workshop-ui-aligned.apk"
 SIGNED_APK = APK_WORK / "slg-workshop-ui-signed.apk"
 GENERATED = Path(__file__).parent / "generated"
+ICON_RESOURCES = Path(__file__).parent / "icon-res"
 FAST_SCAN = APK_WORK / "native-fast-scan"
 sys.path.insert(0, str(FAST_SCAN))
 from build_fast_scanner import main as generate_fast_scanner_dex  # noqa: E402
 
 FAST_SCAN_GENERATED = FAST_SCAN / "generated"
+BUNDLED_CJK_FONT_ENTRY = "assets/slg/fonts/NotoSansSC-Regular.ttf"
+BUNDLED_CJK_FONT_SOURCE = FAST_SCAN_GENERATED / BUNDLED_CJK_FONT_ENTRY
 ZIPALIGN = TOOLS / "android-15" / "zipalign.exe"
 APKSIGNER = TOOLS / "android-15" / "apksigner.bat"
 KEYSTORE = Path.home() / ".android" / "debug.keystore"
@@ -34,6 +37,25 @@ BASE_REPLACEMENTS = {
     "classes3.dex": FAST_SCAN_GENERATED / "classes3.dex",
     "classes7.dex": FAST_SCAN_GENERATED / "classes7.dex",
     "AndroidManifest.xml": FAST_SCAN_GENERATED / "AndroidManifest.xml",
+    BUNDLED_CJK_FONT_ENTRY: BUNDLED_CJK_FONT_SOURCE,
+}
+
+ICON_DENSITIES = {
+    "mdpi": (48, 108),
+    "hdpi": (72, 162),
+    "xhdpi": (96, 216),
+    "xxhdpi": (144, 324),
+    "xxxhdpi": (192, 432),
+}
+
+ICON_REPLACEMENTS = {
+    f"res/mipmap-{density}-v4/{name}": ICON_RESOURCES / density / name
+    for density in ICON_DENSITIES
+    for name in (
+        "ic_launcher.png",
+        "ic_launcher_round.png",
+        "ic_launcher_foreground.png",
+    )
 }
 
 MLKIT_RES_ENTRIES = {
@@ -50,6 +72,7 @@ NATIVE_LIB_DIR = FAST_SCAN_GENERATED / "lib" / "arm64-v8a"
 def replacement_sources() -> dict[str, Path]:
     """Collect generated entries after the scanner build has materialized them."""
     replacements = dict(BASE_REPLACEMENTS)
+    replacements.update(ICON_REPLACEMENTS)
     if all(path.is_file() for path in MLKIT_RES_ENTRIES.values()):
         replacements.update(MLKIT_RES_ENTRIES)
     if NATIVE_LIB_DIR.is_dir():

@@ -25,6 +25,8 @@ public final class RenpyCompatibilityReport {
     public final int uniqueTextCount;
     public final int occurrenceCount;
     public final int collisionCount;
+    /** External evidence level; kept separate from the structural RPYC dialect. */
+    public final String verificationLevel;
     public final List<Issue> issues;
 
     public RenpyCompatibilityReport(
@@ -41,6 +43,26 @@ public final class RenpyCompatibilityReport {
             int occurrenceCount,
             int collisionCount,
             List<Issue> issues) {
+        this(supportLevel, activationStrategy, templatePath, rpyc, rpaCount, splitCount,
+                languageBuckets, menuType, font, uniqueTextCount, occurrenceCount,
+                collisionCount, RenpyVerificationEvidence.PENDING_LEVEL, issues);
+    }
+
+    public RenpyCompatibilityReport(
+            SupportLevel supportLevel,
+            ActivationStrategy activationStrategy,
+            String templatePath,
+            RpycCompatibility.Report rpyc,
+            int rpaCount,
+            int splitCount,
+            List<String> languageBuckets,
+            String menuType,
+            RenpyFontSupport.FontReport font,
+            int uniqueTextCount,
+            int occurrenceCount,
+            int collisionCount,
+            String verificationLevel,
+            List<Issue> issues) {
         this.supportLevel = supportLevel == null ? SupportLevel.UNSUPPORTED : supportLevel;
         this.activationStrategy = activationStrategy == null ? ActivationStrategy.NONE : activationStrategy;
         this.templatePath = sanitizePath(templatePath);
@@ -53,6 +75,8 @@ public final class RenpyCompatibilityReport {
         this.uniqueTextCount = nonNegative(uniqueTextCount);
         this.occurrenceCount = nonNegative(occurrenceCount);
         this.collisionCount = nonNegative(collisionCount);
+        this.verificationLevel = sanitizeToken(verificationLevel,
+                RenpyVerificationEvidence.PENDING_LEVEL, 80);
         this.issues = sanitizeIssues(issues);
     }
 
@@ -66,9 +90,23 @@ public final class RenpyCompatibilityReport {
         }
     }
 
+    public EngineCapabilities capabilities() {
+        return RenpyEngineAdapter.INSTANCE.capabilities(this);
+    }
+
+    public boolean isTranslationBlocked() {
+        return !capabilities().canTranslate;
+    }
+
+    public boolean isWriterBlocked() {
+        return !capabilities().canWritePatch;
+    }
+
+    /**
+     * Legacy compatibility alias. New callers must choose the specific gate.
+     */
     public boolean isBlocked() {
-        return supportLevel == SupportLevel.UNSUPPORTED
-                || supportLevel == SupportLevel.EXTRACT_ONLY;
+        return isTranslationBlocked();
     }
 
     /** JSON containing only fixed diagnostic fields and bounded metadata. */
@@ -85,6 +123,7 @@ public final class RenpyCompatibilityReport {
         number(out, "uniqueTextCount", uniqueTextCount);
         number(out, "occurrenceCount", occurrenceCount);
         number(out, "collisionCount", collisionCount);
+        field(out, "verificationLevel", verificationLevel);
         out.append("\"rpyc\":");
         appendRpyc(out, rpyc);
         out.append(',');
@@ -120,6 +159,7 @@ public final class RenpyCompatibilityReport {
         bool(out, "usesPy2Builtins", report.usesPy2Builtins);
         field(out, "generationSupport", report.generationSupport == null
                 ? "UNKNOWN_EXTRACT_ONLY" : report.generationSupport.name());
+        field(out, "dialect", report.dialect == null ? "UNKNOWN" : report.dialect.name());
         field(out, "reason", report.reason);
         trimTrailingComma(out);
         out.append('}');

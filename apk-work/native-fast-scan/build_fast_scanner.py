@@ -22,6 +22,9 @@ BASE_APK = ROOT / "apk-work" / "com.slgtranslator.app-base.apk"
 SOURCE_DEX = ROOT / "apk-work" / "extracted" / "classes6.dex"
 HERE = Path(__file__).resolve().parent
 GENERATED = HERE / "generated"
+BUNDLED_CJK_FONT_ENTRY = "assets/slg/fonts/NotoSansSC-Regular.ttf"
+BUNDLED_CJK_FONT_SOURCE = HERE / BUNDLED_CJK_FONT_ENTRY
+BUNDLED_CJK_FONT_GENERATED = GENERATED / BUNDLED_CJK_FONT_ENTRY
 SOURCE_SOURCES = sorted((HERE / "src").rglob("*.java"))
 STUB_SOURCES = sorted((HERE / "stubs").rglob("*.java"))
 THIRD_PARTY = HERE / "third-party"
@@ -172,6 +175,20 @@ SAVE_APK_METHOD = """.method public final savePatchedApkToDownloads(Lcom/getcapa
     return-void
 .end method"""
 LIST_PATCHES_SIGNATURE = ".method public final listPatchedApks(Lcom/getcapacitor/PluginCall;)V"
+DELETE_PATCHES_SIGNATURE = ".method public final deletePatchedApk(Lcom/getcapacitor/PluginCall;)V"
+DELETE_PATCHES_DELEGATE = "Lcom/slgtranslator/app/InstallSupport;->deletePatchedApk"
+DELETE_PATCHES_METHOD = """.method public final deletePatchedApk(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/InstallSupport;->deletePatchedApk(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
 INSTALL_APK_SIGNATURE = ".method public final installApk(Lcom/getcapacitor/PluginCall;)V"
 INSTALL_APK_DELEGATE = "Lcom/slgtranslator/app/PackageInstallerSupport;->installViaSession"
 INSTALL_APK_PATTERN = re.compile(
@@ -372,6 +389,48 @@ READ_TEXTS_METHOD = """.method public final readRenpyTexts(Lcom/getcapacitor/Plu
     invoke-static {v0, p1}, Lcom/slgtranslator/app/FastApkScanner;->readRenpyTexts(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
     return-void
 .end method"""
+READ_STRUCTURED_TEXTS_SIGNATURE = ".method public final readStructuredTexts(Lcom/getcapacitor/PluginCall;)V"
+READ_STRUCTURED_TEXTS_DELEGATE = "Lcom/slgtranslator/app/FastApkScanner;->readStructuredTexts"
+READ_STRUCTURED_TEXTS_METHOD = """.method public final readStructuredTexts(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/FastApkScanner;->readStructuredTexts(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+TRANSLATION_PROJECT_EXPORT_SIGNATURE = ".method public final exportTranslationProject(Lcom/getcapacitor/PluginCall;)V"
+TRANSLATION_PROJECT_EXPORT_DELEGATE = "Lcom/slgtranslator/app/TranslationProjectSupport;->exportTranslationProject"
+TRANSLATION_PROJECT_EXPORT_METHOD = """.method public final exportTranslationProject(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/TranslationProjectSupport;->exportTranslationProject(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
+TRANSLATION_PROJECT_IMPORT_SIGNATURE = ".method public final importTranslationProject(Lcom/getcapacitor/PluginCall;)V"
+TRANSLATION_PROJECT_IMPORT_DELEGATE = "Lcom/slgtranslator/app/TranslationProjectSupport;->importTranslationProject"
+TRANSLATION_PROJECT_IMPORT_METHOD = """.method public final importTranslationProject(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/TranslationProjectSupport;->importTranslationProject(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method"""
 COMPILE_TL_METHOD = """.method public final compileTranslationsIntoApk(Lcom/getcapacitor/PluginCall;)V
     .annotation runtime Lcom/getcapacitor/PluginMethod;
     .end annotation
@@ -386,7 +445,7 @@ COMPILE_TL_METHOD = """.method public final compileTranslationsIntoApk(Lcom/getc
 .end method"""
 
 # On-device translation kernel bridge methods: localStatus / localDownload /
-# translateLocal / mlkitDelete / llmDownload / llmDelete. Methods that need
+# translateLocal / localRelease / mlkitDelete / llmDownload / llmDelete. Methods that need
 # the plugin instance for progress listeners pass p0 as java.lang.Object.
 LOCAL_DELEGATE = "Lcom/slgtranslator/app/LocalTranslationSupport;"
 LOCAL_METHODS = (
@@ -435,6 +494,22 @@ LOCAL_METHODS = (
     invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
     move-result-object v0
     invoke-static {v0, p1}, Lcom/slgtranslator/app/LocalTranslationSupport;->translateLocal(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
+    return-void
+.end method""",
+    ),
+    (
+        ".method public final localRelease(Lcom/getcapacitor/PluginCall;)V",
+        f"{LOCAL_DELEGATE}->releaseLocalResources",
+        """.method public final localRelease(Lcom/getcapacitor/PluginCall;)V
+    .annotation runtime Lcom/getcapacitor/PluginMethod;
+    .end annotation
+
+    .locals 1
+    .param p1, "call"    # Lcom/getcapacitor/PluginCall;
+
+    invoke-virtual {p0}, Lcom/slgtranslator/app/FileManagerPlugin;->getContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/slgtranslator/app/LocalTranslationSupport;->releaseLocalResources(Landroid/content/Context;Lcom/getcapacitor/PluginCall;)V
     return-void
 .end method""",
     ),
@@ -717,13 +792,13 @@ def patch_version_manifest(manifest: Path) -> None:
 
     apktool restores versionCode/versionName from original/AndroidManifest.xml
     when the decoded XML omits them, so write them explicitly here to pin the
-    release version (1.0.7 / versionCode 7).
+    release version (1.011 / versionCode 11).
     """
     ET.register_namespace("android", ANDROID_NAMESPACE)
     tree = ET.parse(manifest)
     root = tree.getroot()
-    root.set("{" + ANDROID_NAMESPACE + "}versionCode", "7")
-    root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.7")
+    root.set("{" + ANDROID_NAMESPACE + "}versionCode", "11")
+    root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.011")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
 
@@ -882,6 +957,13 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path
         raise RuntimeError(f"Patch list bridge is repeatedly injected: {list_patches_count}")
     if patched.count(LIST_PATCHES_SIGNATURE) != 1 or patched.count(LIST_PATCHES_DELEGATE) != 1:
         raise RuntimeError("Expected exactly one valid patch list bridge")
+    delete_patched_apk_count = patched.count(DELETE_PATCHES_SIGNATURE)
+    if delete_patched_apk_count == 0:
+        patched = patched.rstrip() + "\n\n" + DELETE_PATCHES_METHOD + "\n"
+    elif delete_patched_apk_count != 1:
+        raise RuntimeError(f"Delete patched APK bridge is repeatedly injected: {delete_patched_apk_count}")
+    if patched.count(DELETE_PATCHES_SIGNATURE) != 1 or patched.count(DELETE_PATCHES_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid delete patched APK bridge")
     inject_count = patched.count(INJECT_MENU_SIGNATURE)
     if inject_count == 0:
         patched = patched.rstrip() + "\n\n" + INJECT_MENU_METHOD + "\n"
@@ -903,6 +985,28 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path
         raise RuntimeError(f"Read Ren'Py texts bridge is repeatedly injected: {read_texts_count}")
     if patched.count(READ_TEXTS_SIGNATURE) != 1 or patched.count(READ_TEXTS_DELEGATE) != 1:
         raise RuntimeError("Expected exactly one valid read Ren'Py texts bridge")
+    read_structured_texts_count = patched.count(READ_STRUCTURED_TEXTS_SIGNATURE)
+    if read_structured_texts_count == 0:
+        patched = patched.rstrip() + "\n\n" + READ_STRUCTURED_TEXTS_METHOD + "\n"
+    elif read_structured_texts_count != 1:
+        raise RuntimeError(
+            f"Read structured texts bridge is repeatedly injected: {read_structured_texts_count}")
+    if patched.count(READ_STRUCTURED_TEXTS_SIGNATURE) != 1 \
+            or patched.count(READ_STRUCTURED_TEXTS_DELEGATE) != 1:
+        raise RuntimeError("Expected exactly one valid read structured texts bridge")
+    for signature, delegate, method, label in (
+        (TRANSLATION_PROJECT_EXPORT_SIGNATURE, TRANSLATION_PROJECT_EXPORT_DELEGATE,
+         TRANSLATION_PROJECT_EXPORT_METHOD, "translation project export"),
+        (TRANSLATION_PROJECT_IMPORT_SIGNATURE, TRANSLATION_PROJECT_IMPORT_DELEGATE,
+         TRANSLATION_PROJECT_IMPORT_METHOD, "translation project import"),
+    ):
+        count = patched.count(signature)
+        if count == 0:
+            patched = patched.rstrip() + "\n\n" + method + "\n"
+        elif count != 1:
+            raise RuntimeError(f"{label} bridge is repeatedly injected: {count}")
+        if patched.count(signature) != 1 or patched.count(delegate) != 1:
+            raise RuntimeError(f"Expected exactly one valid {label} bridge")
     cleanup_count = patched.count(CLEANUP_SIGNATURE)
     if cleanup_count == 0:
         patched = patched.rstrip() + "\n\n" + CLEANUP_METHOD + "\n"
@@ -981,6 +1085,36 @@ def patch_plugin_dex(build: Path, env: dict[str, str]) -> tuple[Path, Path, Path
     return result, result3, compiled_manifest, native_libs, res_files, xml_id, raw_id
 
 
+def check_structured_parser_budget() -> None:
+    """Structured-text parsers must be duplicate-free and stay inside the
+    4 MiB APK size budget before they are merged into the helper dex."""
+    parser_jars = [
+        THIRD_PARTY / "gson-2.13.2.jar",
+        THIRD_PARTY / "commons-csv-1.10.0.jar",
+        THIRD_PARTY / "commons-lang3-3.12.0.jar",
+    ]
+    for jar in parser_jars:
+        if not jar.is_file() or jar.stat().st_size == 0:
+            raise RuntimeError(f"Structured parser jar missing: {jar}")
+    classes: dict[str, str] = {}
+    total = 0
+    for jar in parser_jars:
+        total += jar.stat().st_size
+        with zipfile.ZipFile(jar) as archive:
+            for name in archive.namelist():
+                # META-INF/ entries are jar metadata (incl. multi-release
+                # module-info), not dex classes.
+                if not name.endswith(".class") or name.startswith("META-INF/"):
+                    continue
+                if name in classes:
+                    raise RuntimeError(
+                        f"duplicate class {name} across {classes[name]} and {jar.name}"
+                    )
+                classes[name] = jar.name
+    if total > 4 * 1024 * 1024:
+        raise RuntimeError(f"Structured parser jars exceed 4 MiB budget: {total}")
+
+
 def main() -> tuple[Path, Path, Path, Path]:
     env = os.environ.copy()
     env["JAVA_HOME"] = str(JAVA_HOME)
@@ -989,6 +1123,11 @@ def main() -> tuple[Path, Path, Path, Path]:
     env["TEMP"] = str(ascii_temp)
     env["TMP"] = str(ascii_temp)
     GENERATED.mkdir(parents=True, exist_ok=True)
+    check_structured_parser_budget()
+    if not BUNDLED_CJK_FONT_SOURCE.is_file():
+        raise RuntimeError(f"Bundled CJK font is missing: {BUNDLED_CJK_FONT_SOURCE}")
+    BUNDLED_CJK_FONT_GENERATED.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(BUNDLED_CJK_FONT_SOURCE, BUNDLED_CJK_FONT_GENERATED)
     with tempfile.TemporaryDirectory(prefix="slg-fast-scan-", dir=ascii_temp) as temporary:
         build = Path(temporary)
         plugin_dex, bridge_dex, compiled_manifest, native_libs, res_files, xml_id, raw_id = patch_plugin_dex(build, env)

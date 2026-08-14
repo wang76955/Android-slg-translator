@@ -27,6 +27,7 @@ public final class RenpyPreflight {
         public final int uniqueTextCount;
         public final int occurrenceCount;
         public final int collisionCount;
+        public final String verificationLevel;
 
         public SourceSet(
                 String templatePath,
@@ -39,6 +40,23 @@ public final class RenpyPreflight {
                 int uniqueTextCount,
                 int occurrenceCount,
                 int collisionCount) {
+            this(templatePath, rpyc, rpaCount, splitCount, languageBuckets, menuType, font,
+                    uniqueTextCount, occurrenceCount, collisionCount,
+                    RenpyVerificationEvidence.PENDING_LEVEL);
+        }
+
+        public SourceSet(
+                String templatePath,
+                RpycCompatibility.Report rpyc,
+                int rpaCount,
+                int splitCount,
+                List<String> languageBuckets,
+                String menuType,
+                RenpyFontSupport.FontReport font,
+                int uniqueTextCount,
+                int occurrenceCount,
+                int collisionCount,
+                String verificationLevel) {
             this.templatePath = templatePath;
             this.rpyc = rpyc;
             this.rpaCount = rpaCount;
@@ -51,6 +69,7 @@ public final class RenpyPreflight {
             this.uniqueTextCount = uniqueTextCount;
             this.occurrenceCount = occurrenceCount;
             this.collisionCount = collisionCount;
+            this.verificationLevel = verificationLevel;
         }
     }
 
@@ -77,7 +96,8 @@ public final class RenpyPreflight {
             return report(source, RenpyCompatibilityReport.SupportLevel.EXTRACT_ONLY,
                     RenpyCompatibilityReport.ActivationStrategy.NONE, issues);
         }
-        if (generation != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED) {
+        if (generation != RpycCompatibility.GenerationSupport.MODERN_SUPPORTED
+                && generation != RpycCompatibility.GenerationSupport.LEGACY_PROTOCOL2_SUPPORTED) {
             issues.add(new RenpyCompatibilityReport.Issue(
                     "renpy_rpyc_generation_unknown", "RPYC generation support is not verified"));
             return report(source, RenpyCompatibilityReport.SupportLevel.EXTRACT_ONLY,
@@ -127,6 +147,8 @@ public final class RenpyPreflight {
                 source == null ? 0 : source.uniqueTextCount,
                 source == null ? 0 : source.occurrenceCount,
                 source == null ? 0 : source.collisionCount,
+                source == null ? RenpyVerificationEvidence.PENDING_LEVEL
+                        : source.verificationLevel,
                 issues);
     }
 

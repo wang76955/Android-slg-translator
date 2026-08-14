@@ -11,9 +11,11 @@ import org.json.JSONObject;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Capacitor bridge entry points for the on-device translation kernel.
@@ -30,6 +32,8 @@ import java.util.Map;
  * through the FileManager plugin when it supports notifyListeners.
  */
 public final class LocalTranslationSupport {
+
+    private static final Object RESOURCE_LOCK = new Object();
 
     private LocalTranslationSupport() {
     }
@@ -68,6 +72,44 @@ public final class LocalTranslationSupport {
             this.keyPath = keyPath == null ? "" : keyPath;
             this.text = text == null ? "" : text;
         }
+    }
+
+    /**
+     * Re-key text items so every one has a non-empty, unique key path.
+     *
+     * The Ren'Py record path (FastApkScanner.renpyRecordJson) historically
+     * emitted records without a {@code keyPath} field, so consumers keying
+     * translations by keyPath collapsed every empty path onto one entry and
+     * corrupted the pairs. This guard preserves already-distinct keys verbatim
+     * and synthesizes deterministic non-empty keys only for empty or duplicate
+     * inputs, so the WebView sending already-unique keys is left untouched.
+     */
+    static List<TextItem> ensureUniqueKeyPaths(List<TextItem> items) {
+        List<TextItem> result = new ArrayList<>();
+        if (items == null) {
+            return result;
+        }
+        Set<String> seen = new HashSet<>();
+        for (TextItem item : items) {
+            if (item == null) {
+                continue;
+            }
+            String keyPath = item.keyPath == null ? "" : item.keyPath;
+            if (keyPath.length() > 0 && seen.add(keyPath)) {
+                // A distinct non-empty key is preserved verbatim.
+                result.add(new TextItem(keyPath, item.text));
+                continue;
+            }
+            // Empty or duplicate key: synthesize a deterministic unique key.
+            String synthesized = "key:" + item.text;
+            int suffix = 0;
+            while (!seen.add(synthesized)) {
+                suffix++;
+                synthesized = "key#" + suffix + ":" + item.text;
+            }
+            result.add(new TextItem(synthesized, item.text));
+        }
+        return result;
     }
 
     /** Query availability and storage state of both local engines. */
@@ -144,16 +186,50 @@ public final class LocalTranslationSupport {
         String targetLang = firstNonEmpty(call.getString("targetLang"), "zh");
         List<TextItem> items = parseTexts(call);
         new Thread(() -> {
-            try {
-                if ("llm".equalsIgnoreCase(engine)) {
-                    LocalLlmEngine.translate(context, items, sourceLang, targetLang, call);
-                } else {
-                    MlKitTranslator.translate(context, items, sourceLang, targetLang, call);
+            synchronized (RESOURCE_LOCK) {
+                try {
+                    if ("llm".equalsIgnoreCase(engine)) {
+                        LocalLlmEngine.translate(context, items, sourceLang, targetLang, call);
+                    } else {
+                        MlKitTranslator.translate(context, items, sourceLang, targetLang, call);
+                    }
+                } catch (Throwable t) {
+                    // The WebView batch loop owns normal task-level release.
+                    // Release immediately only when this native call fails so
+                    // the next retry cannot retain a broken translator.
+                    releaseLocalResources(context, null);
+                    call.reject("本地翻译失败: " + safeMessage(t));
                 }
-            } catch (Throwable t) {
-                call.reject("本地翻译失败: " + safeMessage(t));
             }
         }, "slg-local-translate").start();
+    }
+
+    /** Release native translation resources without deleting downloaded models. */
+    public static void releaseLocalResources(Context context, PluginCall call) {
+        synchronized (RESOURCE_LOCK) {
+            Throwable failure = null;
+            try {
+                MlKitTranslator.releaseSharedTranslator();
+            } catch (Throwable t) {
+                failure = t;
+            }
+            try {
+                LocalLlmEngine.releaseLoadedModelForIdle();
+            } catch (Throwable t) {
+                if (failure == null) {
+                    failure = t;
+                }
+            }
+            if (call != null) {
+                if (failure != null) {
+                    call.reject("释放本地翻译资源失败: " + safeMessage(failure));
+                    return;
+                }
+                JSObject result = new JSObject();
+                result.put("released", true);
+                call.resolve(result);
+            }
+        }
     }
 
     /** Download the Qwen GGUF model used by the LLM engine. */
@@ -205,7 +281,7 @@ public final class LocalTranslationSupport {
         } catch (Throwable t) {
             // Partial input is still usable; return what parsed.
         }
-        return items;
+        return ensureUniqueKeyPaths(items);
     }
 
     static String firstNonEmpty(String value, String fallback) {

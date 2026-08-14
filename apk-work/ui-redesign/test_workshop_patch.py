@@ -3362,6 +3362,44 @@ check(!collision.enabled&&!window.__slgDialogueIdMode&&collision.reason===`ident
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_structured_text_workflow(self):
+        module = self.load_patch()
+        node_script = module.structured_text_runtime + r'''
+globalThis.window=globalThis;
+function check(condition,label){if(!condition)throw new Error(label)}
+(async()=>{
+  const runtime=window.__slgStructuredTextRuntime;
+  check(runtime.resolveStructuredWorkflow({canWritePatch:true,canTranslate:true,canExtractStructured:true})===`PATCHABLE_VERIFIED`,`verified codec resolves to PATCHABLE_VERIFIED`);
+  check(runtime.resolveStructuredWorkflow({canWritePatch:false,canTranslate:true})===`TRANSLATABLE_NO_PATCH`,`translatable without writer resolves to TRANSLATABLE_NO_PATCH`);
+  check(runtime.resolveStructuredWorkflow({canTranslate:false})===`EXTRACT_ONLY`,`no translation resolves to EXTRACT_ONLY`);
+
+  const verified=await runtime.runFixture({
+    adapterId:`structured-text`,workflow:`PATCHABLE_VERIFIED`,
+    capabilities:{canDetect:true,canExtractStructured:true,canTranslate:true,canWritePatch:true,canActivate:true},
+    records:[{recordId:`r1`}],translations:{r1:`你好`}});
+  check(verified.writerCalls===1&&verified.verifyCalls===1&&verified.buildCalls===1,`writer flow`);
+  check(verified.lastResult.workflow===`PATCHABLE_VERIFIED`,`verified codec`);
+
+  const blocked=await runtime.runFixture({
+    adapterId:`structured-text`,workflow:`TRANSLATABLE_NO_PATCH`,
+    capabilities:{canExtractStructured:true,canTranslate:true,canWritePatch:false},
+    records:[],translations:{}});
+  check(blocked.writerCalls===0&&blocked.verifyCalls===0&&blocked.buildCalls===0,`blocked flow makes no write calls`);
+  check(blocked.lastResult.workflow===`TRANSLATABLE_NO_PATCH`,`no writer workflow`);
+
+  const foreign=await runtime.runFixture({
+    adapterId:`renpy`,workflow:`PATCHABLE_VERIFIED`,
+    capabilities:{canWritePatch:true},records:[],translations:{}});
+  check(foreign.writerCalls===0&&foreign.lastResult.workflow===`PATCHABLE_VERIFIED`,`foreign adapter passes through untouched`);
+  console.log(`STRUCTURED_WORKFLOW_OK`);
+})().catch(error=>{console.error(error&&error.stack||error);process.exitCode=1});
+'''
+        result = subprocess.run(
+            ["node", "-e", node_script],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_candidate_filter_drops_tl_duplicates_and_crashes_never(self):
         module = self.load_patch()
         js, _ = module.patch_assets(
@@ -4242,12 +4280,12 @@ check(!row.children.some(node=>node.cls==="workshop-row-retry"),"clearing row er
             r"\.workshop-steps(?:li|\\s+li)\{display:grid;grid-template-columns:1fr;grid-template-rows:autoautoauto",
         )
 
-    def test_release_manifest_version_is_108(self):
+    def test_release_manifest_version_is_1011(self):
         source = (ROOT.parent / "native-fast-scan" / "build_fast_scanner.py").read_text(
             "utf-8"
         )
-        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionCode", "8")', source)
-        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.0.8")', source)
+        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionCode", "11")', source)
+        self.assertIn('root.set("{" + ANDROID_NAMESPACE + "}versionName", "1.011")', source)
 
     def test_disabled_start_does_not_persist_translation_session(self):
         module = self.load_patch()

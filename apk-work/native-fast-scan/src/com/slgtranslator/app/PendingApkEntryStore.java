@@ -51,6 +51,35 @@ public final class PendingApkEntryStore implements Closeable {
         }
     }
 
+    /** Adds a file-backed payload without materializing the whole file in memory. */
+    public int addFile(String apkName, String runtimeName, File payload) throws IOException {
+        ensureOpen();
+        validateName(apkName, "apkName");
+        validateName(runtimeName, "runtimeName");
+        if (payload == null || !payload.isFile()) {
+            throw new IOException("pending file payload is unavailable");
+        }
+        File target = File.createTempFile("payload-file-", ".bin", directory);
+        try (FileInputStream input = new FileInputStream(payload);
+             FileOutputStream output = new FileOutputStream(target)) {
+            byte[] buffer = new byte[COPY_BUFFER_SIZE];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            output.flush();
+            output.getFD().sync();
+            entries.add(new Entry(apkName, runtimeName, target, target.length()));
+            return entries.size() - 1;
+        } catch (Throwable error) {
+            target.delete();
+            if (error instanceof IOException) {
+                throw (IOException) error;
+            }
+            throw new IOException("failed to spool file-backed APK entry", error);
+        }
+    }
+
     public InputStream openPayload(int index) throws IOException {
         ensureOpen();
         return new FileInputStream(entryAt(index).payload);

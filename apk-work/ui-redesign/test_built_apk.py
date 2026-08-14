@@ -1,5 +1,6 @@
 import collections
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ APK = APK_WORK / "slg-workshop-ui-signed.apk"
 BASE_ASSETS = APK_WORK / "extracted" / "assets" / "public" / "assets"
 JS_ASSET = "assets/public/assets/index-CJtfdHOF.js"
 CSS_ASSET = "assets/public/assets/index-C044IUg3.css"
+ICON_RESOURCES = UI_REDESIGN / "icon-res"
 AAPT2 = ROOT / ".tools" / "android-15" / "aapt2.exe"
 DEXDUMP = ROOT / ".tools" / "android-15" / "dexdump.exe"
 ZIPALIGN = ROOT / ".tools" / "android-15" / "zipalign.exe"
@@ -222,6 +224,30 @@ class BuiltApkTest(unittest.TestCase):
             js,
             "stale file-only CTA must not satisfy the artifact contract",
         )
+
+    def test_custom_launcher_icon_resources_cover_every_density_and_layer(self):
+        """The replacement map must provide legacy, round, and adaptive icon PNGs."""
+        builder = (UI_REDESIGN / "build_workshop_apk.py").read_text("utf-8")
+        self.assertIn("ICON_REPLACEMENTS", builder)
+        expected = {
+            "mdpi": (48, 108),
+            "hdpi": (72, 162),
+            "xhdpi": (96, 216),
+            "xxhdpi": (144, 324),
+            "xxxhdpi": (192, 432),
+        }
+        for density, (legacy_size, foreground_size) in expected.items():
+            for name, size in (
+                ("ic_launcher.png", legacy_size),
+                ("ic_launcher_round.png", legacy_size),
+                ("ic_launcher_foreground.png", foreground_size),
+            ):
+                path = ICON_RESOURCES / density / name
+                self.assertTrue(path.is_file(), f"missing launcher icon resource: {path}")
+                raw = path.read_bytes()
+                self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n", f"not a PNG: {path}")
+                width, height = struct.unpack(">II", raw[16:24])
+                self.assertEqual((width, height), (size, size), f"wrong icon size: {path}")
 
     def test_every_dex_has_unique_entries_and_expected_class_ownership(self):
         self.require_artifact_inputs(DEXDUMP)

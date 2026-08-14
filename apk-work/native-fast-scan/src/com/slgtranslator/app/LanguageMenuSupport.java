@@ -237,6 +237,34 @@ public final class LanguageMenuSupport {
                     boolean already = menuHasLanguage(original, translatorLang);
                     byte[] rewritten = injectMenu(original, gameTargetLang, translatorLang);
                     if (rewritten != null) {
+                        // Fail closed: only commit a rewrite that still carries
+                        // the injected language entry and passes the RPC2
+                        // stream validator. A rewrite that drops the entry or
+                        // corrupts the stream would break the game's script
+                        // loading (observed on Ren'Py 8.5.3 screens.rpyc).
+                        if (!menuHasLanguage(rewritten, translatorLang)) {
+                            continue;
+                        }
+                        // Stream-validate only protocol-5 (FRAME) rewrites;
+                        // legacy protocol-2 streams have no FRAME structure for
+                        // the validator to check.
+                        java.util.List<int[]> rewrittenOps = walk(rewritten);
+                        if (rewrittenOps != null) {
+                            boolean hasFrame = false;
+                            for (int[] op : rewrittenOps) {
+                                if (op[0] == 0x95) {
+                                    hasFrame = true;
+                                    break;
+                                }
+                            }
+                            if (hasFrame) {
+                                try {
+                                    RpycStreamValidator.requireValid(rewritten, "menu-inject");
+                                } catch (Exception validationError) {
+                                    continue;
+                                }
+                            }
+                        }
                         replacementName = name;
                         replacementData = rewritten;
                         break;
@@ -934,6 +962,14 @@ public final class LanguageMenuSupport {
             int length = le32(data, op[1] + 1);
             return new String(data, op[1] + 5, length, StandardCharsets.UTF_8);
         }
+        if (code == 0x8d) { // BINUNICODE8
+            long length = le64(data, op[1] + 1);
+            if (length < 0 || length > Integer.MAX_VALUE) {
+                return null;
+            }
+            int len = (int) length;
+            return new String(data, op[1] + 9, len, StandardCharsets.UTF_8);
+        }
         return null;
     }
 
@@ -970,13 +1006,25 @@ public final class LanguageMenuSupport {
             int b = data[pos] & 0xFF;
             int start = pos++;
             switch (b) {
-                // Fixed-size arguments.
+                // Fixed-size arguments. Validate the length field before
+                // advancing: negative or oversized lengths previously moved
+                // pos backwards (a crafted low-bits -4 kept the walker on the
+                // same byte forever) or read beyond the stream.
                 case 0x4a: // BININT
                 case 0x58: // BINUNICODE
                 case 0x54: // BINSTRING
                 case 0x42: // BINBYTES
                 case 0x8b: // LONG4
-                    pos += 4 + lengthAfter(data, pos, b);
+                    if (pos + 4 > n) {
+                        return null;
+                    }
+                    {
+                        int len = lengthAfter(data, pos, b);
+                        if (len < 0 || len > n - pos - 4) {
+                            return null;
+                        }
+                        pos += 4 + len;
+                    }
                     break;
                 case 0x4b: // BININT1
                 case 0x55: // SHORT_BINSTRING
@@ -997,7 +1045,17 @@ public final class LanguageMenuSupport {
                 case 0x8d: // BINUNICODE8
                 case 0x8e: // BINBYTES8
                 case 0x96: // BYTEARRAY8
-                    pos += 8 + (int) le64(data, pos);
+                    if (pos + 8 > n) {
+                        return null;
+                    }
+                    {
+                        long len8 = le64(data, pos);
+                        if (len8 < 0 || len8 > Integer.MAX_VALUE
+                                || len8 > n - pos - 8) {
+                            return null;
+                        }
+                        pos += 8 + (int) len8;
+                    }
                     break;
                 case 0x68: // BINGET
                 case 0x71: // BINPUT

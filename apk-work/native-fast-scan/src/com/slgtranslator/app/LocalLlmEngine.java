@@ -418,6 +418,11 @@ public final class LocalLlmEngine {
         }
     }
 
+    /** Release the native model when no translation task is active. */
+    public static void releaseLoadedModelForIdle() {
+        releaseLoadedModel();
+    }
+
     /** Translate a batch with the local LLM; five lines share one completion.
      * JSON-array output is preferred, with automatic per-line fallback. */
     public static void translate(Context context, List<LocalTranslationSupport.TextItem> items,

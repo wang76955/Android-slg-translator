@@ -22,8 +22,17 @@ import java.util.zip.InflaterInputStream;
 public final class RpycCompatibility {
 
     private static final byte[] RPC2_MAGIC = "RENPY RPC2".getBytes(StandardCharsets.US_ASCII);
+    public enum ModernDialect {
+        MODERN_ENVELOPE_VERIFIED,
+        MODERN_GENERIC,
+        LEGACY_PROTOCOL2,
+        UNKNOWN
+    }
+
     public enum GenerationSupport {
         MODERN_SUPPORTED,
+        /** A standard Ren'Py Python 2 template can use the bounded protocol-2 writer. */
+        LEGACY_PROTOCOL2_SUPPORTED,
         LEGACY_EXTRACT_ONLY,
         UNKNOWN_EXTRACT_ONLY
     }
@@ -36,10 +45,12 @@ public final class RpycCompatibility {
         public final boolean usesPy2Builtins;
         public final GenerationSupport generationSupport;
         public final String reason;
+        public final ModernDialect dialect;
 
         Report(String container, int preferredSlot, int pickleProtocol,
                boolean usesBuiltins, boolean usesPy2Builtins,
-               GenerationSupport generationSupport, String reason) {
+               GenerationSupport generationSupport, String reason,
+               ModernDialect dialect) {
             this.container = container;
             this.preferredSlot = preferredSlot;
             this.pickleProtocol = pickleProtocol;
@@ -47,17 +58,31 @@ public final class RpycCompatibility {
             this.usesPy2Builtins = usesPy2Builtins;
             this.generationSupport = generationSupport;
             this.reason = reason;
+            this.dialect = dialect;
         }
 
         /** True only when the local writer has a verified dialect for this report. */
         public boolean canGenerate() {
-            return generationSupport == GenerationSupport.MODERN_SUPPORTED;
+            return isModernEnvelopeVerified() || isProtocol2WriterCompatible();
+        }
+
+        /** True only when the complete modern top-level envelope is verified. */
+        public boolean isModernEnvelopeVerified() {
+            return dialect == ModernDialect.MODERN_ENVELOPE_VERIFIED;
         }
 
         /** True only for the structurally verified Python 2 protocol-2 shape. */
         public boolean isProtocol2WriterVerified() {
-            return "legacy_protocol2_writer_verified".equals(reason)
+            return dialect == ModernDialect.LEGACY_PROTOCOL2
+                    && "legacy_protocol2_writer_verified".equals(reason)
                     && pickleProtocol == 2 && usesPy2Builtins && !usesBuiltins;
+        }
+
+        /** True when generated translation files must use the Python 2 protocol-2 dialect. */
+        public boolean isProtocol2WriterCompatible() {
+            return isProtocol2WriterVerified()
+                    || (dialect == ModernDialect.LEGACY_PROTOCOL2
+                    && generationSupport == GenerationSupport.LEGACY_PROTOCOL2_SUPPORTED);
         }
     }
 
@@ -96,25 +121,41 @@ public final class RpycCompatibility {
         boolean usesPy2Builtins = containsGlobalName(pickle, "__builtin__");
         GenerationSupport support;
         String reason;
+        ModernDialect dialect;
         if (isVerifiedProtocol2(pickle, protocol, usesBuiltins, usesPy2Builtins)) {
-            // RenpyPreflight's existing public gate uses MODERN_SUPPORTED to
-            // mean that a verified local writer exists. The report's explicit
-            // dialect predicate keeps that gate compatible without allowing
-            // unknown Python 2 structures through.
             support = GenerationSupport.MODERN_SUPPORTED;
             reason = "legacy_protocol2_writer_verified";
+            dialect = ModernDialect.LEGACY_PROTOCOL2;
+        } else if (protocol == 2 && usesPy2Builtins && !usesBuiltins
+                && hasLegacyScriptEnvelope(pickle)) {
+            // A real legacy Ren'Py template does not have to match the small
+            // translation fixture emitted by our writer. It only needs the
+            // standard AST roots that the generated TranslateString document
+            // will instantiate. Keep malformed/minimal Python 2 pickles
+            // extract-only and select the bounded protocol-2 writer here.
+            support = GenerationSupport.LEGACY_PROTOCOL2_SUPPORTED;
+            reason = "legacy_protocol2_engine_compatible";
+            dialect = ModernDialect.LEGACY_PROTOCOL2;
         } else if (usesPy2Builtins) {
             support = GenerationSupport.LEGACY_EXTRACT_ONLY;
             reason = "legacy_pickle_writer_required";
+            dialect = ModernDialect.UNKNOWN;
         } else if (usesBuiltins) {
-            support = GenerationSupport.MODERN_SUPPORTED;
-            reason = "modern_writer_supported";
+            ModernEnvelopeInspection inspection = ModernEnvelopeReader.inspect(pickle);
+            boolean verified = inspection.isVerified;
+            support = verified ? GenerationSupport.MODERN_SUPPORTED
+                    : GenerationSupport.UNKNOWN_EXTRACT_ONLY;
+            reason = verified ? "modern_envelope_verified"
+                    : "modern_envelope_unverified:" + inspection.reason;
+            dialect = verified ? ModernDialect.MODERN_ENVELOPE_VERIFIED
+                    : ModernDialect.MODERN_GENERIC;
         } else {
             support = GenerationSupport.UNKNOWN_EXTRACT_ONLY;
             reason = "unknown_pickle_globals";
+            dialect = ModernDialect.UNKNOWN;
         }
         return new Report(container, preferredSlot, protocol, usesBuiltins,
-                usesPy2Builtins, support, reason);
+                usesPy2Builtins, support, reason, dialect);
     }
 
     /**
@@ -400,7 +441,8 @@ public final class RpycCompatibility {
 
     private static Report invalid(String container, int preferredSlot) {
         return new Report(container, preferredSlot, -1, false, false,
-                GenerationSupport.UNKNOWN_EXTRACT_ONLY, "invalid_rpyc");
+                GenerationSupport.UNKNOWN_EXTRACT_ONLY, "invalid_rpyc",
+                ModernDialect.UNKNOWN);
     }
 
     private static int pickleProtocol(byte[] pickle) {
@@ -422,6 +464,14 @@ public final class RpycCompatibility {
         byte[] token = module.getBytes(StandardCharsets.US_ASCII);
         for (int i = 0; i < pickle.length; i++) {
             int opcode = pickle[i] & 0xff;
+            if (opcode == 0x95) { // FRAME: skip the 8-byte frame length. Its low
+                // byte can collide with a payload opcode (e.g. 0x8e BINBYTES8)
+                // and previously made the scan misread the length as a huge
+                // payload, bailing with a false negative.
+                if (i + 9 > pickle.length) return false;
+                i += 8;
+                continue;
+            }
             if (opcode == 0x63) { // GLOBAL: module\\nname\\n
                 int start = i + 1;
                 int end = lineEnd(pickle, start);
@@ -431,23 +481,133 @@ public final class RpycCompatibility {
                 i = end;
                 continue;
             }
-            if (opcode == 0x8c && i + 2 + token.length <= pickle.length
-                    && (pickle[i + 1] & 0xff) == token.length
-                    && equalsAscii(pickle, i + 2, i + 2 + token.length, token)) {
-                return true;
+            int payloadStart = -1;
+            int payloadLength = -1;
+            if (opcode == 0x8c || opcode == 0x55) { // SHORT_BINUNICODE/SHORT_BINSTRING
+                if (i + 2 > pickle.length) return false;
+                payloadStart = i + 2;
+                payloadLength = pickle[i + 1] & 0xff;
+            } else if (opcode == 0x58 || opcode == 0x54 || opcode == 0x42) {
+                // BINUNICODE/BINSTRING/BINBYTES
+                if (i + 5 > pickle.length) return false;
+                payloadStart = i + 5;
+                payloadLength = le32(pickle, i + 1);
+            } else if (opcode == 0x8d || opcode == 0x8e || opcode == 0x96) {
+                // BINUNICODE8/BINBYTES8/BYTEARRAY8
+                if (i + 9 > pickle.length) return false;
+                long length = le64(pickle, i + 1);
+                if (length < 0 || length > Integer.MAX_VALUE) return false;
+                payloadStart = i + 9;
+                payloadLength = (int) length;
             }
-            if (opcode == 0x58 && i + 5 + token.length <= pickle.length
-                    && le32(pickle, i + 1) == token.length
-                    && equalsAscii(pickle, i + 5, i + 5 + token.length, token)) {
-                return true;
-            }
-            if (opcode == 0x55 && i + 2 + token.length <= pickle.length
-                    && (pickle[i + 1] & 0xff) == token.length
-                    && equalsAscii(pickle, i + 2, i + 2 + token.length, token)) {
-                return true;
+            if (payloadStart >= 0) {
+                if (payloadLength < 0 || payloadStart > pickle.length
+                        || payloadLength > pickle.length - payloadStart) {
+                    return false;
+                }
+                if ((opcode == 0x8c || opcode == 0x58 || opcode == 0x8d || opcode == 0x55
+                        || opcode == 0x54)
+                        && equalsAscii(pickle, payloadStart, payloadStart + payloadLength, token)) {
+                    return true;
+                }
+                i = payloadStart + payloadLength - 1;
             }
         }
         return false;
+    }
+
+    private static boolean containsGlobalPair(byte[] pickle, String module, String name) {
+        return findGlobalPair(pickle, module, name, 0) >= 0;
+    }
+
+    /**
+     * Checks the non-executing envelope emitted by a real legacy Ren'Py
+     * compiler. This is deliberately stricter than checking global names:
+     * malformed streams that merely mention Init/Return must stay blocked.
+     */
+    private static boolean hasLegacyScriptEnvelope(byte[] pickle) {
+        int version = findStringToken(pickle, "version", 0);
+        int key = findStringToken(pickle, "key", version + 1);
+        int deferred = findStringToken(pickle, "deferred_parse_errors", key + 1);
+        int defaultdict = findGlobalPair(pickle, "collections", "defaultdict", deferred + 1);
+        int list = findGlobalPair(pickle, "__builtin__", "list", defaultdict + 1);
+        int scriptList = findOpcode(pickle, 0x5d, list + 1); // EMPTY_LIST (stmts)
+        int init = findGlobalPair(pickle, "renpy.ast", "Init", scriptList + 1);
+        int ret = findGlobalPair(pickle, "renpy.ast", "Return", init + 1);
+        return version >= 0 && key > version && deferred > key
+                && defaultdict > deferred && list > defaultdict
+                && scriptList > list && init > scriptList && ret > init;
+    }
+
+    private static int findStringToken(byte[] pickle, String value, int from) {
+        byte[] expected = value.getBytes(StandardCharsets.UTF_8);
+        for (int i = Math.max(0, from); i < pickle.length; i++) {
+            int opcode = pickle[i] & 0xff;
+            int start;
+            int length;
+            if (opcode == 0x58) { // BINUNICODE
+                if (i + 5 > pickle.length) continue;
+                length = le32(pickle, i + 1);
+                start = i + 5;
+            } else if (opcode == 0x8c) { // SHORT_BINUNICODE
+                if (i + 2 > pickle.length) continue;
+                length = pickle[i + 1] & 0xff;
+                start = i + 2;
+            } else if (opcode == 0x55) { // BINSTRING
+                if (i + 5 > pickle.length) continue;
+                length = le32(pickle, i + 1);
+                start = i + 5;
+            } else {
+                continue;
+            }
+            if (length < 0 || start > pickle.length || length > pickle.length - start) {
+                continue;
+            }
+            if (equalsBytes(pickle, start, length, expected)) return i;
+            i = start + length - 1;
+        }
+        return -1;
+    }
+
+    private static int findOpcode(byte[] pickle, int wanted, int from) {
+        for (int i = Math.max(0, from); i < pickle.length; i++) {
+            if ((pickle[i] & 0xff) == wanted) return i;
+        }
+        return -1;
+    }
+
+    private static int findGlobalPair(byte[] pickle, String module, String name, int from) {
+        byte[] moduleBytes = module.getBytes(StandardCharsets.US_ASCII);
+        byte[] nameBytes = name.getBytes(StandardCharsets.US_ASCII);
+        for (int i = Math.max(0, from); i < pickle.length; i++) {
+            if ((pickle[i] & 0xff) != 0x63) { // GLOBAL: module\nname\n
+                continue;
+            }
+            int moduleStart = i + 1;
+            int moduleEnd = lineEnd(pickle, moduleStart);
+            if (moduleEnd >= pickle.length || !equalsAscii(pickle, moduleStart, moduleEnd, moduleBytes)) {
+                i = moduleEnd;
+                continue;
+            }
+            int nameStart = moduleEnd + 1;
+            int nameEnd = lineEnd(pickle, nameStart);
+            if (nameEnd < pickle.length && equalsAscii(pickle, nameStart, nameEnd, nameBytes)) {
+                return i;
+            }
+            i = nameEnd;
+        }
+        return -1;
+    }
+
+    private static boolean equalsBytes(byte[] data, int start, int length, byte[] expected) {
+        if (length != expected.length || start < 0 || start > data.length
+                || length > data.length - start) {
+            return false;
+        }
+        for (int i = 0; i < length; i++) {
+            if (data[start + i] != expected[i]) return false;
+        }
+        return true;
     }
 
     private static int lineEnd(byte[] data, int start) {
@@ -545,5 +705,16 @@ public final class RpycCompatibility {
                 | ((data[pos + 1] & 0xff) << 8)
                 | ((data[pos + 2] & 0xff) << 16)
                 | ((data[pos + 3] & 0xff) << 24);
+    }
+
+    private static long le64(byte[] data, int pos) {
+        return (data[pos] & 0xffL)
+                | ((data[pos + 1] & 0xffL) << 8)
+                | ((data[pos + 2] & 0xffL) << 16)
+                | ((data[pos + 3] & 0xffL) << 24)
+                | ((data[pos + 4] & 0xffL) << 32)
+                | ((data[pos + 5] & 0xffL) << 40)
+                | ((data[pos + 6] & 0xffL) << 48)
+                | ((data[pos + 7] & 0xffL) << 56);
     }
 }
