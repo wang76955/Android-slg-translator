@@ -226,9 +226,9 @@ class BuiltApkTest(unittest.TestCase):
         )
 
     def test_custom_launcher_icon_resources_cover_every_density_and_layer(self):
-        """The replacement map must provide legacy, round, and adaptive icon PNGs."""
-        builder = (UI_REDESIGN / "build_workshop_apk.py").read_text("utf-8")
-        self.assertIn("ICON_REPLACEMENTS", builder)
+        """Launcher ZIP entries and compiled resource references must agree."""
+        import build_workshop_apk as builder
+
         expected = {
             "mdpi": (48, 108),
             "hdpi": (72, 162),
@@ -248,6 +248,48 @@ class BuiltApkTest(unittest.TestCase):
                 self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n", f"not a PNG: {path}")
                 width, height = struct.unpack(">II", raw[16:24])
                 self.assertEqual((width, height), (size, size), f"wrong icon size: {path}")
+                resource = f"res/mipmap-{density}/{name}"
+                stale_resource = f"res/mipmap-{density}-v4/{name}"
+                self.assertEqual(builder.ICON_REPLACEMENTS.get(resource), path)
+                self.assertNotIn(stale_resource, builder.ICON_REPLACEMENTS)
+
+        self.require_artifact_inputs(AAPT2)
+        with zipfile.ZipFile(APK) as archive:
+            for resource, path in builder.ICON_REPLACEMENTS.items():
+                self.assertEqual(archive.read(resource), path.read_bytes())
+
+        resource_dump = self.assert_tool_success(
+            self.run_tool([str(AAPT2), "dump", "resources", str(APK)])
+        )
+        foreground_match = re.search(
+            r"resource (0x[0-9a-f]+) mipmap/ic_launcher_foreground",
+            resource_dump,
+        )
+        self.assertIsNotNone(foreground_match)
+        for density in expected:
+            for name in (
+                "ic_launcher.png",
+                "ic_launcher_round.png",
+                "ic_launcher_foreground.png",
+            ):
+                self.assertIn(f"res/mipmap-{density}/{name}", resource_dump)
+                self.assertNotIn(f"res/mipmap-{density}-v4/{name}", resource_dump)
+
+        foreground_id = foreground_match.group(1)
+        for adaptive_icon in ("ic_launcher.xml", "ic_launcher_round.xml"):
+            xmltree = self.assert_tool_success(
+                self.run_tool(
+                    [
+                        str(AAPT2),
+                        "dump",
+                        "xmltree",
+                        str(APK),
+                        "--file",
+                        f"res/mipmap-anydpi-v26/{adaptive_icon}",
+                    ]
+                )
+            )
+            self.assertIn(f"=@{foreground_id}", xmltree)
 
     def test_every_dex_has_unique_entries_and_expected_class_ownership(self):
         self.require_artifact_inputs(DEXDUMP)

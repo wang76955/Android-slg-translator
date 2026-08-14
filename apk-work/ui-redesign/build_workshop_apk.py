@@ -49,7 +49,7 @@ ICON_DENSITIES = {
 }
 
 ICON_REPLACEMENTS = {
-    f"res/mipmap-{density}-v4/{name}": ICON_RESOURCES / density / name
+    f"res/mipmap-{density}/{name}": ICON_RESOURCES / density / name
     for density in ICON_DENSITIES
     for name in (
         "ic_launcher.png",
